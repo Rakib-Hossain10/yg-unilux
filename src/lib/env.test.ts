@@ -144,6 +144,35 @@ describe("bad formats", () => {
   });
 });
 
+describe("surrounding whitespace", () => {
+  it.each([
+    ["AUTH_SECRET", ` ${"a".repeat(32)}`, () => env.auth()],
+    ["CRON_SECRET", `${"c".repeat(32)}\n`, () => env.cronSecret()],
+    ["RESEND_API_KEY", "re_live_key ", () => env.email()],
+    ["R2_SECRET_ACCESS_KEY", "\tsecret", () => env.r2()],
+    ["SITE_URL", "https://example.com ", () => env.siteUrl()],
+    ["COMPANY_EMAIL", "info@example.com\r\n", () => env.companyEmail()],
+  ])("rejects %s with leading or trailing whitespace", (key, value, read) => {
+    vi.stubEnv(key, value);
+    const error = captureEnvError(read);
+    expect(error.variables).toContain(key);
+    expect(error.message).toMatch(new RegExp(`${key}: invalid.*whitespace`));
+  });
+
+  it("reports a whitespace-only required value as blank", () => {
+    vi.stubEnv("MONGODB_URI", "   ");
+    const error = captureEnvError(() => env.mongo());
+    expect(error.variables).toEqual(["MONGODB_URI"]);
+    expect(error.message).toMatch(/MONGODB_URI: missing \(only whitespace\)/);
+  });
+
+  it("reports a whitespace-only optional value instead of ignoring it", () => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    vi.stubEnv("AUTH_URL", "  ");
+    expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+  });
+});
+
 describe("GEO_BLOCK_ENABLED", () => {
   it.each([
     [undefined, false],

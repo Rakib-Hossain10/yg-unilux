@@ -18,11 +18,16 @@ export class EnvError extends Error {
   readonly variables: readonly string[];
 
   constructor(feature: string, problems: readonly EnvProblem[]) {
-    const lines = problems.map((p) =>
-      p.kind === "missing"
-        ? `  - ${p.variable}: missing`
-        : `  - ${p.variable}: invalid, expected ${p.expected}`,
-    );
+    const lines = problems.map((p) => {
+      switch (p.kind) {
+        case "missing":
+          return `  - ${p.variable}: missing`;
+        case "blank":
+          return `  - ${p.variable}: missing (only whitespace)`;
+        case "invalid":
+          return `  - ${p.variable}: invalid, expected ${p.expected}`;
+      }
+    });
     super(
       `Environment is not configured for ${feature}:\n${lines.join("\n")}\n` +
         "Set these in .env.local (see .env.example) or in the Vercel project settings.",
@@ -33,17 +38,21 @@ export class EnvError extends Error {
 
 type EnvProblem =
   | { kind: "missing"; variable: string }
+  | { kind: "blank"; variable: string }
   | { kind: "invalid"; variable: string; expected: string };
 
 interface Rule<T> {
   schema: z.ZodType<T>;
   expected: string;
+  /** The schema trims its own input, so surrounding whitespace is allowed. */
+  trimsInput?: boolean;
 }
 
-const rule = <T>(schema: z.ZodType<T>, expected: string): Rule<T> => ({
-  schema,
-  expected,
-});
+const rule = <T>(
+  schema: z.ZodType<T>,
+  expected: string,
+  options: { trimsInput?: boolean } = {},
+): Rule<T> => ({ schema, expected, ...options });
 
 const httpUrl = rule(z.url({ protocol: /^https?$/ }), "an http(s) URL");
 const email = rule(z.email(), "an email address");
@@ -56,7 +65,7 @@ const longSecret = rule(
 /** "no-reply@example.com" or "YG UniLUX <no-reply@example.com>". */
 const emailFrom = rule(
   z.string().refine((value) => {
-    const match = /^[^<>]+<([^<>\s]+)>$/.exec(value.trim());
+    const match = /^[^<>]+<([^<>\s]+)>$/.exec(value);
     return z.email().safeParse(match ? match[1] : value).success;
   }),
   'an email address or "Name <address>"',
@@ -87,6 +96,7 @@ const booleanFlag = rule(
     .pipe(z.enum(["true", "false", "1", "0"]))
     .transform((value) => value === "true" || value === "1"),
   '"true" or "false"',
+  { trimsInput: true },
 );
 
 type Spec = Record<string, { rule: Rule<unknown>; optional?: boolean }>;
@@ -108,6 +118,22 @@ function read<S extends Spec>(feature: string, spec: S): Parsed<S> {
     if (raw === undefined || raw === "") {
       if (!optional) problems.push({ kind: "missing", variable });
       out[variable] = undefined;
+      continue;
+    }
+    // Whitespace-only is a mistake, not "unset": report it even when the
+    // variable is optional, so a switch never silently falls back to default.
+    if (raw.trim() === "") {
+      problems.push({ kind: "blank", variable });
+      continue;
+    }
+    // A pasted secret with a stray space or newline would fail later at the
+    // provider with a confusing error, so reject it here.
+    if (!r.trimsInput && raw !== raw.trim()) {
+      problems.push({
+        kind: "invalid",
+        variable,
+        expected: `${r.expected}, without leading or trailing whitespace`,
+      });
       continue;
     }
     const result = r.schema.safeParse(raw);
