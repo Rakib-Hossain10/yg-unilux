@@ -2,35 +2,70 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+// Secrets must never reach the browser (ADR 0011). The bundler inlines any
+// NEXT_PUBLIC_* env value into client JS however it is accessed (dot, bracket,
+// template literal, alias, cast, non-null assertion), so ban the name itself.
+const PUBLIC_ENV_MESSAGE =
+  "Env vars named NEXT_PUBLIC_* are inlined into the client bundle and are forbidden. Read config on the server via src/lib/env.ts.";
+const noNextPublic = [
+  "error",
+  {
+    selector: "Identifier[name=/^NEXT_PUBLIC_/]",
+    message: PUBLIC_ENV_MESSAGE,
+  },
+  { selector: "Literal[value=/^NEXT_PUBLIC_/]", message: PUBLIC_ENV_MESSAGE },
+  {
+    selector: "TemplateElement[value.raw=/NEXT_PUBLIC_/]",
+    message: PUBLIC_ENV_MESSAGE,
+  },
+];
+
+// All env access goes through src/lib/env.ts (validated, server-only).
+const PROCESS_ENV_MESSAGE =
+  "Read environment variables only through src/lib/env.ts (tests: vi.stubEnv).";
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
     rules: {
-      // Secrets must never reach the browser (ADR 0011). Next.js inlines any
-      // process.env.NEXT_PUBLIC_* value into the client bundle, so ban them.
-      "no-restricted-syntax": [
+      "no-restricted-syntax": noNextPublic,
+      "no-restricted-properties": [
+        "error",
+        { object: "process", property: "env", message: PROCESS_ENV_MESSAGE },
+      ],
+      "no-restricted-imports": [
         "error",
         {
-          selector:
-            "MemberExpression[object.type='MemberExpression'][object.object.name='process'][object.property.name='env'][property.name=/^NEXT_PUBLIC_/]",
-          message:
-            "process.env.NEXT_PUBLIC_* is forbidden: it is inlined into the client bundle. Read config on the server via src/lib/env.ts.",
-        },
-        {
-          selector:
-            "MemberExpression[object.type='MemberExpression'][object.object.name='process'][object.property.name='env'][computed=true][property.value=/^NEXT_PUBLIC_/]",
-          message:
-            "process.env['NEXT_PUBLIC_*'] is forbidden: it is inlined into the client bundle. Read config on the server via src/lib/env.ts.",
-        },
-        {
-          selector:
-            "VariableDeclarator[init.type='MemberExpression'][init.object.name='process'][init.property.name='env'] > ObjectPattern > Property[key.name=/^NEXT_PUBLIC_/]",
-          message:
-            "Destructuring NEXT_PUBLIC_* from process.env is forbidden. Read config on the server via src/lib/env.ts.",
+          paths: [
+            {
+              name: "process",
+              importNames: ["env"],
+              message: PROCESS_ENV_MESSAGE,
+            },
+            {
+              name: "node:process",
+              importNames: ["env"],
+              message: PROCESS_ENV_MESSAGE,
+            },
+          ],
         },
       ],
     },
+  },
+  {
+    // The env module itself, tool configs and Node scripts read process.env.
+    files: ["src/lib/env.ts", "**/*.config.*", "scripts/**"],
+    rules: {
+      "no-restricted-properties": "off",
+      "no-restricted-imports": "off",
+    },
+  },
+  {
+    // This test asserts that NEXT_PUBLIC_ never appears in the repo, so it has
+    // to spell the name. It is never bundled.
+    files: ["test/repo-security.test.ts"],
+    rules: { "no-restricted-syntax": "off" },
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([
