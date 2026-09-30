@@ -70,6 +70,30 @@ describe("findGitleaks", () => {
     expect(result).toBe(win.join(WINGET_PKG, "gitleaks.exe"));
   });
 
+  it.each([".", "node_modules/.bin", "bin", ""])(
+    "skips the relative PATH entry %j (a repo file must not be run as gitleaks)",
+    (relative) => {
+      const result = findGitleaks({
+        env: { PATH: `${relative}:/usr/bin` },
+        platform: "linux",
+        ...fakeFs([path.posix.join(relative, "gitleaks"), "/usr/bin/gitleaks"]),
+      });
+      expect(result).toBe("/usr/bin/gitleaks");
+    },
+  );
+
+  it("skips relative PATH entries on Windows too", () => {
+    const result = findGitleaks({
+      env: { Path: ".\\tools;C:\\tools", LOCALAPPDATA: LOCAL },
+      platform: "win32",
+      ...fakeFs([
+        win.join(".\\tools", "gitleaks.exe"),
+        win.join("C:\\tools", "gitleaks.exe"),
+      ]),
+    });
+    expect(result).toBe(win.join("C:\\tools", "gitleaks.exe"));
+  });
+
   it("returns null when gitleaks is nowhere", () => {
     const result = findGitleaks({
       env: { Path: "C:\\Windows", LOCALAPPDATA: LOCAL },

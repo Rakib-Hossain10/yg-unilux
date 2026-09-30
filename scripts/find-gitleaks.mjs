@@ -32,7 +32,9 @@ export function findGitleaks({ env, platform, isFile, readdir }) {
   // Windows env var names are case-insensitive; Node exposes it as "Path".
   const pathVar = env.PATH ?? env.Path ?? "";
   for (const dir of pathVar.split(p.delimiter)) {
-    if (!dir) continue;
+    // Relative entries (".", "bin", empty) resolve against the repo, so a
+    // committed file could impersonate gitleaks. Only trust absolute dirs.
+    if (!dir || !p.isAbsolute(dir)) continue;
     const candidate = p.join(dir, exe);
     if (isFile(candidate)) return candidate;
   }
