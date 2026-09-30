@@ -12,6 +12,7 @@ test("home page responds 200, shows the brand and logs no console errors", async
   const response = await page.goto("/");
 
   expect(response?.status()).toBe(200);
+  expect(response?.headers()["x-powered-by"]).toBeUndefined();
   await expect(
     page.getByRole("heading", { level: 1, name: "YG UniLUX" }),
   ).toBeVisible();
