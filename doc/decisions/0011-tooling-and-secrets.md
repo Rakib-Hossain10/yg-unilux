@@ -20,7 +20,7 @@
   - CI installs npm 12.1.0 first (`NPM_VERSION` in `ci.yml`).
   - Dependabot does not bump `NPM_VERSION`; keep it in step with `devEngines` by hand.
 - **uuid advisory fixed:** GHSA-w5hq-g745-h8pq came in through exceljs 4.4.0 (uuid 8.3.2) and is fixed with `"overrides": { "uuid": "^11.1.1" }`. An exceljs round-trip test covers the one code path that uses uuid. `npm audit` shows 0 vulnerabilities. exceljs itself has had no release since 2023; re-evaluate it before Phase 3 (import), where it will parse untrusted uploads.
-- **ESLint enforces the secrets rule:** `process.env` may be read only in `src/lib/env.ts`, `**/*.config.*` and `scripts/**`, and any `NEXT_PUBLIC_` name or string is an error.
+- **ESLint enforces the secrets rule:** `process.env` may be read only in `src/lib/env.ts`, root-level `*.config.{ts,mts,mjs,js,cjs}` and `scripts/**`, and any `NEXT_PUBLIC_` name or string is an error.
 - **Whitespace in env values:** a whitespace-only value is an error, even for optional variables, and secrets padded with whitespace are invalid.
 - **env API:** `src/lib/env.ts` validates each feature lazily (`env.mongo()`, `env.r2()`, `env.whistleblowerKey()`, …). A missing or invalid variable throws `EnvError`, which names the variable but never its value, so the app builds with no secrets set.
 
