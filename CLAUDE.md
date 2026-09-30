@@ -87,6 +87,8 @@ Only two: `admin` and `customer` (keep the `role` field so a second admin can be
 - Product, leader and factory photos are always real client photos — never AI-generated.
 
 ## Working conventions
+- Start every session by reading `doc/tasks.md` (current phase + open tasks) and `doc/decisions/README.md` (ADR index). Decisions there override older text in this file until it is updated.
+- End every session by ticking `doc/tasks.md`, adding a session-log line, and writing a new ADR in `doc/decisions/` for any design decision made.
 - Build one phase at a time; plan first, then implement.
 - Server Components by default; `"use client"` only where interaction/animation needs it.
 - Keep admin UI plain and fast (shadcn); keep motion work in `components/motion/`.
