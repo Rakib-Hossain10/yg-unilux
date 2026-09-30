@@ -16,16 +16,23 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Install all project skills (20) and create 6 subagents in `.claude/agents/` — ADR 0013
 - [x] Automatic per-file review: `.claude/agents/code-reviewer.md` + PostToolUse/FileChanged hooks — ADR 0014
 - [x] Commit setup work on `main`
-- [ ] Reload session, verify agents + skills + hooks load (`/agents`, `/hooks`)
-- [ ] Decide: CI security extras (Dependabot, CodeQL, npm audit) + enable GitHub secret scanning
-- [ ] Before scaffolding/`npm install`: `touch .claude/reviews/.disabled`; remove it afterwards and restart the session so FileChanged watches the new `src/`
-- [ ] `create-next-app` in place (TS, App Router, `src/`, Tailwind, ESLint, `@/*`); record Next version in ADR 0008
-- [ ] Read installed Next docs for caching, `proxy.ts` and dynamic APIs; finalise ADR 0008
-- [ ] Install dependencies (see ADR 0011 for the list)
-- [ ] Config: strict tsconfig, Prettier, ESLint, Vitest, Playwright, npm scripts
-- [ ] `src/lib/env.ts` (Zod, server-only) + `.env.example` with every key empty; `.env*.local` gitignored
-- [ ] Update CLAUDE.md: 11 collections, `datasheetId`, `proxy.ts`, caching + no-restricted-data-in-cache, rate limit, keys, secrets, R2, npm/Vitest/Playwright
-- [ ] GitHub Actions CI: lint → typecheck → vitest → build
+- [x] Reload session, verify agents + skills + hooks load (`/agents`, `/hooks`)
+- [x] Decide security tooling: Dependabot (weekly, grouped; Next/React majors manual), `npm audit --audit-level=high` in CI, gitleaks in CI + pre-commit; CodeQL only if free on private repo, else skip + ADR 0015. Phase 0 plan approved in chat.
+- [x] Install gitleaks 8.30.1 locally (winget; on user PATH after shell restart)
+- [x] Gitleaks baseline: first history scan flags 1 false positive (`mockToken` example in `.claude/skills/playwright-best-practices/advanced/authentication-flows.md:54`). Add its fingerprint to `.gitleaksignore` (narrow, not a path allowlist) in Phase 0
+- [ ] User checks GitHub → Settings → Code security (Dependabot alerts, code scanning, secret scanning) and reports what is available
+- [x] Before scaffolding/`npm install`: `touch .claude/reviews/.disabled`
+- [ ] Remove `.claude/reviews/.disabled` after merge and restart the session so FileChanged watches the new `src/`
+- [x] Scaffold Next.js 16.3.7 (TS, App Router, `src/`, Tailwind 4, ESLint, `@/*`) with placeholder page
+- [x] Read installed Next docs for caching, `proxy.ts` and dynamic APIs; finalised ADR 0008 + 0007
+- [x] Install dependencies (ADR 0011): all except the auth library
+- [ ] **Decide the auth library** (Auth.js is security-fixes-only upstream; Better Auth recommended upstream) — blocks Phase 1 auth; new ADR
+- [x] Config: strict tsconfig, Prettier, ESLint (bans `NEXT_PUBLIC_*`), Vitest, Playwright, npm scripts
+- [x] `src/lib/env.ts` (Zod, server-only, lazy per feature, 43 tests) + `.env.example`; `.env*.local` gitignored
+- [x] Update CLAUDE.md: 11 collections, `datasheetId`, `proxy.ts`, caching + no-restricted-data-in-cache, rate limit, keys, secrets, R2, npm/Vitest/Playwright
+- [x] `.gitattributes` (LF), Dependabot, CI (checks + audit, e2e, gitleaks), gitleaks config + husky pre-commit — ADR 0015
+- [x] `qa-security-reviewer` on `phase-0`: FAIL → fixed (F1 gitleaks allowlist, F2 NEXT_PUBLIC bypasses, F3 whitespace, F5 npm pin, F7 uuid) → re-review FAIL on N1 (devEngines `error` breaks npm 10) + N2 (config glob too broad) → both fixed by orchestrator and verified
+- [ ] Push `phase-0`, first CI run green on GitHub, merge to `main`
 - [ ] Link Vercel project, deploy blank app — **deferred: client's Vercel account doesn't exist yet**
 - **Exit:** CI green, docs committed (Vercel preview once the account exists)
 
@@ -36,6 +43,9 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] `lib/rate-limit.ts` (per email + per IP, TTL) — ADR 0004
 - [ ] `lib/permissions.ts`: `requireAdmin`, `requireCustomerAccess`, `canSeeRestricted`
 - [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
+  - [ ] e2e: prove whether `NextResponse.rewrite(url, { status: 403 })` keeps the 403; else return a 403 response directly
+  - [ ] Policy for a malformed `GEO_BLOCK_ENABLED` (`env.geoBlockEnabled()` throws): catch `EnvError`, choose fail-closed vs off, and record it in an ADR (QA finding F4)
+- [ ] Security headers (CSP, HSTS, X-Content-Type-Options, Referrer-Policy, frame-ancestors) in `next.config.ts`
 - [ ] `app/blocked/page.tsx`
 - [ ] `scripts/seed-admin.ts` (create / reset from CLI)
 - [ ] Design tokens, fonts, header shell, footer shell, 404/500
@@ -123,4 +133,6 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 ## Session log
 - 2026-09-30 — Read all docs, settled ADRs 0001–0012, approved roadmap, created `doc/`.
 - 2026-09-30 — Installed 20 skills, rejected `code-review` (mattpocock) and `deploy-to-vercel`; created 6 subagents (ADR 0013).
+- 2026-10-01 — Two QA rounds on Phase 0; all findings fixed; F4/F6 documented (ADR 0015, Phase 1 tasks); npm 12 via devEngines `warn` (ADR 0011).
+- 2026-09-30 — Phase 0 built by backend-architect on `phase-0` (9 commits); ADRs 0007/0008/0010/0011 updated from installed Next 16.3.7 docs; ADR 0015 added; Auth.js found to be maintenance-only → decision pending.
 - 2026-09-30 — Added the automatic review hook (ADR 0014) and moved code-reviewer into `.claude/agents/`; replaced the find-skills symlink with a copy (`core.symlinks=false`); committed the setup on `main`. Vercel deferred.

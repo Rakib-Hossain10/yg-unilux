@@ -1,0 +1,8 @@
+# Gitleaks config (v8.30). Used by CI and the husky pre-commit hook.
+# No path allowlists: false positives are ignored only by exact fingerprint
+# in .gitleaksignore, so a real value pasted into any file is still caught.
+title = "YG UniLUX gitleaks config"
+
+[extend]
+# Start from the upstream default rule set.
+useDefault = true

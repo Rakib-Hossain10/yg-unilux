@@ -1,0 +1,11 @@
+# 1. Secret scan of the staged changes. Never skipped: a missing gitleaks
+#    binary fails the commit with install instructions.
+GITLEAKS="$(node scripts/find-gitleaks.mjs)" || exit 1
+"$GITLEAKS" git --staged --redact --no-banner --config .gitleaks.toml . || {
+  echo "gitleaks found a possible secret in the staged changes. Commit blocked." >&2
+  echo "Remove it (and rotate it if it was real). False positive? Add its fingerprint to .gitleaksignore." >&2
+  exit 1
+}
+
+# 2. Format and lint the staged files.
+npx lint-staged --concurrent false
