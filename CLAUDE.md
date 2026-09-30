@@ -9,12 +9,15 @@ English only — no i18n library, no language switcher, no `[locale]` routes.
 - Next.js (App Router) + TypeScript, Tailwind CSS, shadcn/ui (admin)
 - Motion: GSAP + ScrollTrigger, Lenis smooth scroll, Motion (Framer Motion)
 - MongoDB Atlas + Mongoose
-- Auth.js — credentials only, role stored in session, NO public sign-up
-- Cloudinary — public product images
-- Private files (.xlsx datasheets, whistleblower attachments): Cloudinary `authenticated` raw OR Cloudflare R2 private bucket
-- Resend (email), MongoDB Atlas Search, React Hook Form + Zod
+- Auth — credentials only, role stored in session, NO public sign-up. Library choice pending (Auth.js is security-fixes-only upstream); see doc/tasks.md
+- Cloudinary — public product images only
+- Private files (.xlsx datasheets, whistleblower attachments): Cloudflare R2 private bucket, presigned URLs, always through `src/lib/storage.ts` (ADR 0009)
+- Resend (email), MongoDB Atlas Search (Atlas in every environment, regex fallback only if `$search` fails — ADR 0006), React Hook Form + Zod
 - Vercel Cron for the daily access-expiry reminder job
 - Hosting: Vercel (+ Vercel Firewall for geo-block)
+- Tooling: npm ≥ 12.1 (`devEngines` warns on older npm; Node 22 ships npm 10, so run `npm i -g npm@12` first; CI pins 12.1.0), Node ≥ 22, Vitest (+ mongodb-memory-server), Playwright, ESLint, Prettier, husky + lint-staged (ADR 0010, 0011)
+- Versions: Next.js 16.3.7, React 19.2, TypeScript 5.9, Tailwind 4, Mongoose 9, Zod 4. The Next.js docs for this version are in `node_modules/next/dist/docs/`; read them before using any Next API.
+- Security tooling (all free): Dependabot, `npm audit --audit-level=high` in CI, gitleaks in CI + pre-commit; no CodeQL (ADR 0015)
 
 ## Folder structure
 ```
@@ -27,9 +30,12 @@ src/
     api/             datasheet download, uploads, auth, import, cron
     blocked/         page shown to mainland China
   components/        ui/ (shadcn), site/, admin/, motion/
-  lib/               db, auth, cloudinary, storage, email, geo, permissions
+  lib/               env, db, auth, cloudinary, storage, email, geo, permissions, rate-limit, crypto, catalog, import
   models/            one Mongoose schema per collection
-  middleware.ts      geo-block + admin guard (named proxy.ts on Next.js 16+)
+  proxy.ts           geo-block + coarse admin redirect (Next.js 16 name for middleware — ADR 0007)
+scripts/             seed-admin and other CLI scripts
+e2e/                 Playwright tests
+doc/                 tasks.md (tracker) + decisions/ (ADRs)
 ```
 
 ## Domain model
@@ -57,11 +63,10 @@ src/
 - Extract embedded images by row anchor (xl/drawings) and upload to Cloudinary; admin adds more images later.
 - Category and areas are not in the sheet → optional extra template columns, else assigned after import.
 - Always a preview step with per-row warnings (missing specs, no image, duplicate model no.) before saving. Re-import upserts by model no.; never duplicates.
-- Restricted .xlsx download: one uploaded file can be attached to several products (e.g. a whole family sheet).
 - All text is plain English strings.
-- Datasheet: admin uploads one .xlsx per product (`product.datasheet` = storage key, file name, size, updatedAt). Same file for every approved customer. Accept .xlsx only (check file signature, not just extension), max 10 MB. No datasheet → show "Datasheet coming soon".
+- Datasheets are their own collection (ADR 0001): `datasheets` = storage key, file name, size, mime type, updatedAt, uploadedBy. Products reference it with `datasheetId`; one file can be attached to many products (e.g. a whole family sheet). Replacing a file keeps the storage key. Deleting a datasheet still used by products is blocked. Same file for every approved customer. Accept .xlsx only (check file signature, not just extension), max 10 MB. No `datasheetId` → show "Datasheet coming soon".
 - Customer access: one approval unlocks ALL datasheets. `user.accessExpiresAt` is set by the admin at account creation/approval (3/6/12 months, custom date, or null = no expiry) and can be extended later. Expired → login works but downloads are locked with "Access expired — contact us". Daily cron emails customers 7 days before expiry.
-- Collections: products, categories, areas, users, accessRequests, downloadLogs, leaders, siteContent, whistleblowerCases, auditLog.
+- Collections (11): products, categories, areas, users, accessRequests, downloadLogs, datasheets, leaders, siteContent, whistleblowerCases, auditLog. Plus the internal `loginAttempts` (TTL, rate limiting).
 
 ## Roles
 Only two: `admin` and `customer` (keep the `role` field so a second admin can be added later without code changes).
@@ -71,13 +76,21 @@ Only two: `admin` and `customer` (keep the `role` field so a second admin can be
 
 ## Security rules — never break these
 1. A datasheet .xlsx is NEVER in `/public` and NEVER behind a public URL.
-2. Datasheets are served only via `/api/datasheet/[productId]`: check session → role=customer or admin → status active → not expired → return a short-lived (~60 s) signed URL → write a downloadLogs entry.
-3. Every admin page AND every admin API route checks the role on the server. Hiding a button is not access control.
+2. Datasheets are served only via `/api/datasheet/[productId]`: check session → role=customer or admin → status active → not expired → resolve `datasheetId` → return a short-lived (~60 s) R2 presigned URL → write a downloadLogs entry (user, product, datasheet) → `Cache-Control: private, no-store`.
+3. Every admin page AND every admin API route and server action checks the role on the server (`requireAdmin()`). Hiding a button is not access control; `proxy.ts` is never the only guard.
 4. No self-registration. Accounts are created by the admin (manually or by approving an access request).
-5. Passwords hashed (bcrypt/argon2); login rate-limited; new accounts have `mustChangePassword: true`.
-6. Geo-block: `x-vercel-ip-country === 'CN'` → rewrite to `/blocked` (403), toggled by `GEO_BLOCK_ENABLED`. Block ONLY `CN` — never HK, MO or TW. Applies to the whole site including `/admin` (client team uses a VPN) unless told otherwise. Local dev has no country header, so it does not block locally.
-7. Whistleblower: named reports = mailto the company email (`COMPANY_EMAIL` env / admin setting). Anonymous reports: never store IP, no analytics on those pages, strip EXIF from uploads, encrypt report text + messages at rest; alert email to the company email contains no report content.
+5. Passwords hashed (argon2id preferred, bcrypt fallback); login and password-reset rate-limited per email AND per IP with a MongoDB TTL counter (ADR 0004); new accounts have `mustChangePassword: true`.
+6. Geo-block: `x-vercel-ip-country === 'CN'` → rewrite to `/blocked` (403), toggled ONLY by the `GEO_BLOCK_ENABLED` env var (not an admin setting — ADR 0003). Block ONLY `CN` — never HK, MO or TW. Applies to the whole site including `/admin` (client team uses a VPN) unless told otherwise. Local dev has no country header, so it does not block locally.
+7. Whistleblower: named reports = mailto the company email (`COMPANY_EMAIL` env / admin setting). Anonymous reports: never store IP (and never apply IP rate limiting on these routes), no analytics on those pages, strip EXIF from uploads with `sharp`, encrypt report text + messages at rest with AES-256-GCM and a stored `keyVersion` (key `WHISTLEBLOWER_ENC_KEY`; losing it makes data unreadable — ADR 0005); alert email to the company email contains no report content.
 8. Validate every form and API input with Zod on the server.
+9. Restricted spec values never appear in any cached HTML, cached data entry, shared/CDN cache, search result, family/related strip, JSON-LD, metadata or sitemap. Cached catalog queries exclude restricted fields by projection; only one uncached function reads them, rendered in a separate dynamic block (ADR 0002).
+10. Secrets live in `.env.local` (gitignored), are read only through `src/lib/env.ts` (`server-only`, Zod), and are never prefixed `NEXT_PUBLIC_`. Every variable is listed empty in `.env.example`. Never commit a secret; gitleaks runs pre-commit and in CI.
+11. Private files are deployed/uploaded only through our own code and the client's accounts. Never send the repo or its files to third-party or anonymous upload/deploy endpoints.
+
+## Caching and performance (ADR 0008)
+- No cache inside MongoDB. Public catalog data uses the Next.js cache, tagged, and every admin mutation (product, category, area, datasheet, column visibility, bulk import) invalidates through ONE shared revalidation helper.
+- Take the caching API from the installed Next.js docs (`node_modules/next/dist/docs/`), never from memory.
+- Mongoose: cached global connection, `lean()` + field projection on reads, indexes declared in schemas (product `slug` unique, `mainCategory`, `extraCategories`, `areas`, `family`, `variants.modelNo`, `status`).
 
 ## Design
 - Palette from the logo: black, white, warm greys; photography carries colour.
@@ -89,6 +102,7 @@ Only two: `admin` and `customer` (keep the `role` field so a second admin can be
 ## Working conventions
 - Start every session by reading `doc/tasks.md` (current phase + open tasks) and `doc/decisions/README.md` (ADR index). Decisions there override older text in this file until it is updated.
 - End every session by ticking `doc/tasks.md`, adding a session-log line, and writing a new ADR in `doc/decisions/` for any design decision made.
-- Build one phase at a time; plan first, then implement.
+- Build one phase at a time; plan first, then implement. Work on a `phase-N` branch; merge to `main` only when lint, typecheck, tests, build, audit and gitleaks are green and `qa-security-reviewer` passes.
+- Subagents live in `.claude/agents/` (ADR 0013). The main session orchestrates and alone edits `doc/` and this file. Every changed source file is auto-reviewed by `code-reviewer` via hooks (ADR 0014); pause it with `.claude/reviews/.disabled` during scaffolding or bulk changes.
 - Server Components by default; `"use client"` only where interaction/animation needs it.
 - Keep admin UI plain and fast (shadcn); keep motion work in `components/motion/`.

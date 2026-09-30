@@ -23,10 +23,11 @@ Template:
 | [0005](0005-whistleblower-encryption.md) | AES-256-GCM with key versioning for whistleblower data | Accepted |
 | [0006](0006-search-atlas.md) | Atlas Search in every environment, regex fallback | Accepted |
 | [0007](0007-proxy-ts.md) | Use `proxy.ts` (Next.js 16+) | Accepted |
-| [0008](0008-caching.md) | Next.js tag-based cache for public catalog data | Accepted (API details pending Phase 0) |
+| [0008](0008-caching.md) | Next.js tag-based cache for public catalog data | Accepted (API confirmed, Next 16.3.7) |
 | [0009](0009-r2-private-storage.md) | Cloudflare R2 for private files | Accepted |
 | [0010](0010-testing.md) | Vitest + Playwright | Accepted |
 | [0011](0011-tooling-and-secrets.md) | npm, dependency list, secrets handling | Accepted |
 | [0012](0012-agent-skills.md) | Agent skills: core now, rest per phase | Partly superseded by 0013 |
 | [0013](0013-subagents.md) | Project subagents in `.claude/agents/` (6 builders/reviewers + hook-run code-reviewer), all skills installed up front | Accepted |
 | [0014](0014-automatic-file-review-hook.md) | Automatic per-file review via PostToolUse + FileChanged hooks | Accepted |
+| [0015](0015-free-security-tooling.md) | Dependabot, npm audit, gitleaks (CI + pre-commit); CodeQL skipped | Accepted |
