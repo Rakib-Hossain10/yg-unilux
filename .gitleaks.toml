@@ -1,0 +1,10 @@
+# Gitleaks config (v8.30). Used by CI and the husky pre-commit hook.
+title = "YG UniLUX gitleaks config"
+
+[extend]
+# Start from the upstream default rule set.
+useDefault = true
+
+[[allowlists]]
+description = "Env template: keys only, values are always empty"
+paths = ['''^\.env\.example$''']

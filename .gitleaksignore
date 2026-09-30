@@ -1,0 +1,2 @@
+# False positive: 'mockToken' example string in a vendored Playwright skill doc.
+.claude/skills/playwright-best-practices/advanced/authentication-flows.md:generic-api-key:54
