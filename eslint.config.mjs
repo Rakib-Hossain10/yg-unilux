@@ -55,7 +55,7 @@ const eslintConfig = defineConfig([
   },
   {
     // The env module itself, tool configs and Node scripts read process.env.
-    files: ["src/lib/env.ts", "**/*.config.*", "scripts/**"],
+    files: ["src/lib/env.ts", "*.config.{ts,mts,mjs,js,cjs}", "scripts/**"],
     rules: {
       "no-restricted-properties": "off",
       "no-restricted-imports": "off",
