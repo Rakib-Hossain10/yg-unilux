@@ -77,9 +77,15 @@ const emailFrom = rule(
   'an email address or "Name <address>"',
 );
 
+/*
+ * The URI must name its database (".../yg_unilux?..."). Atlas's "Connect"
+ * dialog omits it, and the driver then silently uses a database called
+ * "test", so Preview and Production on one cluster could share data.
+ * Shape: scheme, hosts (no "/"), "/", a non-empty database name, optional query.
+ */
 const mongoUri = rule(
-  z.string().regex(/^mongodb(\+srv)?:\/\/\S+$/),
-  "a mongodb:// or mongodb+srv:// URI",
+  z.string().regex(/^mongodb(\+srv)?:\/\/[^/\s]+\/[^/?\s]+(\?\S*)?$/),
+  "a mongodb:// or mongodb+srv:// URI that names the database, e.g. …mongodb.net/yg_unilux?retryWrites=true",
 );
 
 /** Canonical base64 that decodes to exactly 32 bytes (AES-256 key, ADR 0005). */

@@ -3,7 +3,16 @@
 Working tracker for the YG UniLUX build. Update it at the end of every session: tick finished items, add new ones, and move "Current focus".
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
-**Current focus:** Phase 1 — Foundations (ready: auth decided in ADR 0017, `MONGODB_URI` set by user)
+**Current focus:** Phase 1 — Foundations — in progress on branch `phase-1`
+
+**Phase 1 decisions (user, 2026-10-01):**
+- **Logo:** no SVG yet, so the header uses a text placeholder.
+- **Fonts:** two Google Fonts, bundled at build time with `next/font`, so there are no runtime requests to Google.
+- **Malformed `GEO_BLOCK_ENABLED`:** fail closed. Block CN and log the error; ADR in task 8.
+- **Email:** no verified Resend domain yet. Reset emails are tested only to the user's own Resend account email.
+- **QA:** `qa-security-reviewer` runs after tasks 3, 5, 6, 7, 8, 11 and 12. The other tasks get only the automatic per-file review.
+- **Comments:** every file starts with a 2–3 line plain-English header. Important functions and blocks get a short "what and why" comment; obvious lines don't.
+- **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit.
 **Working method:** plan mode → approve → small commits on a `phase-N` branch → lint + typecheck + tests + build green → security check against CLAUDE.md → PR → merge → tick here.
 
 ---
@@ -41,10 +50,11 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Direct `mongodb` dependency: needed by Better Auth's adapter; pinned to Mongoose's range `~7.6` so npm dedupes to one copy (test + Dependabot ignore) — ADR 0017
 
 ## Phase 1 — Foundations
-- [ ] `lib/db.ts` cached global Mongoose connection
-- [ ] 11 Mongoose models + `loginAttempts` (TTL); indexes per ADR 0008
+- [x] Task 1: `lib/db.ts`, one shared `MongoClient` for Mongoose and Better Auth, strict Mongoose, `MONGODB_URI` must name the database — ADR 0018
+- [ ] 11 Mongoose models + `loginAttempts` (TTL); indexes per ADR 0008; `scripts/sync-indexes.ts` (`npm run db:indexes`) builds them, incl. Better Auth collection indexes later (ADR 0018)
 - [ ] `lib/auth.ts` with Better Auth per ADR 0017: Mongo adapter on Mongoose's client, `disableSignUp`, admin plugin (admin/customer), additionalFields (mustChangePassword, accessExpiresAt, company, country), argon2id, Resend reset, DB rate limit + per-email hook, telemetry off; route `app/api/auth/[...all]`; fix the `env.auth()` comment
-- [ ] `lib/rate-limit.ts` (per email + per IP, TTL) — ADR 0004
+- [ ] `lib/rate-limit.ts` (per-email TTL counter; per-IP is Better Auth's) — ADR 0004, 0017
+- [ ] `lib/email.ts` minimal Resend sender (password-reset email)
 - [ ] `lib/permissions.ts`: `requireAdmin`, `requireCustomerAccess`, `canSeeRestricted`
 - [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
   - [ ] e2e: prove whether `NextResponse.rewrite(url, { status: 403 })` keeps the 403; else return a 403 response directly
@@ -53,6 +63,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] `app/blocked/page.tsx`
 - [ ] `scripts/seed-admin.ts` (create / reset from CLI)
 - [ ] Design tokens, fonts, header shell, footer shell, 404/500
+- [ ] Minimal `/login` page + placeholder `/admin` page behind `requireAdmin()`; e2e: admin logs in, customer gets 403, visitor redirected
 - [ ] Tests: permissions matrix, rate limiter, proxy country matrix, env validation
 - **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview
 
@@ -120,6 +131,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
 ## Phase 10 — Launch
 - [ ] Deploy via client-linked Vercel project (no third-party deploy scripts)
+- [ ] Fluid compute: check current Vercel docs for `attachDatabasePool(client)` (`@vercel/functions`); decide `waitQueueTimeoutMS` after a load test (ADR 0018)
 - [ ] Real content, Vercel Firewall CN rule, domain
 - [ ] Test every role + China block on production
 - [ ] Admin handover guide + encryption-key backup instructions

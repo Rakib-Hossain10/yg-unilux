@@ -78,6 +78,15 @@ describe("valid values", () => {
     });
   });
 
+  it.each([
+    "mongodb+srv://user:pw@cluster0.example.mongodb.net/yg_unilux?retryWrites=true&w=majority",
+    "mongodb://h1.example.net:27017,h2.example.net:27017/yg?replicaSet=rs0",
+    "mongodb://127.0.0.1:27017/yg_dev",
+  ])("accepts a MONGODB_URI that names its database: %s", (uri) => {
+    vi.stubEnv("MONGODB_URI", uri);
+    expect(env.mongo()).toEqual({ uri });
+  });
+
   it("returns the r2 config", () => {
     vi.stubEnv("R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef");
     vi.stubEnv("R2_ACCESS_KEY_ID", "access-key-id");
@@ -116,6 +125,18 @@ describe("valid values", () => {
 describe("bad formats", () => {
   it.each([
     ["MONGODB_URI", "postgres://localhost/db", () => env.mongo()],
+    // No database name: the driver would silently use "test" (see db.ts).
+    [
+      "MONGODB_URI",
+      "mongodb+srv://u:p@cluster0.example.mongodb.net/?retryWrites=true",
+      () => env.mongo(),
+    ],
+    [
+      "MONGODB_URI",
+      "mongodb+srv://u:p@cluster0.example.mongodb.net",
+      () => env.mongo(),
+    ],
+    ["MONGODB_URI", "mongodb://127.0.0.1:27017/", () => env.mongo()],
     ["AUTH_SECRET", "too-short", () => env.auth()],
     ["SITE_URL", "not a url", () => env.siteUrl()],
     ["SITE_URL", "ftp://example.com", () => env.siteUrl()],

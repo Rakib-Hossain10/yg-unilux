@@ -50,6 +50,17 @@ jobs:
       # Dependency install scripts stay blocked in CI, matching the
       # allowScripts deny list in package.json (none of them are needed).
       - run: npm ci --ignore-scripts
+
+      # mongodb-memory-server's postinstall is blocked, so DB tests download
+      # the MongoDB binary at test time (MD5-checked) into this folder. Caching
+      # it saves the download on every run and a dependency on MongoDB's CDN.
+      # Binaries are stored per version, so a restored older cache is harmless.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: mongodb-binaries-${{ runner.os }}-
+
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
