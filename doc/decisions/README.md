@@ -32,3 +32,4 @@ Template:
 | [0014](0014-automatic-file-review-hook.md) | Automatic per-file review via PostToolUse + FileChanged hooks | Accepted |
 | [0015](0015-free-security-tooling.md) | Dependabot, npm audit, gitleaks (CI + pre-commit); CodeQL skipped | Accepted |
 | [0016](0016-cloudinary-url.md) | Single `CLOUDINARY_URL`; next/image allowed only for our cloud | Accepted |
+| [0017](0017-better-auth.md) | Better Auth (not Auth.js); one shared `mongodb` driver copy | Accepted |

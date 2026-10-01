@@ -12,7 +12,7 @@
 ## Resolved in Phase 0
 - **Versions:** next 16.3.7, react 19.2.8, typescript 5.9.3, tailwindcss 4.3.3, mongoose 9.10.3, zod 4.6.5, Node ≥ 22 (`.nvmrc` = 22).
 - **Password hasher:** `@node-rs/argon2` (argon2id). Next already treats it as a server-external package, and it was proven under `next build` + `next start`.
-- **Auth library:** not installed. Upstream Auth.js now gets only security patches and recommends Better Auth for new projects. The choice is pending, and Phase 1 auth is blocked on it.
+- **Auth library:** Better Auth 1.7.7, decided in ADR 0017. Auth.js was rejected because it is security-fixes-only upstream and v5 is still beta. `mongodb@~7.6.0` is installed to match Mongoose's driver, so there is one copy.
 - **Install scripts are denied by default.** `package.json` `allowScripts` denies esbuild, mongodb-memory-server and unrs-resolver (all optional), and CI runs `npm ci --ignore-scripts`. A new install script needs explicit approval.
 - **`agentRules: false`** in `next.config.ts`, so `next dev` never rewrites the hand-kept CLAUDE.md.
 - **npm 12 is expected.** `package.json` `devEngines.packageManager` is npm ^12.1.0 with `onFail: "warn"`. Older npm prints an `EBADDEVENGINES` warning and carries on; contributors should run `npm install -g npm@12` because the `allowScripts` deny policy only works on npm 12.
