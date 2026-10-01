@@ -2,6 +2,12 @@ import "server-only";
 
 import { z } from "zod";
 
+import {
+  CLOUDINARY_URL_FORMAT,
+  type CloudinaryCredentials,
+  parseCloudinaryUrl,
+} from "./cloudinary-url";
+
 /**
  * Server-only, lazily validated environment access (ADR 0011).
  *
@@ -89,6 +95,19 @@ const aes256KeyBase64 = rule(
   "base64 of exactly 32 random bytes (openssl rand -base64 32)",
 );
 
+/** cloudinary://<api_key>:<api_secret>@<cloud_name>, parsed into its three parts. */
+const cloudinaryUrl = rule(
+  z.string().transform((value, ctx): CloudinaryCredentials => {
+    const credentials = parseCloudinaryUrl(value);
+    if (!credentials) {
+      ctx.addIssue({ code: "custom", message: "invalid CLOUDINARY_URL" });
+      return z.NEVER;
+    }
+    return credentials;
+  }),
+  CLOUDINARY_URL_FORMAT,
+);
+
 const booleanFlag = rule(
   z
     .string()
@@ -160,17 +179,10 @@ export const env = {
     return { secret: v.AUTH_SECRET, url: v.AUTH_URL };
   },
 
-  cloudinary() {
-    const v = read("Cloudinary", {
-      CLOUDINARY_CLOUD_NAME: { rule: nonEmpty },
-      CLOUDINARY_API_KEY: { rule: nonEmpty },
-      CLOUDINARY_API_SECRET: { rule: nonEmpty },
-    });
-    return {
-      cloudName: v.CLOUDINARY_CLOUD_NAME,
-      apiKey: v.CLOUDINARY_API_KEY,
-      apiSecret: v.CLOUDINARY_API_SECRET,
-    };
+  /** Public product images (ADR 0009). One variable: CLOUDINARY_URL. */
+  cloudinary(): CloudinaryCredentials {
+    return read("Cloudinary", { CLOUDINARY_URL: { rule: cloudinaryUrl } })
+      .CLOUDINARY_URL;
   },
 
   r2() {

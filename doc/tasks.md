@@ -3,7 +3,7 @@
 Working tracker for the YG UniLUX build. Update it at the end of every session: tick finished items, add new ones, and move "Current focus".
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
-**Current focus:** Phase 0 — Setup & tooling
+**Current focus:** Phase 1 — Foundations (blocked on: auth library decision, `MONGODB_URI`)
 **Working method:** plan mode → approve → small commits on a `phase-N` branch → lint + typecheck + tests + build green → security check against CLAUDE.md → PR → merge → tick here.
 
 ---
@@ -22,7 +22,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Gitleaks baseline: first history scan flags 1 false positive (`mockToken` example in `.claude/skills/playwright-best-practices/advanced/authentication-flows.md:54`). Add its fingerprint to `.gitleaksignore` (narrow, not a path allowlist) in Phase 0
 - [ ] User checks GitHub → Settings → Code security (Dependabot alerts, code scanning, secret scanning) and reports what is available
 - [x] Before scaffolding/`npm install`: `touch .claude/reviews/.disabled`
-- [ ] Remove `.claude/reviews/.disabled` after merge and restart the session so FileChanged watches the new `src/`
+- [x] Remove `.claude/reviews/.disabled` after merge (done 2026-10-01; hook verified working)
 - [x] Scaffold Next.js 16.3.7 (TS, App Router, `src/`, Tailwind 4, ESLint, `@/*`) with placeholder page
 - [x] Read installed Next docs for caching, `proxy.ts` and dynamic APIs; finalised ADR 0008 + 0007
 - [x] Install dependencies (ADR 0011): all except the auth library
@@ -32,9 +32,13 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Update CLAUDE.md: 11 collections, `datasheetId`, `proxy.ts`, caching + no-restricted-data-in-cache, rate limit, keys, secrets, R2, npm/Vitest/Playwright
 - [x] `.gitattributes` (LF), Dependabot, CI (checks + audit, e2e, gitleaks), gitleaks config + husky pre-commit — ADR 0015
 - [x] `qa-security-reviewer` on `phase-0`: FAIL → fixed (F1 gitleaks allowlist, F2 NEXT_PUBLIC bypasses, F3 whitespace, F5 npm pin, F7 uuid) → re-review FAIL on N1 (devEngines `error` breaks npm 10) + N2 (config glob too broad) → both fixed by orchestrator and verified
-- [ ] Push `phase-0`, first CI run green on GitHub, merge to `main`
+- [x] Push `phase-0`, CI green on GitHub, merged to `main` (PR #1)
 - [ ] Link Vercel project, deploy blank app — **deferred: client's Vercel account doesn't exist yet**
 - **Exit:** CI green, docs committed (Vercel preview once the account exists)
+
+## Between phases
+- [x] `CLOUDINARY_URL` replaces the three Cloudinary variables; next/image limited to our cloud — ADR 0016 (branch `chore/cloudinary-url`)
+- [ ] Decide: keep or drop the direct `mongodb` dependency the user added (Mongoose already bundles the driver)
 
 ## Phase 1 — Foundations
 - [ ] `lib/db.ts` cached global Mongoose connection
@@ -131,6 +135,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-01 — Phase 0 merged (PR #1). Review hook re-enabled. Switched to a single `CLOUDINARY_URL` (ADR 0016) and fixed the user's next.config edit (missing comma, unrestricted Cloudinary host).
 - 2026-09-30 — Read all docs, settled ADRs 0001–0012, approved roadmap, created `doc/`.
 - 2026-09-30 — Installed 20 skills, rejected `code-review` (mattpocock) and `deploy-to-vercel`; created 6 subagents (ADR 0013).
 - 2026-10-01 — Two QA rounds on Phase 0; all findings fixed; F4/F6 documented (ADR 0015, Phase 1 tasks); npm 12 via devEngines `warn` (ADR 0011).

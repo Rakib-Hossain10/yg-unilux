@@ -9,9 +9,7 @@ const ALL_KEYS = [
   "MONGODB_URI",
   "AUTH_SECRET",
   "AUTH_URL",
-  "CLOUDINARY_CLOUD_NAME",
-  "CLOUDINARY_API_KEY",
-  "CLOUDINARY_API_SECRET",
+  "CLOUDINARY_URL",
   "R2_ACCOUNT_ID",
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_ACCESS_KEY",
@@ -52,7 +50,7 @@ describe("types", () => {
 
 describe("whitespace", () => {
   it.each([
-    ["CLOUDINARY_API_SECRET", () => env.cloudinary()],
+    ["CLOUDINARY_URL", () => env.cloudinary()],
     ["R2_SECRET_ACCESS_KEY", () => env.r2()],
     ["RESEND_API_KEY", () => env.email()],
     ["AUTH_SECRET", () => env.auth()],
@@ -157,7 +155,7 @@ describe("email validation", () => {
 describe("secrecy of every group", () => {
   const SECRET = "Zq9Leak7Canary3Value";
   it.each([
-    ["CLOUDINARY_API_SECRET", () => env.cloudinary()],
+    ["CLOUDINARY_URL", () => env.cloudinary()],
     ["R2_SECRET_ACCESS_KEY", () => env.r2()],
     ["EMAIL_FROM", () => env.email()],
     ["COMPANY_EMAIL", () => env.companyEmail()],

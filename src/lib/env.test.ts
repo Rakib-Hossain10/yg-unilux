@@ -7,9 +7,7 @@ const ALL_KEYS = [
   "MONGODB_URI",
   "AUTH_SECRET",
   "AUTH_URL",
-  "CLOUDINARY_CLOUD_NAME",
-  "CLOUDINARY_API_KEY",
-  "CLOUDINARY_API_SECRET",
+  "CLOUDINARY_URL",
   "R2_ACCOUNT_ID",
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_ACCESS_KEY",
@@ -200,6 +198,37 @@ describe("GEO_BLOCK_ENABLED", () => {
   );
 });
 
+describe("CLOUDINARY_URL", () => {
+  it("returns the cloud name, API key and API secret", () => {
+    vi.stubEnv(
+      "CLOUDINARY_URL",
+      "cloudinary://123456789012345:test_secret_0000@demo-cloud",
+    );
+    expect(env.cloudinary()).toEqual({
+      cloudName: "demo-cloud",
+      apiKey: "123456789012345",
+      apiSecret: "test_secret_0000",
+    });
+  });
+
+  it("names CLOUDINARY_URL when it is missing", () => {
+    const error = captureEnvError(() => env.cloudinary());
+    expect(error.variables).toEqual(["CLOUDINARY_URL"]);
+  });
+
+  it.each([
+    ["the whole KEY=value line", "CLOUDINARY_URL=cloudinary://1:abc@demo"],
+    ["a bare cloud name", "demo-cloud"],
+  ])("rejects %s and shows the expected format", (_label, value) => {
+    vi.stubEnv("CLOUDINARY_URL", value);
+    const error = captureEnvError(() => env.cloudinary());
+    expect(error.message).toContain("CLOUDINARY_URL: invalid");
+    expect(error.message).toContain(
+      "cloudinary://<api_key>:<api_secret>@<cloud_name>",
+    );
+  });
+});
+
 describe("secrecy", () => {
   it.each([
     [
@@ -216,6 +245,12 @@ describe("secrecy", () => {
     ],
     ["SITE_URL", "Sup3rS3cret", () => env.siteUrl()],
     ["GEO_BLOCK_ENABLED", "Sup3rS3cret", () => env.geoBlockEnabled()],
+    [
+      // Well-formed apart from the port, so the secret part is realistic.
+      "CLOUDINARY_URL",
+      "cloudinary://123456789012345:Sup3rS3cretApiSecret@demo:443",
+      () => env.cloudinary(),
+    ],
   ])("never puts the value of %s in the error", (key, value, read) => {
     vi.stubEnv(key, value);
     const error = captureEnvError(read);
