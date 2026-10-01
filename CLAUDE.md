@@ -8,8 +8,8 @@ English only — no i18n library, no language switcher, no `[locale]` routes.
 ## Stack
 - Next.js (App Router) + TypeScript, Tailwind CSS, shadcn/ui (admin)
 - Motion: GSAP + ScrollTrigger, Lenis smooth scroll, Motion (Framer Motion)
-- MongoDB Atlas + Mongoose
-- Auth — credentials only, role stored in session, NO public sign-up. Library choice pending (Auth.js is security-fixes-only upstream); see doc/tasks.md
+- MongoDB Atlas + Mongoose 9 + the official `mongodb` driver pinned to Mongoose's own range (`~7.6`) so there is ONE driver copy (ADR 0017; a test enforces it)
+- Auth: Better Auth (ADR 0017) — email/password only with `disableSignUp`, admin plugin (roles `admin`/`customer`, `createUser`, `banUser`, `setUserPassword`), MongoDB adapter on Mongoose's connection, database sessions, argon2id, reset emails via Resend, telemetry off. Read the installed `better-auth` docs/types before writing auth code.
 - Cloudinary — public product images only
 - Private files (.xlsx datasheets, whistleblower attachments): Cloudflare R2 private bucket, presigned URLs, always through `src/lib/storage.ts` (ADR 0009)
 - Resend (email), MongoDB Atlas Search (Atlas in every environment, regex fallback only if `$search` fails — ADR 0006), React Hook Form + Zod
@@ -66,7 +66,8 @@ doc/                 tasks.md (tracker) + decisions/ (ADRs)
 - All text is plain English strings.
 - Datasheets are their own collection (ADR 0001): `datasheets` = storage key, file name, size, mime type, updatedAt, uploadedBy. Products reference it with `datasheetId`; one file can be attached to many products (e.g. a whole family sheet). Replacing a file keeps the storage key. Deleting a datasheet still used by products is blocked. Same file for every approved customer. Accept .xlsx only (check file signature, not just extension), max 10 MB. No `datasheetId` → show "Datasheet coming soon".
 - Customer access: one approval unlocks ALL datasheets. `user.accessExpiresAt` is set by the admin at account creation/approval (3/6/12 months, custom date, or null = no expiry) and can be extended later. Expired → login works but downloads are locked with "Access expired — contact us". Daily cron emails customers 7 days before expiry.
-- Collections (11): products, categories, areas, users, accessRequests, downloadLogs, datasheets, leaders, siteContent, whistleblowerCases, auditLog. Plus the internal `loginAttempts` (TTL, rate limiting).
+- Collections (11): products, categories, areas, users, accessRequests, downloadLogs, datasheets, leaders, siteContent, whistleblowerCases, auditLog. Plus the internal `loginAttempts` (TTL, per-email rate limiting).
+- Better Auth owns `users`, `sessions`, `accounts`, `verifications`, `rateLimits` (raw driver). Mongoose code never writes them; any Mongoose model over `users` is read-only. User fields we add via `additionalFields` (`input: false`): `mustChangePassword`, `accessExpiresAt`, `company`, `country`. Blocking = Better Auth `banned`/`banExpires` (replaces a custom `status`).
 
 ## Roles
 Only two: `admin` and `customer` (keep the `role` field so a second admin can be added later without code changes).
@@ -76,10 +77,10 @@ Only two: `admin` and `customer` (keep the `role` field so a second admin can be
 
 ## Security rules — never break these
 1. A datasheet .xlsx is NEVER in `/public` and NEVER behind a public URL.
-2. Datasheets are served only via `/api/datasheet/[productId]`: check session → role=customer or admin → status active → not expired → resolve `datasheetId` → return a short-lived (~60 s) R2 presigned URL → write a downloadLogs entry (user, product, datasheet) → `Cache-Control: private, no-store`.
+2. Datasheets are served only via `/api/datasheet/[productId]`: check session (from the database) → role=customer or admin → not banned (Better Auth `banned`/`banExpires`) → `accessExpiresAt` null or in the future → resolve `datasheetId` → return a short-lived (~60 s) R2 presigned URL → write a downloadLogs entry (user, product, datasheet) → `Cache-Control: private, no-store`.
 3. Every admin page AND every admin API route and server action checks the role on the server (`requireAdmin()`). Hiding a button is not access control; `proxy.ts` is never the only guard.
 4. No self-registration. Accounts are created by the admin (manually or by approving an access request).
-5. Passwords hashed (argon2id preferred, bcrypt fallback); login and password-reset rate-limited per email AND per IP with a MongoDB TTL counter (ADR 0004); new accounts have `mustChangePassword: true`.
+5. Passwords hashed with argon2id (Better Auth `password.hash/verify`); login and password-reset rate-limited per IP (Better Auth `rateLimit`, `storage: "database"`) AND per email (our MongoDB TTL counter, ADR 0004); public sign-up disabled (`disableSignUp`); new accounts have `mustChangePassword: true` and are redirected to change it. Admin checks and the datasheet route read the session from the database, never only from a cookie cache.
 6. Geo-block: `x-vercel-ip-country === 'CN'` → rewrite to `/blocked` (403), toggled ONLY by the `GEO_BLOCK_ENABLED` env var (not an admin setting — ADR 0003). Block ONLY `CN` — never HK, MO or TW. Applies to the whole site including `/admin` (client team uses a VPN) unless told otherwise. Local dev has no country header, so it does not block locally.
 7. Whistleblower: named reports = mailto the company email (`COMPANY_EMAIL` env / admin setting). Anonymous reports: never store IP (and never apply IP rate limiting on these routes), no analytics on those pages, strip EXIF from uploads with `sharp`, encrypt report text + messages at rest with AES-256-GCM and a stored `keyVersion` (key `WHISTLEBLOWER_ENC_KEY`; losing it makes data unreadable — ADR 0005); alert email to the company email contains no report content.
 8. Validate every form and API input with Zod on the server.

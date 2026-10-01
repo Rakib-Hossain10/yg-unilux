@@ -3,7 +3,7 @@
 Working tracker for the YG UniLUX build. Update it at the end of every session: tick finished items, add new ones, and move "Current focus".
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
-**Current focus:** Phase 1 — Foundations (blocked on: auth library decision, `MONGODB_URI`)
+**Current focus:** Phase 1 — Foundations (ready: auth decided in ADR 0017, `MONGODB_URI` set by user)
 **Working method:** plan mode → approve → small commits on a `phase-N` branch → lint + typecheck + tests + build green → security check against CLAUDE.md → PR → merge → tick here.
 
 ---
@@ -26,7 +26,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Scaffold Next.js 16.3.7 (TS, App Router, `src/`, Tailwind 4, ESLint, `@/*`) with placeholder page
 - [x] Read installed Next docs for caching, `proxy.ts` and dynamic APIs; finalised ADR 0008 + 0007
 - [x] Install dependencies (ADR 0011): all except the auth library
-- [ ] **Decide the auth library** (Auth.js is security-fixes-only upstream; Better Auth recommended upstream) — blocks Phase 1 auth; new ADR
+- [x] **Decide the auth library**: Better Auth 1.7.7 + `mongodb@~7.6` (one shared driver) — ADR 0017
 - [x] Config: strict tsconfig, Prettier, ESLint (bans `NEXT_PUBLIC_*`), Vitest, Playwright, npm scripts
 - [x] `src/lib/env.ts` (Zod, server-only, lazy per feature, 43 tests) + `.env.example`; `.env*.local` gitignored
 - [x] Update CLAUDE.md: 11 collections, `datasheetId`, `proxy.ts`, caching + no-restricted-data-in-cache, rate limit, keys, secrets, R2, npm/Vitest/Playwright
@@ -38,12 +38,12 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
 ## Between phases
 - [x] `CLOUDINARY_URL` replaces the three Cloudinary variables; next/image limited to our cloud — ADR 0016 (branch `chore/cloudinary-url`)
-- [ ] Decide: keep or drop the direct `mongodb` dependency the user added (Mongoose already bundles the driver)
+- [x] Direct `mongodb` dependency: needed by Better Auth's adapter; pinned to Mongoose's range `~7.6` so npm dedupes to one copy (test + Dependabot ignore) — ADR 0017
 
 ## Phase 1 — Foundations
 - [ ] `lib/db.ts` cached global Mongoose connection
 - [ ] 11 Mongoose models + `loginAttempts` (TTL); indexes per ADR 0008
-- [ ] `lib/auth.ts` Auth.js credentials, role/status/expiry/mustChangePassword in session
+- [ ] `lib/auth.ts` with Better Auth per ADR 0017: Mongo adapter on Mongoose's client, `disableSignUp`, admin plugin (admin/customer), additionalFields (mustChangePassword, accessExpiresAt, company, country), argon2id, Resend reset, DB rate limit + per-email hook, telemetry off; route `app/api/auth/[...all]`; fix the `env.auth()` comment
 - [ ] `lib/rate-limit.ts` (per email + per IP, TTL) — ADR 0004
 - [ ] `lib/permissions.ts`: `requireAdmin`, `requireCustomerAccess`, `canSeeRestricted`
 - [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
@@ -135,6 +135,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-01 — Auth decided: Better Auth (ADR 0017) after checking current Better Auth and Auth.js docs; installed better-auth 1.7.7 + mongodb ~7.6 (deduped with Mongoose); CLAUDE.md, ADR 0004/0011 updated. User rotated the Cloudinary secret.
 - 2026-10-01 — Phase 0 merged (PR #1). Review hook re-enabled. Switched to a single `CLOUDINARY_URL` (ADR 0016) and fixed the user's next.config edit (missing comma, unrestricted Cloudinary host).
 - 2026-09-30 — Read all docs, settled ADRs 0001–0012, approved roadmap, created `doc/`.
 - 2026-09-30 — Installed 20 skills, rejected `code-review` (mattpocock) and `deploy-to-vercel`; created 6 subagents (ADR 0013).

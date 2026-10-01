@@ -32,6 +32,15 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/react-dom"
         update-types: ["version-update:semver-major"]
+      # The mongodb driver must stay in Mongoose's own range (ADR 0017) so
+      # Mongoose, Better Auth and our code share ONE driver copy. Bump it by
+      # hand together with mongoose; patch updates are still allowed.
+      - dependency-name: mongodb
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
+      # Auth library majors are upgraded by hand after reading the changelog.
+      - dependency-name: better-auth
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
