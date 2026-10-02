@@ -1,6 +1,7 @@
 // The internal `loginAttempts` collection (ADR 0004): one counter per rate-limit
-// key, e.g. "email:<normalised email>", that MongoDB deletes by itself when
-// its window ends. The per-IP limit is Better Auth's own (ADR 0017).
+// key, e.g. "email-login:<HMAC of the email>", that MongoDB deletes by itself
+// when its window ends; keys never hold a plain email (src/lib/rate-limit.ts).
+// The per-IP limit is Better Auth's own (ADR 0017).
 
 import type { Types } from "mongoose";
 
@@ -13,7 +14,7 @@ const { Schema } = mongoose;
 /** A rate-limit counter as stored (and as returned by `lean()`). */
 export interface LoginAttempt {
   _id: Types.ObjectId;
-  /** What is being counted, e.g. "email:jane@example.com". */
+  /** What is being counted: "<namespace>:<64 hex HMAC>", never a plain email. */
   key: string;
   /** Attempts so far in the current window. */
   count: number;
@@ -36,7 +37,7 @@ const loginAttemptSchema = new Schema<LoginAttempt>(
     },
     expiresAt: { type: Date, required: true },
   },
-  // Counters are updated atomically by src/lib/rate-limit.ts (task 4); no
+  // Counters are updated atomically by src/lib/rate-limit.ts; no
   // timestamps or version key needed.
   {
     collection: "loginAttempts",
