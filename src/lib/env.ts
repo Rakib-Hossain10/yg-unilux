@@ -240,6 +240,30 @@ export const env = {
   },
 
   /**
+   * Dedicated key for scrambling client IPs in the sign-in rate limit
+   * (ADR 0022). Separate from AUTH_SECRET so the session-signing secret never
+   * touches IP data; rotating it only resets 15-minute counters.
+   */
+  ipHashSecret(): string {
+    const feature = "sign-in rate limiting by network";
+    const secret = read(feature, {
+      IP_HASH_SECRET: { rule: longSecret },
+    }).IP_HASH_SECRET;
+    // Reusing AUTH_SECRET would defeat the point of a dedicated key. Only the
+    // variable name goes into the error, never either value.
+    if (secret === process.env.AUTH_SECRET) {
+      throw new EnvError(feature, [
+        {
+          kind: "invalid",
+          variable: "IP_HASH_SECRET",
+          expected: "a secret different from AUTH_SECRET",
+        },
+      ]);
+    }
+    return secret;
+  },
+
+  /**
    * True in production builds (Vercel Production and Preview both run with
    * NODE_ENV=production). Not a secret and not validated: Next.js sets it.
    */

@@ -20,6 +20,7 @@ const ALL_KEYS = [
   "GEO_BLOCK_ENABLED",
   "WHISTLEBLOWER_ENC_KEY",
   "CRON_SECRET",
+  "IP_HASH_SECRET",
   "SITE_URL",
 ] as const;
 
@@ -55,6 +56,7 @@ describe("whitespace", () => {
     ["RESEND_API_KEY", () => env.email()],
     ["AUTH_SECRET", () => env.auth()],
     ["CRON_SECRET", () => env.cronSecret()],
+    ["IP_HASH_SECRET", () => env.ipHashSecret()],
   ])("rejects a whitespace-only %s", (key, read) => {
     vi.stubEnv(key, " ".repeat(40));
     expect(envErrorOf(read).variables).toContain(key);

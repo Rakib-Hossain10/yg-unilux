@@ -1,7 +1,6 @@
-// The internal `loginAttempts` collection (ADR 0004): one counter per rate-limit
-// key, e.g. "email-login:<HMAC of the email>", that MongoDB deletes by itself
-// when its window ends; keys never hold a plain email (src/lib/rate-limit.ts).
-// The per-IP limit is Better Auth's own (ADR 0017).
+// The internal `loginAttempts` collection (ADR 0004, 0020, 0022): one counter
+// per rate-limit key, e.g. "email-reset:<HMAC of the email>", that MongoDB
+// deletes by itself when it expires. Keys never hold a plain email or IP.
 
 import type { Types } from "mongoose";
 
@@ -14,12 +13,19 @@ const { Schema } = mongoose;
 /** A rate-limit counter as stored (and as returned by `lean()`). */
 export interface LoginAttempt {
   _id: Types.ObjectId;
-  /** What is being counted: "<namespace>:<64 hex HMAC>", never a plain email. */
+  /**
+   * What is being counted: "<namespace>:<64 hex HMAC>", or for a per-network
+   * counter "email-ip-login:<email HMAC>.<network HMAC>". Never a plain email or IP.
+   */
   key: string;
   /** Attempts so far in the current window. */
   count: number;
   /** When the window ends; MongoDB removes the document soon after. */
   expiresAt: Date;
+  /** Slow-down counters only: the earliest time the next attempt is allowed. */
+  nextAllowedAt?: Date;
+  /** Whether the most recent attempt was let through (set by every counter). */
+  lastAttemptAllowed?: boolean;
 }
 
 const loginAttemptSchema = new Schema<LoginAttempt>(
@@ -36,8 +42,13 @@ const loginAttemptSchema = new Schema<LoginAttempt>(
       },
     },
     expiresAt: { type: Date, required: true },
+    // nextAllowedAt: slow-down counters only. lastAttemptAllowed: every counter
+    // stores its latest decision (src/lib/rate-limit.ts).
+    nextAllowedAt: { type: Date },
+    lastAttemptAllowed: { type: Boolean },
   },
-  // Counters are updated atomically by src/lib/rate-limit.ts; no
+  // Counters are updated atomically by src/lib/rate-limit.ts and
+  // src/lib/sign-in-limit.ts; no
   // timestamps or version key needed.
   {
     collection: "loginAttempts",

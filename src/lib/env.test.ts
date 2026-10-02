@@ -18,6 +18,7 @@ const ALL_KEYS = [
   "GEO_BLOCK_ENABLED",
   "WHISTLEBLOWER_ENC_KEY",
   "CRON_SECRET",
+  "IP_HASH_SECRET",
   "SITE_URL",
 ] as const;
 
@@ -116,6 +117,27 @@ describe("valid values", () => {
     expect(decoded.equals(key)).toBe(true);
   });
 
+  it("returns IP_HASH_SECRET and reports it by name when missing", () => {
+    expect(captureEnvError(() => env.ipHashSecret()).variables).toEqual([
+      "IP_HASH_SECRET",
+    ]);
+    vi.stubEnv("IP_HASH_SECRET", "i".repeat(32));
+    expect(env.ipHashSecret()).toBe("i".repeat(32));
+  });
+
+  it("rejects an IP_HASH_SECRET equal to AUTH_SECRET without echoing it", () => {
+    const shared = "Sup3rS3cretSharedBetweenBothVars!!";
+    vi.stubEnv("IP_HASH_SECRET", shared);
+    vi.stubEnv("AUTH_SECRET", shared);
+    const error = captureEnvError(() => env.ipHashSecret());
+    expect(error.variables).toEqual(["IP_HASH_SECRET"]);
+    expect(error.message).toMatch(/different from AUTH_SECRET/);
+    expect(error.message).not.toContain("Sup3rS3cret");
+
+    vi.stubEnv("AUTH_SECRET", `${shared}-other`);
+    expect(env.ipHashSecret()).toBe(shared);
+  });
+
   it("allows AUTH_URL to be unset (Auth.js infers it on Vercel)", () => {
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));
     expect(env.auth()).toEqual({ secret: "a".repeat(32), url: undefined });
@@ -142,6 +164,7 @@ describe("bad formats", () => {
     ["SITE_URL", "ftp://example.com", () => env.siteUrl()],
     ["COMPANY_EMAIL", "not-an-email", () => env.companyEmail()],
     ["CRON_SECRET", "short", () => env.cronSecret()],
+    ["IP_HASH_SECRET", "x".repeat(31), () => env.ipHashSecret()],
     ["WHISTLEBLOWER_ENC_KEY", "not base64 !!", () => env.whistleblowerKey()],
     [
       "WHISTLEBLOWER_ENC_KEY",
@@ -167,6 +190,7 @@ describe("surrounding whitespace", () => {
   it.each([
     ["AUTH_SECRET", ` ${"a".repeat(32)}`, () => env.auth()],
     ["CRON_SECRET", `${"c".repeat(32)}\n`, () => env.cronSecret()],
+    ["IP_HASH_SECRET", ` ${"i".repeat(32)}`, () => env.ipHashSecret()],
     ["RESEND_API_KEY", "re_live_key ", () => env.email()],
     ["R2_SECRET_ACCESS_KEY", "\tsecret", () => env.r2()],
     ["SITE_URL", "https://example.com ", () => env.siteUrl()],
@@ -259,6 +283,7 @@ describe("secrecy", () => {
     ],
     ["AUTH_SECRET", "Sup3rS3cret", () => env.auth()],
     ["CRON_SECRET", "Sup3rS3cret", () => env.cronSecret()],
+    ["IP_HASH_SECRET", "Sup3rS3cret", () => env.ipHashSecret()],
     [
       "WHISTLEBLOWER_ENC_KEY",
       "Sup3rS3cretKeyMaterial==",

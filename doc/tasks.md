@@ -52,14 +52,21 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 ## Phase 1 — Foundations
 - [x] Task 1: `lib/db.ts`, one shared `MongoClient` for Mongoose and Better Auth, strict Mongoose, `MONGODB_URI` must name the database — ADR 0018
 - [x] Task 2: 11 Mongoose models + read-only `users` + `loginAttempts` (TTL), `spec-columns.ts`, `npm run db:indexes` — ADR 0019 (8 open questions listed there)
+- [ ] Task 5 must also apply ADR 0022's 'Required in task 5' list (issue a device token on password reset, token epoch, path passed to clearSignIn, wider guard, Better Auth limiter storage, reset hardening)
 - [ ] `lib/auth.ts` with Better Auth per ADR 0017: Mongo adapter on Mongoose's client, `disableSignUp`, admin plugin (admin/customer), additionalFields (mustChangePassword, accessExpiresAt, company, country), argon2id, Resend reset, DB rate limit + per-email hook, telemetry off; route `app/api/auth/[...all]`; fix the `env.auth()` comment
 - [x] Task 3: `lib/rate-limit.ts` per-email limiter (HMAC keys, atomic window, fail closed); QA PASS — ADR 0020
   - [ ] Task 5 must: gate with `consume()`, clear on success and after password reset, generic 429, audit lockouts (ADR 0020 a/b/e/f)
   - [ ] Task 7 must: `seed:admin` clears the admin's login/reset counters
   - [ ] User decision: add per-(email + hashed IP) key against targeted lockout (ADR 0020 c)
 - [x] Task 4: `lib/email.ts` Resend sender + password-reset template; `env.isProduction()` — ADR 0021
-- [ ] Task 3b (user request 2026-10-02): per-(email + HMAC'd IP) hard limit 5/15 min + per-email progressive slow-down (no lockout); `IP_HASH_SECRET`; IP from Vercel's trusted header; TTL ≤ 15 min; never on whistleblower routes; QA — ADR 0022
-- [ ] Privacy page (Phase 7) must include the login-attempt logging line from `doc/content/privacy.md`
+- Task 3b QA (2026-10-02) FAIL → user decisions:
+  - H1: a signed **known-device cookie** (OWASP device cookies), so known devices skip the shared per-email slow-down and have their own 5/15 min limit. Polling during a wait is no longer free (no give-back).
+  - On success, clear only the caller's network counter (not the slow-down).
+  - Reset requests get the same per-network + never-zero per-email treatment in task 5.
+  - Fixes in progress: M2 wider whistleblower ESLint guard, L1 cap refusals, L2 private give-back, L3 IP_HASH_SECRET ≠ AUTH_SECRET.
+  - Task 5 note (QA M1): Better Auth's built-in limiter stores raw `ip|path` keys, so it must use HMAC'd custom storage or be turned off for these paths. Set `ipAddressHeaders: ["x-vercel-forwarded-for"]` and `ipv6Subnet: 64`.
+- [x] Task 3b: per-network limit (HMAC'd IP, `x-vercel-forwarded-for`), per-email slow-down, known-device cookie, wider whistleblower guard; QA PASS on the second review — ADR 0022
+- [ ] Privacy + cookie pages (Phase 7) must include `doc/content/privacy.md` (login-attempt line + `__Host-yg-device` cookie)
 - [ ] `lib/permissions.ts`: `requireAdmin`, `requireCustomerAccess`, `canSeeRestricted`
 - [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
   - [ ] e2e: prove whether `NextResponse.rewrite(url, { status: 403 })` keeps the 403; else return a 403 response directly
@@ -152,6 +159,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-02 — Task 3b committed after two QA rounds (FAIL → user chose a known-device cookie → PASS); ADR 0022; privacy/cookie text drafted; ADR 0004/0020 updated.
 - 2026-10-02 — Task 4 committed (Resend email sender, ADR 0021). User approved per-network limit + progressive slow-down (task 3b).
 - 2026-10-02 — Task 3 committed (per-email rate limiter); QA PASS; applied QA L1 (HKDF subkey), L2 (length cap), M1 (doc: gate with consume only); ADR 0020.
 - 2026-10-02 — Task 2 committed (models + index script); whistleblower schema hardened after review (neutral file names, size caps, MIME allow-list); ADR 0019.

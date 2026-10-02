@@ -1,5 +1,5 @@
 # 0020 — Per-email rate limiter
-- Status: Accepted (lockout mitigation (c) pending the user's answer)
+- Status: Partly superseded by ADR 0022 (sign-in now uses per-network limits, a slow-down and known devices; item (c) is resolved there). Reset requests still follow this ADR until task 5.
 - Date: 2026-10-02
 - Builds on: ADR 0004 (and its update), 0017
 

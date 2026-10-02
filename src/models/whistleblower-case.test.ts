@@ -74,6 +74,9 @@ const IDENTITY_WORDS = new Set([
   "headers",
   "referer",
   "referrer",
+  // A deny-list of identity words, not a header read: the IP-header guard
+  // (eslint.config.mjs) has nothing to protect here.
+  // eslint-disable-next-line no-restricted-syntax
   "forwarded",
 ]);
 

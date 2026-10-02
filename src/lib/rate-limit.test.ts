@@ -1,4 +1,4 @@
-// Tests for src/lib/rate-limit.ts: the per-email fixed-window limiter, run
+// Tests for src/lib/rate-limit.ts: the fixed-window counter and key builders, run
 // against a real in-memory MongoDB so the atomic update pipeline, the unique
 // index race and the expiry handling are exercised for real.
 
@@ -11,21 +11,29 @@ import { setupMemoryDb } from "../../test/helpers/memory-db";
 import { getDb, mongoose } from "./db";
 import { EnvError } from "./env";
 import {
-  LOGIN_EMAIL,
   RESET_EMAIL,
   type RateLimitKey,
   type RateLimitRule,
   RateLimitUnavailableError,
+  buildKey,
   checkLimit,
   clearAttempts,
   consume,
   emailKey,
+  hashEmail,
   recordAttempt,
+  wasLastAttemptAllowed,
 } from "./rate-limit";
 
 // A test-only secret (not a real one): 32+ characters, as env.auth() requires.
 const TEST_SECRET = "test-secret-for-rate-limit-tests-0123456789";
 const EMAIL = "jane.doe@example.com";
+
+/* A 5-per-15-minutes fixed window, the shape of the sign-in hard limit. */
+const FIVE_PER_15 = {
+  limit: 5,
+  windowSeconds: 15 * 60,
+} as const satisfies RateLimitRule;
 
 setupMemoryDb("yg_rate_limit_test");
 
@@ -44,7 +52,7 @@ beforeEach(async () => {
 async function consumeTimes(
   key: RateLimitKey,
   n: number,
-  rule: RateLimitRule = LOGIN_EMAIL,
+  rule: RateLimitRule = FIVE_PER_15,
 ) {
   const results = [];
   for (let i = 0; i < n; i++) results.push(await consume(key, rule));
@@ -53,9 +61,9 @@ async function consumeTimes(
 
 describe("emailKey", () => {
   it("maps the same email in any case or surrounding whitespace to one key", () => {
-    const key = emailKey("email-login", EMAIL);
-    expect(emailKey("email-login", "  Jane.Doe@EXAMPLE.com\n")).toBe(key);
-    expect(emailKey("email-login", "john@example.com")).not.toBe(key);
+    const key = emailKey("email-reset", EMAIL);
+    expect(emailKey("email-reset", "  Jane.Doe@EXAMPLE.com\n")).toBe(key);
+    expect(emailKey("email-reset", "john@example.com")).not.toBe(key);
   });
 
   it("is namespace + 64 hex chars and contains no part of the email", () => {
@@ -66,20 +74,20 @@ describe("emailKey", () => {
   });
 
   it("changes when AUTH_SECRET changes (rotation only resets counters)", () => {
-    const before = emailKey("email-login", EMAIL);
+    const before = emailKey("email-reset", EMAIL);
     vi.stubEnv("AUTH_SECRET", `${TEST_SECRET}-rotated`);
-    expect(emailKey("email-login", EMAIL)).not.toBe(before);
+    expect(emailKey("email-reset", EMAIL)).not.toBe(before);
   });
 
   it("throws EnvError when AUTH_SECRET is missing", () => {
     vi.stubEnv("AUTH_SECRET", undefined);
-    expect(() => emailKey("email-login", EMAIL)).toThrow(EnvError);
+    expect(() => emailKey("email-reset", EMAIL)).toThrow(EnvError);
   });
 });
 
 describe("consume", () => {
   it("allows exactly `limit` attempts, then refuses with the remaining window", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     const results = await consumeTimes(key, 6);
 
     expect(results.map((r) => r.allowed)).toEqual([
@@ -115,7 +123,7 @@ describe("consume", () => {
   });
 
   it("does not extend the window with attempts over the limit", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     await consumeTimes(key, 5);
     const end = (await LoginAttemptModel.findOne({ key }).lean())?.expiresAt;
     await consumeTimes(key, 3);
@@ -125,19 +133,19 @@ describe("consume", () => {
   });
 
   it("starts a fresh window when expiresAt has passed but TTL has not deleted the doc yet", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     await consumeTimes(key, 6);
     await LoginAttemptModel.updateOne(
       { key },
       { expiresAt: new Date(Date.now() - 1_000) },
     );
 
-    expect(await checkLimit(key, LOGIN_EMAIL)).toEqual({
+    expect(await checkLimit(key, FIVE_PER_15)).toEqual({
       allowed: true,
       remaining: 5,
       retryAfterSeconds: 0,
     });
-    const fresh = await consume(key, LOGIN_EMAIL);
+    const fresh = await consume(key, FIVE_PER_15);
     expect(fresh).toEqual({
       allowed: true,
       remaining: 4,
@@ -149,18 +157,21 @@ describe("consume", () => {
   });
 
   it("lets exactly `limit` of many parallel attempts on a new key through", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     const results = await Promise.all(
-      Array.from({ length: 25 }, () => consume(key, LOGIN_EMAIL)),
+      Array.from({ length: 25 }, () => consume(key, FIVE_PER_15)),
     );
 
-    expect(results.filter((r) => r.allowed)).toHaveLength(LOGIN_EMAIL.limit);
+    expect(results.filter((r) => r.allowed)).toHaveLength(FIVE_PER_15.limit);
     expect(await LoginAttemptModel.countDocuments({ key })).toBe(1);
-    expect((await LoginAttemptModel.findOne({ key }).lean())?.count).toBe(25);
+    // Refused attempts change nothing, so the count stops at the limit.
+    expect((await LoginAttemptModel.findOne({ key }).lean())?.count).toBe(
+      FIVE_PER_15.limit,
+    );
   });
 
   it("retries once when a concurrent upsert of the same new key wins the insert", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     const duplicate = new MongoServerError({
       message: "E11000 duplicate key error",
       code: 11000,
@@ -169,7 +180,7 @@ describe("consume", () => {
       .spyOn(mongoose.Query.prototype, "exec")
       .mockRejectedValueOnce(duplicate);
 
-    expect(await consume(key, LOGIN_EMAIL)).toEqual({
+    expect(await consume(key, FIVE_PER_15)).toEqual({
       allowed: true,
       remaining: 4,
       retryAfterSeconds: 0,
@@ -180,10 +191,10 @@ describe("consume", () => {
   it("rejects keys not built by emailKey, before touching the database", async () => {
     const exec = vi.spyOn(mongoose.Query.prototype, "exec");
     await expect(
-      consume(`email-login:${EMAIL}` as RateLimitKey, LOGIN_EMAIL),
+      consume(`email-login:${EMAIL}` as RateLimitKey, FIVE_PER_15),
     ).rejects.toThrow(TypeError);
     await expect(
-      consume(emailKey("email-login", EMAIL), { limit: 0, windowSeconds: 60 }),
+      consume(emailKey("email-reset", EMAIL), { limit: 0, windowSeconds: 60 }),
     ).rejects.toThrow(TypeError);
     expect(exec).not.toHaveBeenCalled();
   });
@@ -191,8 +202,8 @@ describe("consume", () => {
 
 describe("checkLimit", () => {
   it("is read-only and agrees with consume", async () => {
-    const key = emailKey("email-login", EMAIL);
-    expect(await checkLimit(key, LOGIN_EMAIL)).toEqual({
+    const key = emailKey("email-reset", EMAIL);
+    expect(await checkLimit(key, FIVE_PER_15)).toEqual({
       allowed: true,
       remaining: 5,
       retryAfterSeconds: 0,
@@ -200,13 +211,13 @@ describe("checkLimit", () => {
     expect(await LoginAttemptModel.countDocuments({})).toBe(0);
 
     await consumeTimes(key, 4);
-    expect(await checkLimit(key, LOGIN_EMAIL)).toMatchObject({
+    expect(await checkLimit(key, FIVE_PER_15)).toMatchObject({
       allowed: true,
       remaining: 1,
     });
-    await recordAttempt(key, LOGIN_EMAIL);
+    await recordAttempt(key, FIVE_PER_15);
 
-    const blocked = await checkLimit(key, LOGIN_EMAIL);
+    const blocked = await checkLimit(key, FIVE_PER_15);
     expect(blocked.allowed).toBe(false);
     expect(blocked.remaining).toBe(0);
     expect(blocked.retryAfterSeconds).toBeGreaterThanOrEqual(898);
@@ -216,21 +227,45 @@ describe("checkLimit", () => {
 
 describe("clearAttempts", () => {
   it("resets a key so the full limit is available again", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     await consumeTimes(key, 6);
     await clearAttempts(key);
 
     expect(await LoginAttemptModel.countDocuments({ key })).toBe(0);
-    expect(await consume(key, LOGIN_EMAIL)).toMatchObject({
+    expect(await consume(key, FIVE_PER_15)).toMatchObject({
       allowed: true,
       remaining: 4,
     });
   });
 });
 
+describe("wasLastAttemptAllowed", () => {
+  it("reports the latest decision of a live counter, false without one", async () => {
+    const key = emailKey("email-reset", EMAIL);
+    expect(await wasLastAttemptAllowed(key)).toBe(false);
+    await consumeTimes(key, 5);
+    expect(await wasLastAttemptAllowed(key)).toBe(true);
+    await consume(key, FIVE_PER_15);
+    expect(await wasLastAttemptAllowed(key)).toBe(false);
+  });
+});
+
+describe("buildKey", () => {
+  it("accepts only 64-hex digests, so a raw email or IP can't become a key", () => {
+    const digest = hashEmail(EMAIL);
+    expect(buildKey("email-ip-login", digest, "b".repeat(64))).toBe(
+      `email-ip-login:${digest}.${"b".repeat(64)}`,
+    );
+    expect(() => buildKey("email-login", EMAIL)).toThrow(TypeError);
+    expect(() => buildKey("email-ip-login", digest, "203.0.113.7")).toThrow(
+      TypeError,
+    );
+  });
+});
+
 describe("namespaces and storage", () => {
-  it("keeps login and reset counters independent for the same email", async () => {
-    const login = emailKey("email-login", EMAIL);
+  it("keeps counters in different namespaces independent for the same email", async () => {
+    const login = buildKey("email-ip-login", hashEmail(EMAIL), "a".repeat(64));
     const reset = emailKey("email-reset", EMAIL);
     await consumeTimes(login, 6);
 
@@ -238,13 +273,13 @@ describe("namespaces and storage", () => {
       allowed: true,
       remaining: 2,
     });
-    expect((await checkLimit(login, LOGIN_EMAIL)).allowed).toBe(false);
+    expect((await checkLimit(login, FIVE_PER_15)).allowed).toBe(false);
   });
 
   it("never stores the email in the raw collection", async () => {
-    await consume(emailKey("email-login", EMAIL), LOGIN_EMAIL);
+    await consume(emailKey("email-reset", EMAIL), FIVE_PER_15);
     await consume(
-      emailKey("email-reset", "  JANE.DOE@example.com "),
+      emailKey("email-reset", "  JOHN.DOE@example.com "),
       RESET_EMAIL,
     );
 
@@ -252,6 +287,7 @@ describe("namespaces and storage", () => {
     expect(raw).toHaveLength(2);
     const stored = JSON.stringify(raw).toLowerCase();
     expect(stored).not.toContain("jane");
+    expect(stored).not.toContain("john");
     expect(stored).not.toContain("example.com");
     expect(stored).not.toContain("@");
     // Only the schema's fields: no helper field left behind by the pipeline.
@@ -261,6 +297,7 @@ describe("namespaces and storage", () => {
         "count",
         "expiresAt",
         "key",
+        "lastAttemptAllowed",
       ]);
     }
   });
@@ -268,7 +305,7 @@ describe("namespaces and storage", () => {
 
 describe("database failures", () => {
   it("turn into RateLimitUnavailableError without the key in the message", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     const failure = new MongoServerError({
       message: `E11000 dup key: { key: "${key}" }`,
       code: 91,
@@ -276,9 +313,9 @@ describe("database failures", () => {
     vi.spyOn(mongoose.Query.prototype, "exec").mockRejectedValue(failure);
 
     for (const call of [
-      () => consume(key, LOGIN_EMAIL),
-      () => checkLimit(key, LOGIN_EMAIL),
-      () => recordAttempt(key, LOGIN_EMAIL),
+      () => consume(key, FIVE_PER_15),
+      () => checkLimit(key, FIVE_PER_15),
+      () => recordAttempt(key, FIVE_PER_15),
       () => clearAttempts(key),
     ]) {
       const error: unknown = await call().catch((e: unknown) => e);
@@ -289,11 +326,11 @@ describe("database failures", () => {
   });
 
   it("does not retry a duplicate-key error twice", async () => {
-    const key = emailKey("email-login", EMAIL);
+    const key = emailKey("email-reset", EMAIL);
     const duplicate = new MongoServerError({ message: "E11000", code: 11000 });
     vi.spyOn(mongoose.Query.prototype, "exec").mockRejectedValue(duplicate);
 
-    await expect(consume(key, LOGIN_EMAIL)).rejects.toThrow(
+    await expect(consume(key, FIVE_PER_15)).rejects.toThrow(
       RateLimitUnavailableError,
     );
   });

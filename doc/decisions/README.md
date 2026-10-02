@@ -35,5 +35,6 @@ Template:
 | [0017](0017-better-auth.md) | Better Auth (not Auth.js); one shared `mongodb` driver copy | Accepted |
 | [0018](0018-database-connection.md) | One MongoClient for Mongoose + Better Auth; strict Mongoose; explicit indexes; URI names the DB | Accepted |
 | [0019](0019-models.md) | Mongoose models: fixed spec keys, strict schemas, read-only users, whistleblower privacy limits | Accepted |
+| [0022](0022-sign-in-limits-network-device.md) | Sign-in limits: per network (HMAC'd IP), per-email slow-down, known-device cookie | Accepted |
 | [0021](0021-email-sender.md) | Resend email sender: lazy client, escaped templates, link validation, leak-free errors | Accepted |
 | [0020](0020-per-email-rate-limit.md) | Per-email limiter: HMAC keys, atomic fixed window, fail closed; lockout risk + mitigations | Accepted |
