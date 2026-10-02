@@ -57,7 +57,9 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - [ ] Task 5 must: gate with `consume()`, clear on success and after password reset, generic 429, audit lockouts (ADR 0020 a/b/e/f)
   - [ ] Task 7 must: `seed:admin` clears the admin's login/reset counters
   - [ ] User decision: add per-(email + hashed IP) key against targeted lockout (ADR 0020 c)
-- [ ] `lib/email.ts` minimal Resend sender (password-reset email)
+- [x] Task 4: `lib/email.ts` Resend sender + password-reset template; `env.isProduction()` — ADR 0021
+- [ ] Task 3b (user request 2026-10-02): per-(email + HMAC'd IP) hard limit 5/15 min + per-email progressive slow-down (no lockout); `IP_HASH_SECRET`; IP from Vercel's trusted header; TTL ≤ 15 min; never on whistleblower routes; QA — ADR 0022
+- [ ] Privacy page (Phase 7) must include the login-attempt logging line from `doc/content/privacy.md`
 - [ ] `lib/permissions.ts`: `requireAdmin`, `requireCustomerAccess`, `canSeeRestricted`
 - [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
   - [ ] e2e: prove whether `NextResponse.rewrite(url, { status: 403 })` keeps the 403; else return a 403 response directly
@@ -150,6 +152,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-02 — Task 4 committed (Resend email sender, ADR 0021). User approved per-network limit + progressive slow-down (task 3b).
 - 2026-10-02 — Task 3 committed (per-email rate limiter); QA PASS; applied QA L1 (HKDF subkey), L2 (length cap), M1 (doc: gate with consume only); ADR 0020.
 - 2026-10-02 — Task 2 committed (models + index script); whistleblower schema hardened after review (neutral file names, size caps, MIME allow-list); ADR 0019.
 - 2026-10-01 — Task 1 committed (db.ts, ADR 0018).

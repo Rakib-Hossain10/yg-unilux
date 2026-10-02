@@ -239,6 +239,14 @@ export const env = {
       .CRON_SECRET;
   },
 
+  /**
+   * True in production builds (Vercel Production and Preview both run with
+   * NODE_ENV=production). Not a secret and not validated: Next.js sets it.
+   */
+  isProduction(): boolean {
+    return process.env.NODE_ENV === "production";
+  },
+
   siteUrl(): URL {
     return new URL(
       read("absolute site URLs", { SITE_URL: { rule: httpUrl } }).SITE_URL,

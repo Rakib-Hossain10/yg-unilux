@@ -285,3 +285,15 @@ describe("secrecy", () => {
     expect(error.cause).toBeUndefined();
   });
 });
+
+describe("isProduction", () => {
+  it.each([
+    ["production", true],
+    ["development", false],
+    ["test", false],
+    [undefined, false],
+  ])("NODE_ENV=%s gives %s", (value, expected) => {
+    vi.stubEnv("NODE_ENV", value);
+    expect(env.isProduction()).toBe(expected);
+  });
+});
