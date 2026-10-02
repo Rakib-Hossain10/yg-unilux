@@ -51,7 +51,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
 ## Phase 1 — Foundations
 - [x] Task 1: `lib/db.ts`, one shared `MongoClient` for Mongoose and Better Auth, strict Mongoose, `MONGODB_URI` must name the database — ADR 0018
-- [ ] 11 Mongoose models + `loginAttempts` (TTL); indexes per ADR 0008; `scripts/sync-indexes.ts` (`npm run db:indexes`) builds them, incl. Better Auth collection indexes later (ADR 0018)
+- [x] Task 2: 11 Mongoose models + read-only `users` + `loginAttempts` (TTL), `spec-columns.ts`, `npm run db:indexes` — ADR 0019 (8 open questions listed there)
 - [ ] `lib/auth.ts` with Better Auth per ADR 0017: Mongo adapter on Mongoose's client, `disableSignUp`, admin plugin (admin/customer), additionalFields (mustChangePassword, accessExpiresAt, company, country), argon2id, Resend reset, DB rate limit + per-email hook, telemetry off; route `app/api/auth/[...all]`; fix the `env.auth()` comment
 - [ ] `lib/rate-limit.ts` (per-email TTL counter; per-IP is Better Auth's) — ADR 0004, 0017
 - [ ] `lib/email.ts` minimal Resend sender (password-reset email)
@@ -147,6 +147,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-02 — Task 2 committed (models + index script); whistleblower schema hardened after review (neutral file names, size caps, MIME allow-list); ADR 0019.
+- 2026-10-01 — Task 1 committed (db.ts, ADR 0018).
 - 2026-10-01 — Auth decided: Better Auth (ADR 0017) after checking current Better Auth and Auth.js docs; installed better-auth 1.7.7 + mongodb ~7.6 (deduped with Mongoose); CLAUDE.md, ADR 0004/0011 updated. User rotated the Cloudinary secret.
 - 2026-10-01 — Phase 0 merged (PR #1). Review hook re-enabled. Switched to a single `CLOUDINARY_URL` (ADR 0016) and fixed the user's next.config edit (missing comma, unrestricted Cloudinary host).
 - 2026-09-30 — Read all docs, settled ADRs 0001–0012, approved roadmap, created `doc/`.

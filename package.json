@@ -23,6 +23,7 @@
     "test:e2e": "playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "db:indexes": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sync-indexes.ts",
     "prepare": "husky"
   },
   "dependencies": {

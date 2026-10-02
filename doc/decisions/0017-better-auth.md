@@ -69,6 +69,6 @@ Configuration for Phase 1 (`src/lib/auth.ts`):
 ## Consequences
 - **Better Auth owns** the `users`, `sessions`, `accounts`, `verifications` and `rateLimits` collections through the raw driver. Our Mongoose code must not write to them.
   - If we need a Mongoose model for admin listings or joins, it is read-only, and its schema must mirror Better Auth's fields.
-  - `populate()` across the two worlds is not available; store and query user ids explicitly.
+  - ~~`populate()` across the two worlds is not available~~ Corrected by ADR 0019: Better Auth stores ObjectId ids, so `populate()` through the read-only users model works.
 - **Read the installed docs before writing code:** the `better-auth` package's own docs and types in `node_modules` are the reference, not memory, the same rule as for Next.js.
 - **Known follow-up:** the comment in `env.auth()` still says "Auth.js infers the URL". It gets fixed in Phase 1 together with `src/lib/auth.ts`.
