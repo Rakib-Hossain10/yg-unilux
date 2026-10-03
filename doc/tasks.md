@@ -3,7 +3,25 @@
 Working tracker for the YG UniLUX build. Update it at the end of every session: tick finished items, add new ones, and move "Current focus".
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
-**Current focus:** Phase 1 — Foundations — in progress on branch `phase-1`
+## ▶ Resume here (next session)
+- **Branch:** `phase-1` (pushed). Tasks 1–5 are done and committed. **Next: task 6** (`lib/permissions.ts`), then 7–12.
+- **QA after:** tasks 6, 7, 8, 11 and 12 (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
+- **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
+- **User must add to `.env.local`:**
+  - `AUTH_URL=http://localhost:3000` (required);
+  - `IP_HASH_SECRET` (32+ random characters, different from `AUTH_SECRET`);
+  - a database name in `MONGODB_URI` (`…mongodb.net/yg_unilux?…`).
+- **Local dev:** use `http://localhost`, not `127.0.0.1`, because the `__Host-` device cookie needs it.
+- **Open QA Lows from task 5 (do soon):**
+  - L1: limit `/change-password` per user id (e.g. 5 per 15 min), before the password check, with the same 429 body. Must land before the Phase 5 change-password UI.
+  - L2: replace the report-only full audit with a blocking audit that allowlists only GHSA-vfj7-8cjw-p6xm (a small Node script over `npm audit --json`), plus a review date.
+  - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, not use server actions; the change-password UI sends `revokeOtherSessions: true`.
+- **Must-do items carried from task 5:**
+  - task 6 uses `getSessionFromDb` and `hasRole`;
+  - task 7: `seed:admin` Zod-checks a 12+ character password and calls `clearAllForEmail`;
+  - task 8: the proxy catches `EnvError` from `geoBlockEnabled()` and fails closed.
+
+**Current focus:** Phase 1 — Foundations — in progress (tasks 1–5 done)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -53,7 +71,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Task 1: `lib/db.ts`, one shared `MongoClient` for Mongoose and Better Auth, strict Mongoose, `MONGODB_URI` must name the database — ADR 0018
 - [x] Task 2: 11 Mongoose models + read-only `users` + `loginAttempts` (TTL), `spec-columns.ts`, `npm run db:indexes` — ADR 0019 (8 open questions listed there)
 - [ ] Task 5 must also apply ADR 0022's 'Required in task 5' list (issue a device token on password reset, token epoch, path passed to clearSignIn, wider guard, Better Auth limiter storage, reset hardening)
-- [ ] `lib/auth.ts` with Better Auth per ADR 0017: Mongo adapter on Mongoose's client, `disableSignUp`, admin plugin (admin/customer), additionalFields (mustChangePassword, accessExpiresAt, company, country), argon2id, Resend reset, DB rate limit + per-email hook, telemetry off; route `app/api/auth/[...all]`; fix the `env.auth()` comment
+- [x] Task 5: Better Auth (`lib/auth.ts`, `auth-handler.ts`, `password-hash.ts`, `/api/auth/[...all]`); QA FAIL → fixed → re-review — ADR 0023
 - [x] Task 3: `lib/rate-limit.ts` per-email limiter (HMAC keys, atomic window, fail closed); QA PASS — ADR 0020
   - [ ] Task 5 must: gate with `consume()`, clear on success and after password reset, generic 429, audit lockouts (ADR 0020 a/b/e/f)
   - [ ] Task 7 must: `seed:admin` clears the admin's login/reset counters
@@ -159,6 +177,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-03 — Task 5 committed (Better Auth). QA found the /verify-password oracle, env overrides and the change-password epoch issue, all fixed. CI audit split (ADR 0015). Session ended here; resume at task 6.
 - 2026-10-02 — Task 3b committed after two QA rounds (FAIL → user chose a known-device cookie → PASS); ADR 0022; privacy/cookie text drafted; ADR 0004/0020 updated.
 - 2026-10-02 — Task 4 committed (Resend email sender, ADR 0021). User approved per-network limit + progressive slow-down (task 3b).
 - 2026-10-02 — Task 3 committed (per-email rate limiter); QA PASS; applied QA L1 (HKDF subkey), L2 (length cap), M1 (doc: gate with consume only); ADR 0020.

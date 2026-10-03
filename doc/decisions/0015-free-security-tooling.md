@@ -24,6 +24,12 @@ Dependabot alerts and version updates are free. This is our understanding as of 
 - **CodeQL: skipped.** It isn't free on private repos.
 - **Revisit** if the repo becomes public or GitHub Code Security becomes available at no cost. CodeQL would then be added as a separate workflow.
 
+## Update 2026-10-03: split audit
+- **Blocking:** `npm audit --omit=dev --audit-level=high`. High or critical advisories in anything that ships to the site always block.
+- **Report-only:** `npm audit --audit-level=high` (`continue-on-error`). This is because of GHSA-vfj7-8cjw-p6xm in `braces`: dev-only (lint tooling via `eslint-config-next`), with no patched release.
+- No override and no `audit fix --force` (that would downgrade `eslint-config-next`).
+- Re-check monthly; once `braces` is fixed upstream, the full audit can block again.
+
 ## Consequences
 - The pre-commit hook needs gitleaks installed on every developer machine (`winget install Gitleaks.Gitleaks` or `brew install gitleaks`).
 - The first scan found one false positive: the `mockToken` example in the vendored Playwright skill docs. It is ignored by fingerprint.

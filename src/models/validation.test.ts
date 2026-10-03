@@ -194,6 +194,20 @@ describe("audit log", () => {
   it("requires the actor and action", async () => {
     expect(await invalidPaths(AuditLogModel, {})).toEqual(["action", "actor"]);
   });
+
+  it("lets anonymous auth.* security events go without an actor, and only those", async () => {
+    const limited = {
+      action: "auth.rate_limited",
+      meta: { namespace: "email-ip-login", reason: "hard_limit" },
+    };
+    expect(await invalidPaths(AuditLogModel, limited)).toEqual([]);
+    expect(
+      await invalidPaths(AuditLogModel, { action: "product.update" }),
+    ).toEqual(["actor"]);
+    expect(
+      await invalidPaths(AuditLogModel, { action: "xauth.rate_limited" }),
+    ).toEqual(["actor"]);
+  });
 });
 
 describe("leaders", () => {

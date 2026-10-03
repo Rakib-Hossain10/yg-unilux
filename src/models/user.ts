@@ -19,11 +19,12 @@ const { Schema } = mongoose;
  *   converts the string id to an ObjectId on insert), so other collections
  *   store user ids as ObjectId too;
  * - dates are BSON Dates and booleans are booleans (the adapter keeps both).
- * mustChangePassword, accessExpiresAt, company and country are our own
- * `additionalFields`, configured in src/lib/auth.ts (task 5).
+ * mustChangePassword, accessExpiresAt, company, country and deviceEpoch are
+ * our own `additionalFields`, configured in src/lib/auth.ts.
  *
- * No indexes are declared here: Better Auth's indexes are created by the
- * sync-indexes script in task 5, and this model is skipped by that script.
+ * No indexes are declared here: Better Auth's indexes are created by
+ * syncBetterAuthIndexes() (src/lib/db-indexes.ts), and this model is skipped
+ * by the Mongoose index sync.
  */
 
 /** A user as stored by Better Auth (and as returned by `lean()`). */
@@ -50,6 +51,12 @@ export interface User {
   accessExpiresAt?: Date | null;
   company?: string | null;
   country?: string | null;
+  /**
+   * Known-device token epoch (ADR 0022 QA L1). Bumped on a password reset, an
+   * admin password change and a ban, which invalidates every device token
+   * issued before. Missing = 0. Never sent to the browser.
+   */
+  deviceEpoch?: number | null;
 }
 
 /** Thrown when code tries to write to Better Auth's users through Mongoose. */
@@ -82,6 +89,7 @@ const userSchema = new Schema<User>(
     accessExpiresAt: Date,
     company: String,
     country: String,
+    deviceEpoch: Number,
   },
   {
     collection: "users",

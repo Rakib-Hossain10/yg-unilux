@@ -1,5 +1,6 @@
 // The `auditLog` collection: one entry per admin write (who did what to which
-// record, and when). Entries are only ever added, so there is no updatedAt.
+// record, and when), plus anonymous "auth.*" security events such as a sign-in
+// rate limit. Entries are only ever added, so there is no updatedAt.
 
 import type { Types } from "mongoose";
 
@@ -22,8 +23,12 @@ export interface AuditTarget {
 /** An audit log entry as stored (and as returned by `lean()`). */
 export interface AuditLog {
   _id: Types.ObjectId;
-  /** The admin who made the change (Better Auth user id). */
-  actor: Types.ObjectId;
+  /**
+   * The admin who made the change (Better Auth user id). Optional only for
+   * anonymous security events ("auth.*", e.g. a sign-in rate limit), which
+   * have no signed-in actor and must not record who was targeted.
+   */
+  actor?: Types.ObjectId;
   /** What happened, e.g. "product.update". The list is set in Phase 2. */
   action: string;
   target?: AuditTarget;
@@ -51,7 +56,19 @@ const targetSchema = new Schema<AuditTarget>(
 
 const auditLogSchema = new Schema<AuditLog>(
   {
-    actor: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    actor: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      // Required for every admin write; "auth.*" security events have no actor.
+      required: [
+        function (this: { action?: unknown }) {
+          return !(
+            typeof this.action === "string" && this.action.startsWith("auth.")
+          );
+        },
+        "actor is required",
+      ],
+    },
     action: { type: String, required: true, trim: true, maxlength: 100 },
     target: targetSchema,
     meta: {

@@ -12,20 +12,15 @@ import { setupMemoryDb } from "../../test/helpers/memory-db";
 import { getDb } from "./db";
 import { issueDeviceToken } from "./device-token";
 import { EnvError } from "./env";
-import {
-  RESET_EMAIL,
-  buildKey,
-  clearAllForEmail,
-  consume,
-  emailKey,
-  hashEmail,
-} from "./rate-limit";
+import { buildKey, clearAllForEmail, hashEmail } from "./rate-limit";
 import {
   SIGN_IN_DEVICE,
   SIGN_IN_NETWORK,
   SIGN_IN_SLOWDOWN,
   type SignInGate,
+  authLimiterStorage,
   clearSignIn,
+  consumeResetRequest,
   consumeSignIn,
 } from "./sign-in-limit";
 
@@ -88,7 +83,9 @@ const ALLOWED: SignInGate = {
   allowed: true,
   retryAfterSeconds: 0,
   audit: null,
+  path: "network",
 };
+const VIA_DEVICE: SignInGate = { ...ALLOWED, path: "device" };
 
 describe("hard limit per (email + network)", () => {
   it("allows 5 attempts from one network, then refuses for the rest of the 15 minutes", async () => {
@@ -151,6 +148,7 @@ describe("per-email slow-down", () => {
       allowed: false,
       retryAfterSeconds: 2,
       audit: { namespace: "email-login", reason: "slowdown" },
+      path: null,
     });
   });
 
@@ -268,6 +266,7 @@ describe("results", () => {
       expect(Object.keys(r).sort()).toEqual([
         "allowed",
         "audit",
+        "path",
         "retryAfterSeconds",
       ]);
       const text = JSON.stringify(r);
@@ -281,7 +280,12 @@ describe("results", () => {
 
 /** One attempt from `ip` carrying a device token. */
 const withToken = (token: string, ip?: string, email = EMAIL) =>
-  consumeSignIn({ email, headers: from(ip), deviceToken: token });
+  consumeSignIn({
+    email,
+    headers: from(ip),
+    deviceToken: token,
+    deviceEpoch: 0,
+  });
 
 const deviceDocs = (email = EMAIL) =>
   LoginAttemptModel.find({
@@ -305,24 +309,25 @@ describe("known device (device token)", () => {
     const slowBefore = await slowState();
     const networksBefore = await networkDocs();
 
-    const token = issueDeviceToken(EMAIL).value;
-    expect(await withToken(token, net(1))).toEqual(ALLOWED);
+    const token = issueDeviceToken(EMAIL, 0).value;
+    expect(await withToken(token, net(1))).toEqual(VIA_DEVICE);
     expect(await slowState()).toEqual(slowBefore);
     expect(await networkDocs()).toEqual(networksBefore);
   });
 
   it("allows 5 attempts per 15 minutes, then treats the token as untrusted for the window", async () => {
-    const token = issueDeviceToken(EMAIL).value;
+    const token = issueDeviceToken(EMAIL, 0).value;
     for (let i = 0; i < 5; i++) await attempt(net(1)); // network 1 is used up
     const viaDevice = [];
     for (let i = 0; i < 5; i++) viaDevice.push(await withToken(token, net(1)));
-    expect(viaDevice).toEqual(Array(5).fill(ALLOWED));
+    expect(viaDevice).toEqual(Array(5).fill(VIA_DEVICE));
 
     // 6th: the device limit is used up, so the untrusted path decides.
     expect(await withToken(token, net(1))).toEqual({
       allowed: false,
       retryAfterSeconds: expect.any(Number) as number,
       audit: { namespace: "email-ip-login", reason: "hard_limit" },
+      path: null,
     });
     // From a fresh network the untrusted path lets it through.
     expect(await withToken(token, net(2))).toEqual(ALLOWED);
@@ -331,8 +336,8 @@ describe("known device (device token)", () => {
   });
 
   it("falls back to the untrusted path for a token of another email or a tampered one", async () => {
-    const other = issueDeviceToken("other@example.com").value;
-    const mine = issueDeviceToken(EMAIL).value;
+    const other = issueDeviceToken("other@example.com", 0).value;
+    const mine = issueDeviceToken(EMAIL, 0).value;
     const tampered = `${mine.slice(0, 5)}${mine[5] === "A" ? "B" : "A"}${mine.slice(6)}`;
     for (const token of [other, tampered, "garbage", ""]) {
       await withToken(token, net(1));
@@ -342,7 +347,7 @@ describe("known device (device token)", () => {
   });
 
   it("lets exactly 5 of 40 parallel attempts through the device path", async () => {
-    const token = issueDeviceToken(EMAIL).value;
+    const token = issueDeviceToken(EMAIL, 0).value;
     for (let i = 0; i < 5; i++) await attempt(net(1)); // untrusted path closed
     const results = await Promise.all(
       Array.from({ length: 40 }, () => withToken(token, net(1))),
@@ -352,7 +357,7 @@ describe("known device (device token)", () => {
   });
 
   it("stores only HMAC/hash keys for devices, expiring within 15 minutes", async () => {
-    const token = issueDeviceToken(EMAIL).value;
+    const token = issueDeviceToken(EMAIL, 0).value;
     await withToken(token, net(1));
     const checkedAt = Date.now();
     const docs = await deviceDocs();
@@ -371,38 +376,49 @@ describe("known device (device token)", () => {
 });
 
 describe("clearing", () => {
-  it("clearSignIn with a working device token forgets only the device counter", async () => {
-    const token = issueDeviceToken(EMAIL).value;
+  it("clearSignIn on the device path forgets only the device counter", async () => {
+    const token = issueDeviceToken(EMAIL, 0).value;
     await attempts(3, net(1));
-    await withToken(token, net(1));
+    const gate = await withToken(token, net(1));
+    expect(gate.path).toBe("device");
     const slowBefore = await slowState();
     const networksBefore = await networkDocs();
 
-    await clearSignIn({
-      email: EMAIL,
-      headers: from(net(1)),
-      deviceToken: token,
-    });
+    await clearSignIn(
+      {
+        email: EMAIL,
+        headers: from(net(1)),
+        deviceToken: token,
+        deviceEpoch: 0,
+      },
+      "device",
+    );
     expect(await deviceDocs()).toHaveLength(0);
     expect(await networkDocs()).toEqual(networksBefore);
     expect(await slowState()).toEqual(slowBefore);
   });
 
   it("clearSignIn after a device fell through forgets the network counter instead", async () => {
-    const token = issueDeviceToken(EMAIL).value;
-    for (let i = 0; i < 6; i++) await withToken(token, net(1)); // 6th is untrusted
-    await clearSignIn({
-      email: EMAIL,
-      headers: from(net(1)),
-      deviceToken: token,
-    });
+    const token = issueDeviceToken(EMAIL, 0).value;
+    let last: SignInGate | undefined;
+    for (let i = 0; i < 6; i++) last = await withToken(token, net(1)); // 6th is untrusted
+    expect(last?.path).toBe("network");
+    await clearSignIn(
+      {
+        email: EMAIL,
+        headers: from(net(1)),
+        deviceToken: token,
+        deviceEpoch: 0,
+      },
+      "network",
+    );
     expect(await networkDocs()).toHaveLength(0);
     expect((await deviceDocs())[0]?.count).toBe(SIGN_IN_DEVICE.limit);
   });
 
   it("clearAllForEmail also forgets the device counters", async () => {
-    await withToken(issueDeviceToken(EMAIL).value, net(1));
-    await withToken(issueDeviceToken(EMAIL).value, net(1));
+    await withToken(issueDeviceToken(EMAIL, 0).value, net(1));
+    await withToken(issueDeviceToken(EMAIL, 0).value, net(1));
     expect(await deviceDocs()).toHaveLength(2);
     await clearAllForEmail(EMAIL);
     expect(await deviceDocs()).toHaveLength(0);
@@ -412,7 +428,7 @@ describe("clearing", () => {
     await attempts(5, net(1));
     for (let i = 2; i <= 7; i++) await attempt(net(i));
     const slowBefore = await slowState();
-    await clearSignIn({ email: EMAIL, headers: from(net(2)) });
+    await clearSignIn({ email: EMAIL, headers: from(net(2)) }, "network");
 
     expect(await slowState()).toEqual(slowBefore);
     const left = await networkDocs();
@@ -425,7 +441,7 @@ describe("clearing", () => {
 
   it("clearAllForEmail forgets every network counter, the slow-down and the reset limit of that email only", async () => {
     for (let i = 1; i <= 12; i++) await attempts(5, net(i));
-    await consume(emailKey("email-reset", EMAIL), RESET_EMAIL);
+    await consumeResetRequest({ email: EMAIL, headers: from(net(1)) });
     await attempt(net(1), "other@example.com");
 
     await clearAllForEmail(` ${EMAIL.toUpperCase()} `);
@@ -539,5 +555,171 @@ describe("concurrency", () => {
     expect((await slowState())?.count).toBe(SIGN_IN_SLOWDOWN.freeAttempts);
     const units = (await networkDocs()).reduce((sum, d) => sum + d.count, 0);
     expect(units).toBe(60);
+  });
+});
+
+describe("password-reset requests", () => {
+  const reset = (ip?: string, email = EMAIL) =>
+    consumeResetRequest({ email, headers: from(ip) });
+  const resetSlowKey = () => buildKey("email-reset", hashEmail(EMAIL));
+
+  it("allows 3 from one network, then refuses for 15 minutes (hard limit)", async () => {
+    for (let i = 0; i < 3; i++)
+      expect((await reset(net(1))).allowed).toBe(true);
+    // Let the per-email throttle pass so only the network limit decides.
+    await LoginAttemptModel.updateOne(
+      { key: resetSlowKey() },
+      { nextAllowedAt: new Date(Date.now() - 1_000) },
+    );
+    const refused = await reset(net(1));
+    expect(refused).toMatchObject({
+      allowed: false,
+      audit: { namespace: "email-ip-reset", reason: "hard_limit" },
+    });
+    expect(refused.retryAfterSeconds).toBeGreaterThan(890);
+    expect(refused.retryAfterSeconds).toBeLessThanOrEqual(900);
+  });
+
+  it("per email: 3 immediately, then one per 10 minutes from any network, never zero", async () => {
+    for (let i = 1; i <= 3; i++)
+      expect((await reset(net(i))).allowed).toBe(true);
+    const waiting = await reset(net(4));
+    expect(waiting).toMatchObject({
+      allowed: false,
+      audit: { namespace: "email-reset", reason: "slowdown" },
+    });
+    expect(waiting.retryAfterSeconds).toBeGreaterThan(590);
+    expect(waiting.retryAfterSeconds).toBeLessThanOrEqual(600);
+    // Ten minutes later one more goes through, then the wait starts again.
+    await LoginAttemptModel.updateOne(
+      { key: resetSlowKey() },
+      { nextAllowedAt: new Date(Date.now() - 1_000) },
+    );
+    expect((await reset(net(5))).allowed).toBe(true);
+    expect((await reset(net(6))).allowed).toBe(false);
+  });
+
+  it("counts unknown emails exactly like known ones (same answers)", async () => {
+    const a: unknown[] = [];
+    const b: unknown[] = [];
+    for (let i = 0; i < 5; i++)
+      a.push(await reset(net(1), "known@example.com"));
+    for (let i = 0; i < 5; i++)
+      b.push(await reset(net(1), "nobody@example.com"));
+    const shape = (r: unknown) => {
+      const g = r as { allowed: boolean; audit: unknown };
+      return [g.allowed, g.audit];
+    };
+    expect(a.map(shape)).toEqual(b.map(shape));
+  });
+
+  it("stores only HMAC keys, expiring within an hour, and none equal a sign-in key", async () => {
+    await reset(net(1));
+    await attempt(net(1));
+    const checkedAt = Date.now();
+    const raw = await getDb().collection("loginAttempts").find({}).toArray();
+    const text = JSON.stringify(raw);
+    expect(text).not.toContain("198.51");
+    expect(text).not.toContain("example");
+    const resetDocs = raw.filter((d) =>
+      /^email-(ip-)?reset:/.test(String(d.key)),
+    );
+    expect(resetDocs).toHaveLength(2);
+    for (const doc of resetDocs) {
+      expect(String(doc.key)).toMatch(
+        /^email-(ip-)?reset:[0-9a-f]{64}(\.[0-9a-f]{64})?$/,
+      );
+      expect((doc.expiresAt as Date).getTime()).toBeLessThanOrEqual(
+        checkedAt + 60 * 60 * 1000 + 1_000,
+      );
+    }
+    const networkParts = raw
+      .map((d) => String(d.key).split(".")[1])
+      .filter(Boolean);
+    expect(new Set(networkParts).size).toBe(networkParts.length);
+  });
+});
+
+describe("Better Auth limiter storage", () => {
+  it("counts per key with the given window and HMACs the ip|path key", async () => {
+    const key = "203.0.113.7|/sign-in/email";
+    const rule = { window: 60, max: 2 };
+    expect(await authLimiterStorage.consume(key, rule)).toEqual({
+      allowed: true,
+      retryAfter: null,
+    });
+    await authLimiterStorage.consume(key, rule);
+    const refused = await authLimiterStorage.consume(key, rule);
+    expect(refused.allowed).toBe(false);
+    expect(refused.retryAfter).toBeGreaterThan(0);
+    expect(refused.retryAfter).toBeLessThanOrEqual(60);
+    // Another network is unaffected.
+    expect(
+      (await authLimiterStorage.consume("203.0.113.8|/sign-in/email", rule))
+        .allowed,
+    ).toBe(true);
+
+    const raw = await getDb().collection("loginAttempts").find({}).toArray();
+    expect(JSON.stringify(raw)).not.toContain("203.0.113");
+    expect(JSON.stringify(raw)).not.toContain("sign-in");
+    for (const doc of raw)
+      expect(String(doc.key)).toMatch(/^ba-limit:[0-9a-f]{64}$/);
+  });
+
+  it("refuses windows over 15 minutes and bad keys as configuration errors", async () => {
+    await expect(
+      authLimiterStorage.consume("1.2.3.4|/x", { window: 901, max: 1 }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      authLimiterStorage.consume("1.2.3.4|/x", { window: 60, max: 0 }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      authLimiterStorage.consume("", { window: 60, max: 1 }),
+    ).rejects.toThrow(TypeError);
+    expect(await LoginAttemptModel.countDocuments({})).toBe(0);
+  });
+});
+
+describe("device epoch in the gate", () => {
+  it("a token issued before an epoch bump no longer takes the device path", async () => {
+    const token = issueDeviceToken(EMAIL, 0).value;
+    const at = (deviceEpoch: number) =>
+      consumeSignIn({
+        email: EMAIL,
+        headers: from(net(1)),
+        deviceToken: token,
+        deviceEpoch,
+      });
+    expect((await at(0)).path).toBe("device");
+    expect((await at(1)).path).toBe("network");
+  });
+});
+
+describe("retention of IP-derived records", () => {
+  it("every email-ip-* and ba-limit document expires within 15 minutes; only the IP-free reset throttle lives up to an hour", async () => {
+    for (let i = 0; i < 4; i++) {
+      await attempt(net(i + 1));
+      await consumeResetRequest({ email: EMAIL, headers: from(net(i + 1)) });
+      await authLimiterStorage.consume(`${net(i + 1)}|/sign-in/email`, {
+        window: 900,
+        max: 20,
+      });
+    }
+    const checkedAt = Date.now();
+    const docs = await getDb().collection("loginAttempts").find({}).toArray();
+    const ipDerived = docs.filter((d) =>
+      /^(email-ip-|ba-limit:)/.test(String(d.key)),
+    );
+    expect(ipDerived.length).toBe(12);
+    for (const doc of ipDerived) {
+      expect(
+        (doc.expiresAt as Date).getTime(),
+        String(doc.key),
+      ).toBeLessThanOrEqual(checkedAt + FIFTEEN_MIN_MS);
+    }
+    const resetThrottle = docs.find((d) =>
+      String(d.key).startsWith("email-reset:"),
+    );
+    expect(String(resetThrottle?.key)).toMatch(/^email-reset:[0-9a-f]{64}$/);
   });
 });

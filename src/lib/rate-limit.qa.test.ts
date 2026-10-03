@@ -9,7 +9,6 @@ import { LoginAttemptModel } from "@/models/login-attempt";
 import { setupMemoryDb } from "../../test/helpers/memory-db";
 
 import {
-  RESET_EMAIL,
   type RateLimitKey,
   type RateLimitRule,
   checkLimit,
@@ -23,6 +22,12 @@ import {
 } from "./sign-in-limit";
 
 const TEST_SECRET = "qa-only-secret-for-rate-limit-tests-abcdef";
+
+/* A 3-per-hour fixed window, the shape of the reset-request network limit. */
+const THREE_PER_HOUR = {
+  limit: 3,
+  windowSeconds: 60 * 60,
+} as const satisfies RateLimitRule;
 
 /* A 5-per-15-minutes fixed window, the shape of the sign-in hard limit. */
 const FIVE_PER_15 = {
@@ -73,19 +78,19 @@ describe("concurrency", () => {
 
   it("resets an expired-but-not-deleted window exactly once under parallel load", async () => {
     const key = emailKey("email-reset", "victim@example.com");
-    for (let i = 0; i < 4; i++) await consume(key, RESET_EMAIL);
+    for (let i = 0; i < 4; i++) await consume(key, THREE_PER_HOUR);
     const old = new Date(Date.now() - 5_000);
     await LoginAttemptModel.updateOne({ key }, { expiresAt: old });
 
     const results = await Promise.all(
-      Array.from({ length: 30 }, () => consume(key, RESET_EMAIL)),
+      Array.from({ length: 30 }, () => consume(key, THREE_PER_HOUR)),
     );
 
-    expect(results.filter((r) => r.allowed)).toHaveLength(RESET_EMAIL.limit);
+    expect(results.filter((r) => r.allowed)).toHaveLength(THREE_PER_HOUR.limit);
     const doc = await LoginAttemptModel.findOne({ key }).lean();
     // One new window (refusals don't count, QA L1), not several overlapping
     // resets: those would have let more than `limit` through above.
-    expect(doc?.count).toBe(RESET_EMAIL.limit);
+    expect(doc?.count).toBe(THREE_PER_HOUR.limit);
     expect(doc?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 3_500_000);
   });
 });

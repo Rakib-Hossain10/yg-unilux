@@ -31,21 +31,25 @@ const processEnvImports = [
 // Whistleblower code must never see or store an IP (CLAUDE.md rule 7, ADR
 // 0005/0022): reporters stay anonymous. In any whistleblower file or folder
 // it may not import the IP reader, the rate limiters, the sign-in device
-// token or @vercel/functions
-// (alias, relative path, /index, import(), require, createRequire), and may
-// not even spell an IP header name. Lint can't see barrel re-exports or a
-// helper that imports these indirectly; Phase 8 adds a runtime test that
-// whistleblower routes write nothing to loginAttempts or rateLimits.
+// token, @vercel/functions, Better Auth or our auth modules (Better Auth reads
+// client IPs for its limiter) by alias, relative path, /index, import(),
+// require or createRequire; may not spell an IP header name; and may not log
+// or dump a whole header list. Lint can't see barrel re-exports or a helper
+// that imports these indirectly (e.g. requireAdmin() in @/lib/permissions);
+// Phase 8 adds a runtime test that whistleblower routes write nothing to
+// loginAttempts and store no IP.
 const WHISTLEBLOWER_FILES = [
   "src/**/whistleblower*",
   "src/**/whistleblower*/**",
 ];
 const IP_MODULES_MESSAGE =
-  "Whistleblower code must never read or store an IP (CLAUDE.md rule 7). Do not use client-ip, rate-limit, sign-in-limit, device-token, @vercel/functions or IP headers here.";
-const IP_MODULE_REGEX = String.raw`((^|/)(client-ip|sign-in-limit|rate-limit|device-token)(/index)?(\.[cm]?[jt]sx?)?$)|(^@vercel/functions(/|$))`;
+  "Whistleblower code must never read or store an IP (CLAUDE.md rule 7). Do not use client-ip, rate-limit, sign-in-limit, device-token, auth, Better Auth, @vercel/functions or IP headers here.";
+const IP_MODULE_REGEX = String.raw`((^|/)(client-ip|sign-in-limit|rate-limit|device-token|auth|auth-handler)(/index)?(\.[cm]?[jt]sx?)?$)|(^@vercel/functions(/|$))|(^better-auth(/|$))|(^@better-auth/)`;
 // The same match for esquery selectors, whose /regex/ can't contain "/".
-const IP_MODULE_SELECTOR_REGEX = String.raw`/(client-ip|sign-in-limit|rate-limit|device-token|@vercel.functions)/`;
+const IP_MODULE_SELECTOR_REGEX = String.raw`/(client-ip|sign-in-limit|rate-limit|device-token|@vercel.functions|better-auth|lib.auth)/`;
 const IP_HEADER_SELECTOR_REGEX = String.raw`/forwarded|x-real-ip|client-ip|true-client-ip|cf-connecting-ip/i`;
+// Something that is a whole header list: `headers`, `h.headers`, `req.headers`.
+const HEADERS_NAME = String.raw`/^(headers|requestHeaders|headerList|headersList)$/i`;
 const whistleblowerSyntax = [
   // import() only with a plain string, so the import rule can see the path.
   "ImportExpression:not([source.type='Literal'])",
@@ -56,6 +60,20 @@ const whistleblowerSyntax = [
   // Reading the header directly, e.g. headers().get("x-forwarded-for").
   `Literal[value=${IP_HEADER_SELECTOR_REGEX}]`,
   `TemplateElement[value.raw=${IP_HEADER_SELECTOR_REGEX}]`,
+  // Dumping a whole header list (QA L3): logging it, serialising it,
+  // spreading or iterating it, Object.fromEntries/Array.from over it.
+  `CallExpression[callee.object.name='console'] Identifier[name=${HEADERS_NAME}]`,
+  `CallExpression[callee.object.name='console'] MemberExpression[property.name='headers']`,
+  `CallExpression[callee.object.name='JSON'] > Identifier[name=${HEADERS_NAME}]`,
+  `CallExpression[callee.object.name='JSON'] > MemberExpression[property.name='headers']`,
+  `CallExpression[callee.property.name=/^(fromEntries|from)$/] > Identifier[name=${HEADERS_NAME}]`,
+  `CallExpression[callee.property.name=/^(fromEntries|from)$/] > MemberExpression[property.name='headers']`,
+  `SpreadElement > Identifier[name=${HEADERS_NAME}]`,
+  `SpreadElement > MemberExpression[property.name='headers']`,
+  `CallExpression[callee.property.name=/^(entries|keys|values|forEach)$/][callee.object.name=${HEADERS_NAME}]`,
+  `CallExpression[callee.property.name=/^(entries|keys|values|forEach)$/][callee.object.property.name='headers']`,
+  `ForOfStatement > Identifier.right[name=${HEADERS_NAME}]`,
+  `ForOfStatement > MemberExpression.right[property.name='headers']`,
 ].map((selector) => ({ selector, message: IP_MODULES_MESSAGE }));
 
 const eslintConfig = defineConfig([

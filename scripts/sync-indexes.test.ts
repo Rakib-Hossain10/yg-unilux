@@ -32,6 +32,11 @@ const COLLECTIONS = [
   "whistleblowerCases",
   "auditLog",
   "loginAttempts",
+  // Better Auth's collections (raw driver).
+  "users",
+  "sessions",
+  "accounts",
+  "verifications",
 ];
 
 interface RunResult {
@@ -111,7 +116,7 @@ describe("npm run db:indexes", () => {
       for (const collection of COLLECTIONS) {
         expect(result.stdout).toMatch(new RegExp(`ok\\s+${collection}\\s`));
       }
-      expect(result.stdout).toContain("Done: 11 of 11 collections ok.");
+      expect(result.stdout).toContain("Done: 15 of 15 collections ok.");
 
       // The indexes really exist in the in-memory database.
       const client = await MongoClient.connect(server.getUri());
@@ -122,6 +127,10 @@ describe("npm run db:indexes", () => {
           .indexes();
         expect(indexes.map((index) => index.name)).toEqual(
           expect.arrayContaining(["slug_1", "variants.modelNo_1"]),
+        );
+        const users = await client.db(DB_NAME).collection("users").indexes();
+        expect(users).toContainEqual(
+          expect.objectContaining({ name: "users_email_uidx", unique: true }),
         );
       } finally {
         await client.close();

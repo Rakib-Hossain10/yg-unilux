@@ -8,7 +8,11 @@ import { getDb, mongoose } from "@/lib/db";
 import { indexedModels } from "@/models";
 import { setupMemoryDb } from "../../test/helpers/memory-db";
 
-import { syncIndexes } from "./db-indexes";
+import {
+  BETTER_AUTH_INDEXES,
+  syncBetterAuthIndexes,
+  syncIndexes,
+} from "./db-indexes";
 
 setupMemoryDb("yg_indexes_test");
 
@@ -82,5 +86,43 @@ describe("syncIndexes", () => {
     const error = result && !result.ok ? result.error : "";
     expect(error).toMatch(/code 11000/);
     expect(error).not.toContain("secret.person");
+  });
+});
+
+describe("syncBetterAuthIndexes", () => {
+  it("builds Better Auth's indexes with the raw driver, idempotently", async () => {
+    const first = await syncBetterAuthIndexes(getDb());
+    const second = await syncBetterAuthIndexes(getDb());
+    expect(first.filter((r) => !r.ok)).toEqual([]);
+    expect(second).toEqual(first);
+    for (const index of BETTER_AUTH_INDEXES) {
+      const existing = await getDb().collection(index.collection).indexes();
+      expect(existing).toContainEqual(
+        expect.objectContaining({ name: index.options.name, key: index.key }),
+      );
+    }
+  });
+
+  it("enforces one account per email (case already lowered by Better Auth)", async () => {
+    await syncBetterAuthIndexes(getDb());
+    const users = getDb().collection("users");
+    await users.deleteMany({});
+    await users.insertOne({ email: "dup@example.com" });
+    await expect(users.insertOne({ email: "dup@example.com" })).rejects.toThrow(
+      /duplicate key/,
+    );
+  });
+
+  it("expires sessions and verifications by TTL", async () => {
+    await syncBetterAuthIndexes(getDb());
+    for (const name of ["sessions", "verifications"]) {
+      const indexes = await getDb().collection(name).indexes();
+      expect(indexes).toContainEqual(
+        expect.objectContaining({
+          key: { expiresAt: 1 },
+          expireAfterSeconds: 0,
+        }),
+      );
+    }
   });
 });

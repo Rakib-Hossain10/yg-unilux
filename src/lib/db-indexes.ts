@@ -1,8 +1,10 @@
-// Builds the MongoDB indexes declared in our Mongoose schemas (ADR 0018:
-// autoIndex is off, so nothing builds them on startup). Used by
-// scripts/sync-indexes.ts (`npm run db:indexes`) and by tests.
+// Builds the MongoDB indexes declared in our Mongoose schemas plus the ones
+// Better Auth's collections need (ADR 0018: autoIndex is off and Mongo has no
+// migrations). Used by scripts/sync-indexes.ts (`npm run db:indexes`) and tests.
 
 import "server-only";
+
+import type { Db } from "mongodb";
 
 import type { RegisteredModel } from "@/models";
 
@@ -107,4 +109,95 @@ function describeIndexError(error: unknown): string {
     );
   }
   return parts.join(" ");
+}
+
+/** One index on a Better Auth collection, created with the raw driver. */
+export interface BetterAuthIndex {
+  collection: "users" | "sessions" | "accounts" | "verifications";
+  key: Record<string, 1>;
+  options: { name: string; unique?: true; expireAfterSeconds?: number };
+}
+
+/*
+ * The indexes Better Auth 1.7.7 expects, from the field-level `unique` /
+ * `index` flags in @better-auth/core/dist/db/get-tables.mjs (user.email,
+ * session.token, session.userId, account.userId, verification.identifier).
+ * The MongoDB adapter's own ensureModelIndexes() builds only table-level
+ * `indexes`, of which the core schema declares none
+ * (@better-auth/mongo-adapter/dist/index.mjs:98-133), so without this list
+ * nothing would enforce a unique email. Names follow Better Auth's scheme
+ * (`<table>_<column>_uidx|idx`, core/dist/db/database-index.mjs:38). The two
+ * TTL indexes are ours: expired sessions (which hold a user agent) and spent
+ * reset tokens are deleted by MongoDB instead of lingering.
+ */
+export const BETTER_AUTH_INDEXES: readonly BetterAuthIndex[] = [
+  {
+    collection: "users",
+    key: { email: 1 },
+    options: { name: "users_email_uidx", unique: true },
+  },
+  {
+    collection: "sessions",
+    key: { token: 1 },
+    options: { name: "sessions_token_uidx", unique: true },
+  },
+  {
+    collection: "sessions",
+    key: { userId: 1 },
+    options: { name: "sessions_userId_idx" },
+  },
+  {
+    collection: "sessions",
+    key: { expiresAt: 1 },
+    options: { name: "sessions_expiresAt_ttl", expireAfterSeconds: 0 },
+  },
+  {
+    collection: "accounts",
+    key: { userId: 1 },
+    options: { name: "accounts_userId_idx" },
+  },
+  {
+    collection: "verifications",
+    key: { identifier: 1 },
+    options: { name: "verifications_identifier_idx" },
+  },
+  {
+    collection: "verifications",
+    key: { expiresAt: 1 },
+    options: { name: "verifications_expiresAt_ttl", expireAfterSeconds: 0 },
+  },
+];
+
+/**
+ * Creates Better Auth's indexes with the raw driver (never through the
+ * read-only users model), one collection after another. Like syncIndexes()
+ * it only adds indexes, and a failure on one collection is recorded while
+ * the rest still run. Expects connectDb() to have been awaited.
+ */
+export async function syncBetterAuthIndexes(
+  db: Db,
+): Promise<IndexSyncResult[]> {
+  const collections = [
+    ...new Set(BETTER_AUTH_INDEXES.map((index) => index.collection)),
+  ];
+  const results: IndexSyncResult[] = [];
+  for (const collection of collections) {
+    const base = { model: "Better Auth", collection };
+    try {
+      for (const index of BETTER_AUTH_INDEXES) {
+        if (index.collection !== collection) continue;
+        await db.collection(collection).createIndex(index.key, index.options);
+      }
+      const indexes = await db.collection(collection).indexes();
+      results.push({
+        ...base,
+        ok: true,
+        indexes: indexes.map((i) => i.name ?? JSON.stringify(i.key)),
+        collectionExists: true,
+      });
+    } catch (error) {
+      results.push({ ...base, ok: false, error: describeIndexError(error) });
+    }
+  }
+  return results;
 }

@@ -132,7 +132,14 @@ describe("CI workflow", () => {
 
   it("installs with scripts blocked and runs the high-severity audit", () => {
     expect(ci).not.toMatch(/run: npm (ci|install)(?! --ignore-scripts)/);
-    expect(ci).toMatch(/npm audit --audit-level=high/);
+    // Blocking on production dependencies: the step has no continue-on-error.
+    expect(ci).toMatch(
+      /run: npm audit --omit=dev --audit-level=high\r?\n(?!\s*continue-on-error)/,
+    );
+    // The full-tree audit still runs, report-only (dev-only `braces` advisory).
+    expect(ci).toMatch(
+      /run: npm audit --audit-level=high\r?\n\s*continue-on-error: true/,
+    );
   });
 
   it("verifies the pinned gitleaks archive checksum, fail-closed", () => {

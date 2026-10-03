@@ -11,7 +11,6 @@ import { setupMemoryDb } from "../../test/helpers/memory-db";
 import { getDb, mongoose } from "./db";
 import { EnvError } from "./env";
 import {
-  RESET_EMAIL,
   type RateLimitKey,
   type RateLimitRule,
   RateLimitUnavailableError,
@@ -22,7 +21,6 @@ import {
   emailKey,
   hashEmail,
   recordAttempt,
-  wasLastAttemptAllowed,
 } from "./rate-limit";
 
 // A test-only secret (not a real one): 32+ characters, as env.auth() requires.
@@ -33,6 +31,12 @@ const EMAIL = "jane.doe@example.com";
 const FIVE_PER_15 = {
   limit: 5,
   windowSeconds: 15 * 60,
+} as const satisfies RateLimitRule;
+
+/* A 3-per-hour fixed window, the shape of the reset-request network limit. */
+const THREE_PER_HOUR = {
+  limit: 3,
+  windowSeconds: 60 * 60,
 } as const satisfies RateLimitRule;
 
 setupMemoryDb("yg_rate_limit_test");
@@ -109,14 +113,14 @@ describe("consume", () => {
 
   it("reports retryAfterSeconds from the window's end, not from the last attempt", async () => {
     const key = emailKey("email-reset", EMAIL);
-    await consumeTimes(key, 3, RESET_EMAIL);
+    await consumeTimes(key, 3, THREE_PER_HOUR);
     // Pretend the window started 50 minutes ago: 10 minutes are left.
     await LoginAttemptModel.updateOne(
       { key },
       { expiresAt: new Date(Date.now() + 600_000) },
     );
 
-    const refused = await consume(key, RESET_EMAIL);
+    const refused = await consume(key, THREE_PER_HOUR);
     expect(refused.allowed).toBe(false);
     expect(refused.retryAfterSeconds).toBeGreaterThanOrEqual(598);
     expect(refused.retryAfterSeconds).toBeLessThanOrEqual(600);
@@ -239,17 +243,6 @@ describe("clearAttempts", () => {
   });
 });
 
-describe("wasLastAttemptAllowed", () => {
-  it("reports the latest decision of a live counter, false without one", async () => {
-    const key = emailKey("email-reset", EMAIL);
-    expect(await wasLastAttemptAllowed(key)).toBe(false);
-    await consumeTimes(key, 5);
-    expect(await wasLastAttemptAllowed(key)).toBe(true);
-    await consume(key, FIVE_PER_15);
-    expect(await wasLastAttemptAllowed(key)).toBe(false);
-  });
-});
-
 describe("buildKey", () => {
   it("accepts only 64-hex digests, so a raw email or IP can't become a key", () => {
     const digest = hashEmail(EMAIL);
@@ -269,7 +262,7 @@ describe("namespaces and storage", () => {
     const reset = emailKey("email-reset", EMAIL);
     await consumeTimes(login, 6);
 
-    expect(await consume(reset, RESET_EMAIL)).toMatchObject({
+    expect(await consume(reset, THREE_PER_HOUR)).toMatchObject({
       allowed: true,
       remaining: 2,
     });
@@ -280,7 +273,7 @@ describe("namespaces and storage", () => {
     await consume(emailKey("email-reset", EMAIL), FIVE_PER_15);
     await consume(
       emailKey("email-reset", "  JOHN.DOE@example.com "),
-      RESET_EMAIL,
+      THREE_PER_HOUR,
     );
 
     const raw = await getDb().collection("loginAttempts").find({}).toArray();

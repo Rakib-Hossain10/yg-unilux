@@ -45,6 +45,25 @@ const IMPORTS = [
   `export const ip = (h: Headers) => h.get("x-vercel-forwarded-for");`,
   `export const ip = (req: Request) => req.headers.get("x-forwarded-for");`,
   "export const ip = (h: Headers) => h.get(`x-real-ip`);",
+  // QA L3: Better Auth and our auth modules (Better Auth reads client IPs).
+  `import { betterAuth } from "better-auth"; void betterAuth;`,
+  `import { toNextJsHandler } from "better-auth/next-js"; void toNextJsHandler;`,
+  `import { APIError } from "@better-auth/core/error"; void APIError;`,
+  `import { getAuth } from "@/lib/auth"; void getAuth;`,
+  `import { getSessionFromDb } from "../../lib/auth"; void getSessionFromDb;`,
+  `import { handleAuthRequest } from "@/lib/auth-handler"; void handleAuthRequest;`,
+  `export async function f() { return import("better-auth/api"); }`,
+  // QA L3: logging or dumping a whole header list.
+  `export const f = (headers: Headers) => console.log(headers);`,
+  `export const f = (req: Request) => console.info("req", req.headers);`,
+  `export const f = (req: Request) => JSON.stringify(req.headers);`,
+  `export const f = (req: Request) => Object.fromEntries(req.headers);`,
+  `export const f = (headers: Headers) => Object.fromEntries(headers);`,
+  `export const f = (req: Request) => Array.from(req.headers);`,
+  `export const f = (req: Request) => [...req.headers];`,
+  `export const f = (req: Request) => req.headers.forEach(() => {});`,
+  `export const f = (headers: Headers) => headers.entries();`,
+  `export function f(req: Request) { for (const h of req.headers) void h; }`,
 ];
 
 const GUARDED_FILES = [
@@ -77,6 +96,15 @@ describe("ESLint whistleblower IP guard", () => {
         [],
       );
     }
+  });
+
+  it("still allows reading one ordinary header in whistleblower files", async () => {
+    expect(
+      await guardMessages(
+        "src/app/api/whistleblower/route.ts",
+        `export const f = (req: Request) => req.headers.get("content-type");`,
+      ),
+    ).toEqual([]);
   });
 
   it("keeps the global process.env ban in whistleblower files", async () => {

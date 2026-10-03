@@ -138,9 +138,14 @@ describe("valid values", () => {
     expect(env.ipHashSecret()).toBe(shared);
   });
 
-  it("allows AUTH_URL to be unset (Auth.js infers it on Vercel)", () => {
+  it("requires AUTH_URL (Better Auth would otherwise trust the request's Host)", () => {
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));
-    expect(env.auth()).toEqual({ secret: "a".repeat(32), url: undefined });
+    expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    expect(env.auth()).toEqual({
+      secret: "a".repeat(32),
+      url: "http://localhost:3000",
+    });
   });
 });
 
@@ -179,10 +184,68 @@ describe("bad formats", () => {
     expect(error.message).toMatch(/invalid/i);
   });
 
+  it.each(["1", "true", "TRUE", "yes", " 0"])(
+    "refuses to start when BETTER_AUTH_TELEMETRY is %j (it overrides telemetry: false)",
+    (value) => {
+      vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+      vi.stubEnv("AUTH_URL", "https://example.com");
+      vi.stubEnv("BETTER_AUTH_TELEMETRY", value);
+      const error = captureEnvError(() => env.auth());
+      expect(error.variables).toEqual(["BETTER_AUTH_TELEMETRY"]);
+      expect(error.message).toMatch(/telemetry/);
+    },
+  );
+
+  it.each([undefined, "", "0", "false", "FALSE"])(
+    "starts when BETTER_AUTH_TELEMETRY is %j",
+    (value) => {
+      vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+      vi.stubEnv("AUTH_URL", "https://example.com");
+      vi.stubEnv("BETTER_AUTH_TELEMETRY", value);
+      expect(env.auth().url).toBe("https://example.com");
+    },
+  );
+
+  it.each([
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_SECRETS",
+    "BETTER_AUTH_URL",
+    "BETTER_AUTH_TRUSTED_ORIGINS",
+  ])(
+    "refuses to start when %s is set (Better Auth would read it directly), naming it but not its value",
+    (variable) => {
+      vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+      vi.stubEnv("AUTH_URL", "https://example.com");
+      vi.stubEnv(variable, "Zq9Leak7Canary3Value");
+      const error = captureEnvError(() => env.auth());
+      expect(error.variables).toEqual([variable]);
+      expect(error.message).toContain(variable);
+      expect(error.message).not.toContain("Zq9Leak7Canary3Value");
+      vi.stubEnv(variable, "");
+      expect(env.auth().url).toBe("https://example.com");
+    },
+  );
+
   it("rejects AUTH_URL when set but not a URL", () => {
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));
     vi.stubEnv("AUTH_URL", "localhost:3000");
     expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+  });
+
+  it.each([
+    "https://www.example.com/",
+    "https://www.example.com/api/auth",
+    "https://www.example.com?x=1",
+    "https://www.example.com#top",
+    "https://user:pass@www.example.com",
+    "ftp://www.example.com",
+  ])("rejects AUTH_URL %j: it must be a bare http(s) origin", (value) => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    vi.stubEnv("AUTH_URL", value);
+    const error = captureEnvError(() => env.auth());
+    expect(error.variables).toEqual(["AUTH_URL"]);
+    expect(error.message).toMatch(/origin/);
+    expect(error.message).not.toContain("pass");
   });
 });
 
@@ -210,9 +273,10 @@ describe("surrounding whitespace", () => {
   });
 
   it("reports a whitespace-only optional value instead of ignoring it", () => {
-    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
-    vi.stubEnv("AUTH_URL", "  ");
-    expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+    vi.stubEnv("GEO_BLOCK_ENABLED", "  ");
+    const error = captureEnvError(() => env.geoBlockEnabled());
+    expect(error.variables).toEqual(["GEO_BLOCK_ENABLED"]);
+    expect(error.message).toMatch(/only whitespace/);
   });
 });
 

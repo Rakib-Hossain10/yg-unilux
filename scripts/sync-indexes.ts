@@ -1,5 +1,6 @@
-// CLI: builds every MongoDB index declared in src/models (ADR 0018). Run it
-// once per new database and after any index change: `npm run db:indexes`.
+// CLI: builds every MongoDB index declared in src/models plus Better Auth's
+// (ADR 0018). Run it once per new database and after any index change:
+// `npm run db:indexes`.
 // It only adds indexes (createIndexes); it never drops one.
 
 /*
@@ -16,8 +17,14 @@
 
 import process from "node:process";
 
-import { DbConnectionError, connectDb, disconnectDb, mongoose } from "@/lib/db";
-import { syncIndexes } from "@/lib/db-indexes";
+import {
+  DbConnectionError,
+  connectDb,
+  disconnectDb,
+  getDb,
+  mongoose,
+} from "@/lib/db";
+import { syncBetterAuthIndexes, syncIndexes } from "@/lib/db-indexes";
 import { EnvError } from "@/lib/env";
 import { indexedModels } from "@/models";
 
@@ -48,7 +55,11 @@ async function main(): Promise<number> {
     console.log(
       `Building indexes in database "${mongoose.connection.name}" (createIndexes; nothing is dropped)`,
     );
-    const results = await syncIndexes(indexedModels);
+    // Our Mongoose models, then Better Auth's collections (raw driver).
+    const results = [
+      ...(await syncIndexes(indexedModels)),
+      ...(await syncBetterAuthIndexes(getDb())),
+    ];
     const width = Math.max(...results.map((r) => r.collection.length));
     for (const result of results) {
       const name = result.collection.padEnd(width);

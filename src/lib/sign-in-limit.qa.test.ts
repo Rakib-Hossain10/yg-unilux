@@ -185,7 +185,7 @@ describe("'never a lockout' against an attacker with several networks", () => {
   // Regression for H1: 6 attacker networks still take every untrusted turn
   // at the 30 s cap, but the owner's known device never competes for them.
   it("the owner with a device token gets in while 6 networks take every untrusted turn", async () => {
-    const token = issueDeviceToken(EMAIL).value;
+    const token = issueDeviceToken(EMAIL, 0).value;
     // Bring the email to the 30 s cap.
     for (let i = 0; i < 15; i++) {
       await attempt(net(150 + i));
@@ -203,6 +203,7 @@ describe("'never a lockout' against an attacker with several networks", () => {
           email: EMAIL,
           headers: from("192.0.2.10"),
           deviceToken: token,
+          deviceEpoch: 0,
         });
         if (owner.allowed) ownerTurns++;
       }
@@ -241,7 +242,12 @@ describe("'never a lockout' against an attacker with several networks", () => {
 // device path.
 describe("re-review: untrusted owners and the device path", () => {
   const withToken = (deviceToken: string, ip = "192.0.2.10") =>
-    consumeSignIn({ email: EMAIL, headers: from(ip), deviceToken });
+    consumeSignIn({
+      email: EMAIL,
+      headers: from(ip),
+      deviceToken,
+      deviceEpoch: 0,
+    });
 
   async function toCap(): Promise<void> {
     for (let i = 0; i < 15; i++) {
@@ -272,8 +278,8 @@ describe("re-review: untrusted owners and the device path", () => {
 
   it("a forged, foreign-email or expired-format token never skips the slow-down", async () => {
     await burnFreeTier();
-    const other = issueDeviceToken("other@example.com").value;
-    const forged = `v1.${"A".repeat(22)}.${Math.floor(Date.now() / 1000)}.${"A".repeat(43)}`;
+    const other = issueDeviceToken("other@example.com", 0).value;
+    const forged = `v2.${"A".repeat(22)}.${Math.floor(Date.now() / 1000)}.${"A".repeat(43)}`;
     for (const t of [other, forged, "", "garbage"]) {
       const r = await withToken(t, net(Math.floor(Math.random() * 100) + 1));
       expect(r.audit?.reason).toBe("slowdown");
@@ -285,7 +291,7 @@ describe("re-review: untrusted owners and the device path", () => {
 
   it("copies of one token share one device counter (theft gives at most 5 per 15 min, from any number of networks)", async () => {
     await toCap();
-    const token = issueDeviceToken(EMAIL).value;
+    const token = issueDeviceToken(EMAIL, 0).value;
     const results = await Promise.all(
       Array.from({ length: 30 }, (_, i) => withToken(token, net(1 + i))),
     );
@@ -296,26 +302,33 @@ describe("re-review: untrusted owners and the device path", () => {
 
   it("documents that a thief with a copy of the owner's token can use up the owner's device path for the window", async () => {
     await toCap();
-    const token = issueDeviceToken(EMAIL).value;
+    const token = issueDeviceToken(EMAIL, 0).value;
     for (let i = 0; i < 5; i++) await withToken(token, net(60));
     await attempt(net(99)); // another attacker network takes the open turn
     const owner = await withToken(token, "192.0.2.10");
     expect(owner.audit?.reason).toBe("slowdown");
   });
 
-  it("clearSignIn race: a parallel attempt with the same token that fell through makes clearSignIn clear the network, not the device", async () => {
-    const token = issueDeviceToken(EMAIL).value;
-    for (let i = 0; i < 5; i++) await withToken(token); // 5th = the success
-    await withToken(token); // a parallel 6th falls through (device full)
-    await clearSignIn({
-      email: EMAIL,
-      headers: from("192.0.2.10"),
-      deviceToken: token,
-    });
-    const dev = await LoginAttemptModel.findOne({
-      key: /^email-dev-login:/,
-    }).lean();
-    // The device counter stays full although a sign-in through it succeeded.
-    expect(dev?.count).toBe(5);
+  it("clearSignIn race (QA L2): the path of the successful attempt is passed in, so a parallel attempt that fell through can't redirect the clear", async () => {
+    const token = issueDeviceToken(EMAIL, 0).value;
+    for (let i = 0; i < 4; i++) await withToken(token);
+    const success = await withToken(token); // 5th = the success
+    expect(success.path).toBe("device");
+    const parallel = await withToken(token); // a parallel 6th falls through
+    expect(parallel.path).toBe("network");
+    await clearSignIn(
+      {
+        email: EMAIL,
+        headers: from("192.0.2.10"),
+        deviceToken: token,
+        deviceEpoch: 0,
+      },
+      success.path ?? "network",
+    );
+    // The device counter of the successful sign-in is cleared, so the owner's
+    // own device never runs out after 5 successful sign-ins.
+    expect(
+      await LoginAttemptModel.countDocuments({ key: /^email-dev-login:/ }),
+    ).toBe(0);
   });
 });

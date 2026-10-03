@@ -32,25 +32,26 @@ export interface SlowdownRule {
   readonly idleResetSeconds: number;
 }
 
-/** 3 password-reset requests per email per 60 minutes. */
-export const RESET_EMAIL = {
-  limit: 3,
-  windowSeconds: 60 * 60,
-} as const satisfies RateLimitRule;
-
 /*
- * Every key namespace in the collection:
- * - "email-reset":    fixed window per email (password-reset requests);
- * - "email-login":    per-email sign-in slow-down (sign-in-limit.ts);
- * - "email-ip-login": per-(email + network) sign-in hard limit (sign-in-limit.ts);
- * - "email-dev-login": per-(email + known device) sign-in hard limit (sign-in-limit.ts).
+ * Every key namespace in the collection (the rules live in sign-in-limit.ts):
+ * - "email-login":     per-email sign-in slow-down;
+ * - "email-ip-login":  per-(email + network) sign-in hard limit;
+ * - "email-dev-login": per-(email + known device) sign-in hard limit;
+ * - "email-reset":     per-email password-reset-request throttle (slow-down);
+ * - "email-ip-reset":  per-(email + network) password-reset-request hard limit;
+ * - "ba-limit":        Better Auth's own per-network limiter (HMAC'd keys).
  * Phase 8 adds "wb-case" (keyed by case number, never by IP).
  */
 export type KeyNamespace =
-  "email-reset" | "email-login" | "email-ip-login" | "email-dev-login";
+  | "email-login"
+  | "email-ip-login"
+  | "email-dev-login"
+  | "email-reset"
+  | "email-ip-reset"
+  | "ba-limit";
 
-/** Namespaces that emailKey() builds for the fixed-window functions below. */
-export type EmailNamespace = "email-reset";
+/** Namespaces keyed by the email alone, which emailKey() builds. */
+export type EmailNamespace = "email-reset" | "email-login";
 
 /*
  * A counter key: "<namespace>:<64 hex>" or, for per-network counters,
@@ -94,7 +95,7 @@ const MAX_EMAIL_LENGTH = 254;
 /* Domain-separated HMAC key: HKDF-SHA256(AUTH_SECRET, info "yg-rate-limit-v1"). */
 function rateLimitSubkey(): Buffer {
   return Buffer.from(
-    hkdfSync("sha256", env.auth().secret, "", "yg-rate-limit-v1", 32),
+    hkdfSync("sha256", env.authSecret(), "", "yg-rate-limit-v1", 32),
   );
 }
 
@@ -478,26 +479,6 @@ export async function consumeSlowdown(
   };
 }
 
-/**
- * Read-only: was the latest attempt counted under this key let through?
- * False when there is no live counter. Lets clearSignIn() tell which path a
- * successful sign-in took; never use it as a gate.
- */
-export async function wasLastAttemptAllowed(
-  key: RateLimitKey,
-): Promise<boolean> {
-  assertKey(key);
-  const doc = await withDb("wasLastAttemptAllowed", () =>
-    LoginAttemptModel.findOne(
-      { key, $expr: { $gt: ["$expiresAt", "$$NOW"] } },
-      { _id: 0, lastAttemptAllowed: 1 },
-    )
-      .lean()
-      .exec(),
-  );
-  return doc?.lastAttemptAllowed === true;
-}
-
 /** Forgets the given counters, e.g. after a successful sign-in. */
 export async function clearAttempts(...keys: RateLimitKey[]): Promise<void> {
   keys.forEach(assertKey);
@@ -508,11 +489,11 @@ export async function clearAttempts(...keys: RateLimitKey[]): Promise<void> {
 
 /**
  * Forgets every counter of one email: the sign-in slow-down, the reset
- * limit and ALL its per-network and per-device sign-in counters (anchored
- * prefix matches on "email-ip-login:<email HMAC>." and
- * "email-dev-login:<email HMAC>.", which can use the unique key index).
- * For the CLI admin reset (task 7) and after a successful password reset
- * (task 5), so the owner of the account always gets back in.
+ * throttle and ALL its per-network and per-device counters (anchored prefix
+ * matches on "email-ip-login:<email HMAC>.", "email-dev-login:<email HMAC>."
+ * and "email-ip-reset:<email HMAC>.", which can use the unique key index).
+ * For the CLI admin reset (task 7) and after a successful password reset,
+ * so the owner of the account always gets back in.
  */
 export async function clearAllForEmail(email: string): Promise<void> {
   const digest = hashEmail(email);
@@ -521,7 +502,9 @@ export async function clearAllForEmail(email: string): Promise<void> {
     buildKey("email-reset", digest),
   ];
   // The digest is hex, so it needs no regex escaping; only the "." does.
-  const pairPrefix = new RegExp(`^email-(ip|dev)-login:${digest}\\.`);
+  const pairPrefix = new RegExp(
+    `^email-(ip-login|dev-login|ip-reset):${digest}\\.`,
+  );
   await withDb("clearAllForEmail", () =>
     LoginAttemptModel.deleteMany({
       $or: [{ key: { $in: exact } }, { key: { $regex: pairPrefix } }],

@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DbConnectionError } from "./db";
 import {
-  RESET_EMAIL,
   RateLimitUnavailableError,
   buildKey,
   checkLimit,
@@ -16,9 +15,16 @@ import {
   consumeSlowdown,
   emailKey,
   hashEmail,
-  wasLastAttemptAllowed,
 } from "./rate-limit";
-import { SIGN_IN_SLOWDOWN, clearSignIn, consumeSignIn } from "./sign-in-limit";
+import {
+  SIGN_IN_SLOWDOWN,
+  authLimiterStorage,
+  clearSignIn,
+  consumeResetRequest,
+  consumeSignIn,
+} from "./sign-in-limit";
+
+const ONE_PER_MINUTE = { limit: 1, windowSeconds: 60 } as const;
 
 vi.mock("./db", async (importOriginal) => {
   const original = await importOriginal<typeof import("./db")>();
@@ -47,8 +53,8 @@ describe("when the database is unreachable", () => {
     };
 
     for (const call of [
-      () => consume(key, RESET_EMAIL),
-      () => checkLimit(key, RESET_EMAIL),
+      () => consume(key, ONE_PER_MINUTE),
+      () => checkLimit(key, ONE_PER_MINUTE),
       () => clearAttempts(key),
       () =>
         consumeSlowdown(
@@ -56,9 +62,14 @@ describe("when the database is unreachable", () => {
           SIGN_IN_SLOWDOWN,
         ),
       () => clearAllForEmail(email),
-      () => wasLastAttemptAllowed(key),
       () => consumeSignIn(request),
-      () => clearSignIn(request),
+      () => clearSignIn(request, "network"),
+      () => consumeResetRequest(request),
+      () =>
+        authLimiterStorage.consume("203.0.113.7|/sign-in/email", {
+          window: 60,
+          max: 10,
+        }),
     ]) {
       const error: unknown = await call().catch((e: unknown) => e);
       expect(error).toBeInstanceOf(RateLimitUnavailableError);

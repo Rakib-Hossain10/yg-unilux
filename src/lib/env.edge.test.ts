@@ -39,10 +39,10 @@ beforeEach(() => {
 });
 
 describe("types", () => {
-  it("marks optional variables as possibly undefined", () => {
+  it("types required variables as defined and optional ones as possibly undefined", () => {
     expectTypeOf(env.auth).returns.toEqualTypeOf<{
       secret: string;
-      url: string | undefined;
+      url: string;
     }>();
     expectTypeOf(env.whistleblowerKey).returns.toEqualTypeOf<Buffer>();
     expectTypeOf(env.geoBlockEnabled).returns.toEqualTypeOf<boolean>();
