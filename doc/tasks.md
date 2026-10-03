@@ -4,8 +4,8 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-1` (pushed through task 5). Tasks 1–7 are done and committed. **Next: task 8**, `src/proxy.ts` (CN geo-block + coarse `/admin` redirect; ADR 0003, 0007). Then 9–12 (security headers, `/blocked` page, design shell, minimal `/login` + placeholder `/admin` + e2e).
-- **QA after:** tasks 8, 11 and 12 (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
+- **Branch:** `phase-1` (pushed through task 5). Tasks 1–8 are done and committed. **Next: task 9**, security headers in `next.config.ts` (CSP, HSTS, X-Content-Type-Options, Referrer-Policy, frame-ancestors). Then 10 (`app/blocked/page.tsx`), 11 (design tokens, fonts, header/footer shell, 404/500/forbidden), 12 (minimal `/login` + placeholder `/admin` behind `requireAdmin()` + Playwright e2e). The Phase 1 exit follows task 12.
+- **QA after:** tasks 11 and 12 (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
   - `AUTH_URL=http://localhost:3000` (required);
@@ -18,13 +18,15 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - L2: replace the report-only full audit with a blocking audit that allowlists only GHSA-vfj7-8cjw-p6xm (a small Node script over `npm audit --json`), plus a review date. `npm audit --audit-level=high` currently reports 5 highs (already known).
   - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, not use server actions; the change-password UI sends `revokeOtherSessions: true`.
 - **Must-do items carried forward:**
-  - task 8: the proxy catches `EnvError` from `geoBlockEnabled()` and fails closed.
+  - Task 9: the CSP must still allow the proxy's 403 page, which uses an inline `<style>` (ADR 0026). Either allow inline styles for it, or send the CSP header from the proxy's `blockedResponse()` with a style hash.
+  - Task 10: `/blocked` is only for direct visits and previews. Blocked visitors get the proxy's own page (`src/lib/geo.ts`), so keep the two texts in step.
+  - Task 12 e2e: assert CN → 403 (and HK/MO/TW → 200) against `next start` with `GEO_BLOCK_ENABLED=true`, plus `/admin` with no cookie → 307 to `/login`.
   - Admin pages and layouts call `requireAdmin()` at the top, outside any `<Suspense>`/`loading.tsx`, so the 403 status is real. Admin Route Handlers use `requireAdminForRoute()`. Never wrap either in `try/catch` without `unstable_rethrow` (ADR 0024).
   - The Phase 1 exit e2e test asserts `status === 403` for a customer on `/admin` (QA L3, task 6).
   - Design-shell task: add `app/forbidden.tsx` alongside the 404/500 pages.
   - Task 9+: each admin Server Action gets a test that calls it as a customer and asserts nothing changed (QA L2, task 6).
 
-**Current focus:** Phase 1 — Foundations — in progress (tasks 1–7 done)
+**Current focus:** Phase 1 — Foundations — in progress (tasks 1–8 done)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -89,9 +91,9 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Task 3b: per-network limit (HMAC'd IP, `x-vercel-forwarded-for`), per-email slow-down, known-device cookie, wider whistleblower guard; QA PASS on the second review — ADR 0022
 - [ ] Privacy + cookie pages (Phase 7) must include `doc/content/privacy.md` (login-attempt line + `__Host-yg-device` cookie)
 - [x] Task 6: `lib/permissions.ts`: `requireAdmin` (redirect / `forbidden()` 403), `requireAdminForRoute` (JSON 401/403), `requireCustomerAccess`, `canSeeRestricted`; fail closed; `authInterrupts` on; QA PASS (L1 fixed, L2/L3 carried) — ADR 0024
-- [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
-  - [ ] e2e: prove whether `NextResponse.rewrite(url, { status: 403 })` keeps the 403; else return a 403 response directly
-  - [ ] Policy for a malformed `GEO_BLOCK_ENABLED` (`env.geoBlockEnabled()` throws): catch `EnvError`, choose fail-closed vs off, and record it in an ADR (QA finding F4)
+- [x] Task 8: `src/proxy.ts` + `lib/geo.ts` + `lib/session-cookie.ts`: CN geo-block + coarse `/admin` redirect; QA PASS, L1 (matcher) fixed — ADR 0026
+  - [x] The rewrite loses the 403 (Next source), so the proxy returns its own 403 page; verified with `next start` + curl
+  - [x] A malformed `GEO_BLOCK_ENABLED` fails closed (block CN, log once) — ADR 0026
 - [ ] Security headers (CSP, HSTS, X-Content-Type-Options, Referrer-Policy, frame-ancestors) in `next.config.ts`
 - [ ] `app/blocked/page.tsx`
 - [x] Task 7: `scripts/seed-admin.ts` + `src/lib/seed-admin.ts` (`npm run seed:admin`: create, or `--reset` that ends sessions, unbans, bumps device epoch, clears counters); QA PASS, L-1..L-3 fixed — ADR 0025
@@ -166,6 +168,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Deploy via client-linked Vercel project (no third-party deploy scripts)
 - [ ] Fluid compute: check current Vercel docs for `attachDatabasePool(client)` (`@vercel/functions`); decide `waitQueueTimeoutMS` after a load test (ADR 0018)
 - [ ] Real content, Vercel Firewall CN rule, domain
+- [ ] Go-live: `GEO_BLOCK_ENABLED=true` in Production AND the Vercel Firewall CN rule active, both tested with a CN request (ADR 0026, QA L2 task 8)
 - [ ] Test every role + China block on production
 - [ ] Admin handover guide + encryption-key backup instructions
 
@@ -180,6 +183,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-03 — Task 8 committed (proxy geo-block + coarse admin redirect, ADR 0026). The proxy returns its own 403 (a rewrite loses the status); verified live. QA PASS; L1 matcher anchoring fixed; L2/I1/I2 recorded (go-live checklist, hosting dependency). Next: task 9 (security headers).
 - 2026-10-03 — Task 7 committed (seed:admin CLI, ADR 0025). QA PASS; fixed L-1 (no echo of stray args), L-2 (escape keys refused at prompt), L-3 (audit before counter clear). Atlas unreachable from this machine (SRV timeout). Next: task 8 (proxy).
 - 2026-10-03 — Task 6 committed (permissions, ADR 0024). QA PASS with 13 real-session tests; L1 fixed (a missing `mustChangePassword` now fails closed). Next: task 7 (seed:admin).
 - 2026-10-03 — Task 5 committed (Better Auth). QA found the /verify-password oracle, env overrides and the change-password epoch issue, all fixed. CI audit split (ADR 0015). Session ended here; resume at task 6.

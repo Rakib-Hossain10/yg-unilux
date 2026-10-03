@@ -41,3 +41,4 @@ Template:
 | [0023](0023-auth-implementation.md) | Better Auth implementation: lazy init, disabled paths, no IP on sessions, hashed limiter keys, device epoch | Accepted |
 | [0024](0024-permissions-and-auth-interrupts.md) | `lib/permissions.ts` access rules (fail closed, temp password unlocks nothing); `forbidden()` via `authInterrupts` | Accepted |
 | [0025](0025-seed-admin-cli.md) | `seed:admin` CLI: create / reset admin, password never in argv or files, reset ends sessions + unbans + bumps device epoch | Accepted |
+| [0026](0026-proxy-geo-block-403.md) | Proxy answers CN with its own 403 page (rewrite loses the status); malformed `GEO_BLOCK_ENABLED` fails closed; matcher skips only `_next/static` + favicon | Accepted |

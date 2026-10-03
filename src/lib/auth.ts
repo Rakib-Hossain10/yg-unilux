@@ -26,6 +26,7 @@ import {
 } from "./email";
 import { EnvError, env } from "./env";
 import { hashPassword, verifyPassword } from "./password-hash";
+import { AUTH_COOKIE_PREFIX } from "./session-cookie";
 import { RateLimitUnavailableError, clearAllForEmail } from "./rate-limit";
 import {
   type AuthLimitAudit,
@@ -454,7 +455,7 @@ export function createAuth(deps: AuthDependencies) {
       },
       // Cookie names: __Secure-yg.session_token and __Secure-yg.dont_remember
       // over https (better-auth dist/cookies/index.mjs:20-46).
-      cookiePrefix: "yg",
+      cookiePrefix: AUTH_COOKIE_PREFIX,
       useSecureCookies: env.isProduction() ? true : undefined,
       // Explicit, because Better Auth turns the origin check off by default
       // when NODE_ENV is "test" (dist/context/create-context.mjs:211); tests
