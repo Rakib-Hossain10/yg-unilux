@@ -24,6 +24,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:indexes": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sync-indexes.ts",
+    "seed:admin": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed-admin.ts",
     "prepare": "husky"
   },
   "dependencies": {
