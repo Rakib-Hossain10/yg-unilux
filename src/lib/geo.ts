@@ -5,6 +5,7 @@
 import "server-only";
 
 import { EnvError, env } from "./env";
+import { BLOCKED_PAGE_HEADERS } from "./security-headers";
 
 /** The header Vercel sets with the visitor's ISO 3166-1 alpha-2 country. */
 export const COUNTRY_HEADER = "x-vercel-ip-country";
@@ -101,6 +102,12 @@ export function blockedResponse(): Response {
   return new Response(BLOCKED_HTML, {
     status: 403,
     headers: {
+      // The proxy's own value wins over next.config headers() for the same
+      // name, so the page brings its own strict CSP etc. (ADR 0027). Spread
+      // first, so the cache rules below can never be overridden by it.
+      ...Object.fromEntries(
+        BLOCKED_PAGE_HEADERS.map(({ key, value }) => [key, value]),
+      ),
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "private, no-store",
       Vary: COUNTRY_HEADER,

@@ -112,6 +112,11 @@ describe("blockedResponse", () => {
     );
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("vary")).toBe("x-vercel-ip-country");
+    expect(response.headers.get("content-security-policy")).toMatch(
+      /^default-src 'none'/,
+    );
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     const html = await response.text();
     expect(html).toContain("not available in your region");
   });
