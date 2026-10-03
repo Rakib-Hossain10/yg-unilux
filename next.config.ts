@@ -48,6 +48,11 @@ const nextConfig: NextConfig = {
   agentRules: false,
   // Do not advertise the framework in an X-Powered-By header.
   poweredByHeader: false,
+  experimental: {
+    // Enables forbidden()/unauthorized() from next/navigation, so a signed-in
+    // non-admin gets a real 403 from requireAdmin() (ADR 0024).
+    authInterrupts: true,
+  },
 };
 
 export default nextConfig;

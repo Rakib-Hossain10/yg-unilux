@@ -39,3 +39,4 @@ Template:
 | [0021](0021-email-sender.md) | Resend email sender: lazy client, escaped templates, link validation, leak-free errors | Accepted |
 | [0022](0022-sign-in-limits-network-device.md) | Sign-in limits: per network (HMAC'd IP), per-email slow-down, known-device cookie | Accepted |
 | [0023](0023-auth-implementation.md) | Better Auth implementation: lazy init, disabled paths, no IP on sessions, hashed limiter keys, device epoch | Accepted |
+| [0024](0024-permissions-and-auth-interrupts.md) | `lib/permissions.ts` access rules (fail closed, temp password unlocks nothing); `forbidden()` via `authInterrupts` | Accepted |

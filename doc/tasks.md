@@ -4,8 +4,8 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-1` (pushed). Tasks 1–5 are done and committed. **Next: task 6** (`lib/permissions.ts`), then 7–12.
-- **QA after:** tasks 6, 7, 8, 11 and 12 (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
+- **Branch:** `phase-1` (pushed through task 5). Tasks 1–6 are done and committed. **Next: task 7**, `scripts/seed-admin.ts` (`npm run seed:admin`: create the admin, or reset the admin's password from the CLI). Then task 8 (`src/proxy.ts` geo-block + coarse `/admin` guard), then 9–12.
+- **QA after:** tasks 7, 8, 11 and 12 (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
   - `AUTH_URL=http://localhost:3000` (required);
@@ -14,14 +14,17 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Local dev:** use `http://localhost`, not `127.0.0.1`, because the `__Host-` device cookie needs it.
 - **Open QA Lows from task 5 (do soon):**
   - L1: limit `/change-password` per user id (e.g. 5 per 15 min), before the password check, with the same 429 body. Must land before the Phase 5 change-password UI.
-  - L2: replace the report-only full audit with a blocking audit that allowlists only GHSA-vfj7-8cjw-p6xm (a small Node script over `npm audit --json`), plus a review date.
+  - L2: replace the report-only full audit with a blocking audit that allowlists only GHSA-vfj7-8cjw-p6xm (a small Node script over `npm audit --json`), plus a review date. `npm audit --audit-level=high` currently reports 5 highs (already known).
   - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, not use server actions; the change-password UI sends `revokeOtherSessions: true`.
-- **Must-do items carried from task 5:**
-  - task 6 uses `getSessionFromDb` and `hasRole`;
-  - task 7: `seed:admin` Zod-checks a 12+ character password and calls `clearAllForEmail`;
+- **Must-do items carried forward:**
+  - task 7: `seed:admin` Zod-checks a 12+ character password, calls `clearAllForEmail`, and sets **`mustChangePassword: false`** explicitly (ADR 0024). Missing or `true` → `requireAdmin()` redirects to `/change-password`, which doesn't exist until Phase 5.
   - task 8: the proxy catches `EnvError` from `geoBlockEnabled()` and fails closed.
+  - Admin pages and layouts call `requireAdmin()` at the top, outside any `<Suspense>`/`loading.tsx`, so the 403 status is real. Admin Route Handlers use `requireAdminForRoute()`. Never wrap either in `try/catch` without `unstable_rethrow` (ADR 0024).
+  - The Phase 1 exit e2e test asserts `status === 403` for a customer on `/admin` (QA L3, task 6).
+  - Design-shell task: add `app/forbidden.tsx` alongside the 404/500 pages.
+  - Task 9+: each admin Server Action gets a test that calls it as a customer and asserts nothing changed (QA L2, task 6).
 
-**Current focus:** Phase 1 — Foundations — in progress (tasks 1–5 done)
+**Current focus:** Phase 1 — Foundations — in progress (tasks 1–6 done)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -85,7 +88,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - Task 5 note (QA M1): Better Auth's built-in limiter stores raw `ip|path` keys, so it must use HMAC'd custom storage or be turned off for these paths. Set `ipAddressHeaders: ["x-vercel-forwarded-for"]` and `ipv6Subnet: 64`.
 - [x] Task 3b: per-network limit (HMAC'd IP, `x-vercel-forwarded-for`), per-email slow-down, known-device cookie, wider whistleblower guard; QA PASS on the second review — ADR 0022
 - [ ] Privacy + cookie pages (Phase 7) must include `doc/content/privacy.md` (login-attempt line + `__Host-yg-device` cookie)
-- [ ] `lib/permissions.ts`: `requireAdmin`, `requireCustomerAccess`, `canSeeRestricted`
+- [x] Task 6: `lib/permissions.ts`: `requireAdmin` (redirect / `forbidden()` 403), `requireAdminForRoute` (JSON 401/403), `requireCustomerAccess`, `canSeeRestricted`; fail closed; `authInterrupts` on; QA PASS (L1 fixed, L2/L3 carried) — ADR 0024
 - [ ] `src/proxy.ts`: CN geo-block + coarse `/admin` guard — ADR 0003, 0007
   - [ ] e2e: prove whether `NextResponse.rewrite(url, { status: 403 })` keeps the 403; else return a 403 response directly
   - [ ] Policy for a malformed `GEO_BLOCK_ENABLED` (`env.geoBlockEnabled()` throws): catch `EnvError`, choose fail-closed vs off, and record it in an ADR (QA finding F4)
@@ -177,6 +180,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-03 — Task 6 committed (permissions, ADR 0024). QA PASS with 13 real-session tests; L1 fixed (a missing `mustChangePassword` now fails closed). Next: task 7 (seed:admin).
 - 2026-10-03 — Task 5 committed (Better Auth). QA found the /verify-password oracle, env overrides and the change-password epoch issue, all fixed. CI audit split (ADR 0015). Session ended here; resume at task 6.
 - 2026-10-02 — Task 3b committed after two QA rounds (FAIL → user chose a known-device cookie → PASS); ADR 0022; privacy/cookie text drafted; ADR 0004/0020 updated.
 - 2026-10-02 — Task 4 committed (Resend email sender, ADR 0021). User approved per-network limit + progressive slow-down (task 3b).
