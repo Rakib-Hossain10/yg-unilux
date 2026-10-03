@@ -103,6 +103,12 @@ Only two: `admin` and `customer` (keep the `role` field so a second admin can be
 ## Working conventions
 - Start every session by reading `doc/tasks.md` (current phase + open tasks) and `doc/decisions/README.md` (ADR index). Decisions there override older text in this file until it is updated.
 - End every session by ticking `doc/tasks.md`, adding a session-log line, and writing a new ADR in `doc/decisions/` for any design decision made.
+- After EVERY task, before its commit, rewrite the "▶ Resume here" section at the top of `doc/tasks.md`:
+  - the next task number and what it is;
+  - which upcoming tasks get a QA review;
+  - anything the user must do (e.g. env values);
+  - must-do items carried into later tasks.
+  The user may run `/clear` after any task, and a fresh session must be able to continue from that section alone.
 - Build one phase at a time; plan first, then implement. Work on a `phase-N` branch; merge to `main` only when lint, typecheck, tests, build, audit and gitleaks are green and `qa-security-reviewer` passes.
 - Subagents live in `.claude/agents/` (ADR 0013). The main session orchestrates and alone edits `doc/` and this file. Every changed source file is auto-reviewed by `code-reviewer` via hooks (ADR 0014); pause it with `.claude/reviews/.disabled` during scaffolding or bulk changes.
 - Server Components by default; `"use client"` only where interaction/animation needs it.
