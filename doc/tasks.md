@@ -4,7 +4,7 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-1` (pushed through task 5). Tasks 1–9 are done and committed. **Next: task 10**, `src/app/blocked/page.tsx` (a plain page for direct visits and previews; same text as the proxy's 403 page in `src/lib/geo.ts`). Then 11 (`app/blocked/page.tsx`), 11 (design tokens, fonts, header/footer shell, 404/500/forbidden), 12 (minimal `/login` + placeholder `/admin` behind `requireAdmin()` + Playwright e2e). The Phase 1 exit follows task 12.
+- **Branch:** `phase-1` (pushed through task 5). Tasks 1–10 are done and committed. **Next: task 11**: design tokens, the two `next/font` Google Fonts, a header shell (text logo placeholder; Product, Services, OEM/ODM, R&D, About us centred; search + account icons), a footer shell, and 404/500/forbidden pages, all in a `(site)` route group. Then 12 (minimal `/login` + placeholder `/admin` behind `requireAdmin()` + Playwright e2e). The Phase 1 exit follows task 12.
 - **QA after:** tasks 11 and 12 (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
@@ -20,14 +20,15 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Must-do items carried forward:**
   - CSP (ADR 0027): `dangerouslySetInnerHTML` only for JSON-LD (`JSON.stringify` with `<` escaped). New external hosts (Phase 2: Cloudinary upload API and R2 presigned PUT in `connect-src`) go into `src/lib/security-headers.ts` together with a note in ADR 0027.
   - Task 11: next/font self-hosts fonts (`font-src 'self'` is enough). Run a browser check for CSP violations on the new shell pages, like the one in task 9.
-  - Task 10: `/blocked` is only for direct visits and previews. Blocked visitors get the proxy's own page (`src/lib/geo.ts`), so keep the two texts in step.
+  - The blocked-page wording lives once in `BLOCKED_COPY` (`src/lib/geo.ts`), used by the proxy's 403 page and `/blocked`. Change it there only.
+  - Task 11: keep `/blocked` outside the `(site)` group (no header or footer). `/blocked` deliberately has no site chrome.
   - Task 12 e2e: assert CN → 403 (and HK/MO/TW → 200) against `next start` with `GEO_BLOCK_ENABLED=true`, plus `/admin` with no cookie → 307 to `/login`.
   - Admin pages and layouts call `requireAdmin()` at the top, outside any `<Suspense>`/`loading.tsx`, so the 403 status is real. Admin Route Handlers use `requireAdminForRoute()`. Never wrap either in `try/catch` without `unstable_rethrow` (ADR 0024).
   - The Phase 1 exit e2e test asserts `status === 403` for a customer on `/admin` (QA L3, task 6).
   - Design-shell task: add `app/forbidden.tsx` alongside the 404/500 pages.
   - Task 9+: each admin Server Action gets a test that calls it as a customer and asserts nothing changed (QA L2, task 6).
 
-**Current focus:** Phase 1 — Foundations — in progress (tasks 1–9 done)
+**Current focus:** Phase 1 — Foundations — in progress (tasks 1–10 done)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -96,7 +97,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - [x] The rewrite loses the 403 (Next source), so the proxy returns its own 403 page; verified with `next start` + curl
   - [x] A malformed `GEO_BLOCK_ENABLED` fails closed (block CN, log once) — ADR 0026
 - [x] Task 9: security headers via `src/lib/security-headers.ts` + `next.config.ts`: static CSP (inline scripts allowed; tested that nonces/SRI don't fit), HSTS, nosniff, Referrer-Policy, framing, Permissions-Policy, whistleblower no-referrer, own headers on the CN 403 — ADR 0027
-- [ ] `app/blocked/page.tsx`
+- [x] Task 10: `app/blocked/page.tsx` (static, noindex, shares `BLOCKED_COPY` with the proxy's 403 page)
 - [x] Task 7: `scripts/seed-admin.ts` + `src/lib/seed-admin.ts` (`npm run seed:admin`: create, or `--reset` that ends sessions, unbans, bumps device epoch, clears counters); QA PASS, L-1..L-3 fixed — ADR 0025
 - [ ] Design tokens, fonts, header shell, footer shell, 404/500
 - [ ] Minimal `/login` page + placeholder `/admin` page behind `requireAdmin()`; e2e: admin logs in, customer gets 403, visitor redirected
@@ -184,6 +185,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-04 — Task 10 committed (/blocked page sharing BLOCKED_COPY with the proxy 403; verified live). Next: task 11 (design shell, QA).
 - 2026-10-03 — Task 9 committed (security headers, ADR 0027). A browser test showed experimental SRI leaves App Router inline scripts blocked (hydration fails), so the CSP allows inline scripts; zero violations in prod, dev and on the 403 page. Next: task 10 (/blocked page).
 - 2026-10-03 — Task 8 committed (proxy geo-block + coarse admin redirect, ADR 0026). The proxy returns its own 403 (a rewrite loses the status); verified live. QA PASS; L1 matcher anchoring fixed; L2/I1/I2 recorded (go-live checklist, hosting dependency). Next: task 9 (security headers).
 - 2026-10-03 — Task 7 committed (seed:admin CLI, ADR 0025). QA PASS; fixed L-1 (no echo of stray args), L-2 (escape keys refused at prompt), L-3 (audit before counter clear). Atlas unreachable from this machine (SRV timeout). Next: task 8 (proxy).

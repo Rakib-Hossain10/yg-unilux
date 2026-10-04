@@ -61,6 +61,17 @@ export function shouldGeoBlock(
   return isBlockedCountry(headers) && geoBlockOn(readFlag);
 }
 
+/**
+ * The blocked page's words, shared by the proxy's 403 page below and the
+ * /blocked route (src/app/blocked/page.tsx), so the two never drift apart.
+ * Plain text only: they are inserted into raw HTML here.
+ */
+export const BLOCKED_COPY = {
+  title: "Not available in your region",
+  heading: "YG UniLUX",
+  message: "Sorry, this website is not available in your region.",
+} as const;
+
 /*
  * The blocked page, sent straight from the proxy with status 403. It is a
  * complete document with inline styles and no scripts, images, fonts or
@@ -73,7 +84,7 @@ const BLOCKED_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Not available in your region | YG UniLUX</title>
+<title>${BLOCKED_COPY.title} | YG UniLUX</title>
 <style>
   html,body{height:100%;margin:0}
   body{display:flex;align-items:center;justify-content:center;padding:16px;
@@ -86,8 +97,8 @@ const BLOCKED_HTML = `<!doctype html>
 </head>
 <body>
 <main>
-<h1>YG UniLUX</h1>
-<p>Sorry, this website is not available in your region.</p>
+<h1>${BLOCKED_COPY.heading}</h1>
+<p>${BLOCKED_COPY.message}</p>
 </main>
 </body>
 </html>
