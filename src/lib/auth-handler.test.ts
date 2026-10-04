@@ -116,3 +116,122 @@ describe("handleAuthRequest", () => {
     ]);
   });
 });
+
+describe("handleAuthRequest — session tokens and client aborts (task 12 QA)", () => {
+  const json = (data: unknown) =>
+    new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
+  const at = (path: string) =>
+    new Request(`http://localhost:3000/api/auth${path}`);
+
+  it("drops token from a sign-in body but keeps user and cookies", async () => {
+    connect.mockResolvedValueOnce(undefined);
+    const ok = json({ redirect: false, token: "secret", user: { id: "u1" } });
+    ok.headers.append("set-cookie", "yg.session_token=secret; HttpOnly");
+    handler.mockResolvedValueOnce(ok);
+    const response = await handleAuthRequest(request());
+    expect(await response.json()).toEqual({
+      redirect: false,
+      user: { id: "u1" },
+    });
+    expect(response.headers.getSetCookie()).toHaveLength(1);
+  });
+
+  it("drops session.token from get-session and every token from list-sessions", async () => {
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockResolvedValueOnce(
+      json({ session: { id: "s1", token: "t1" }, user: { id: "u1" } }),
+    );
+    const one = await handleAuthRequest(at("/get-session"));
+    expect(await one.json()).toEqual({
+      session: { id: "s1" },
+      user: { id: "u1" },
+    });
+
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockResolvedValueOnce(
+      json([
+        { id: "s1", token: "t1" },
+        { id: "s2", token: "t2" },
+      ]),
+    );
+    const list = await handleAuthRequest(at("/list-sessions"));
+    expect(await list.json()).toEqual([{ id: "s1" }, { id: "s2" }]);
+  });
+
+  it("passes a null session and a non-JSON body through unchanged", async () => {
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockResolvedValueOnce(json(null));
+    expect(await (await handleAuthRequest(at("/get-session"))).json()).toBe(
+      null,
+    );
+
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockResolvedValueOnce(new Response("token=plain"));
+    expect(await (await handleAuthRequest(request())).text()).toBe(
+      "token=plain",
+    );
+
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockResolvedValueOnce(
+      new Response("{not json", {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(await (await handleAuthRequest(request())).text()).toBe("{not json");
+
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockResolvedValueOnce(
+      new Response(null, {
+        status: 204,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect((await handleAuthRequest(request())).status).toBe(204);
+  });
+
+  it("answers a body read cut off by the client with 499 and no error log", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockRejectedValueOnce(
+      Object.assign(new Error("aborted"), { code: "ECONNRESET" }),
+    );
+    const response = await handleAuthRequest(request());
+    expect(response.status).toBe(499);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("answers 499 when the request's own signal is aborted", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    connect.mockResolvedValueOnce(undefined);
+    handler.mockRejectedValueOnce(new Error("anything"));
+    const controller = new AbortController();
+    controller.abort();
+    const response = await handleAuthRequest(
+      new Request("http://localhost:3000/api/auth/sign-in/email", {
+        method: "POST",
+        signal: controller.signal,
+      }),
+    );
+    expect(response.status).toBe(499);
+  });
+
+  it("still logs a 500 for an outgoing ECONNRESET or AbortError (e.g. Resend)", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outgoing = [
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      Object.assign(new Error("This operation was aborted"), {
+        name: "AbortError",
+      }),
+    ];
+    for (const error of outgoing) {
+      connect.mockResolvedValueOnce(undefined);
+      handler.mockRejectedValueOnce(error);
+      expect((await handleAuthRequest(request())).status).toBe(500);
+    }
+    expect(log).toHaveBeenCalledTimes(2);
+  });
+});

@@ -28,25 +28,75 @@ function failure(status: 500 | 503): Response {
 }
 
 /*
+ * Removes every `token` key from an auth JSON answer, at any depth. Better
+ * Auth echoes the session token in /sign-in/email and /change-password (top
+ * level), /get-session (`session.token`) and /list-sessions (each entry).
+ * The HttpOnly cookie must be the only copy a browser holds, out of reach of
+ * page scripts. Server code reads sessions through auth.api, which never
+ * passes here. Side effect: /revoke-session (by token) can't be fed from
+ * /list-sessions over HTTP; /revoke-other-sessions still works.
+ */
+function stripTokens(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripTokens);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "token")
+      .map(([key, inner]) => [key, stripTokens(inner)]),
+  );
+}
+
+/*
  * Copies the response so its headers can be changed (redirect responses
  * have immutable headers), then:
  * - Cache-Control: private, no-store on everything: auth answers carry
  *   cookies and account data and must never sit in a shared cache;
  * - Retry-After on Better Auth's own 429, which only sends X-Retry-After
- *   (better-auth dist/api/rate-limiter/index.mjs:64).
+ *   (better-auth dist/api/rate-limiter/index.mjs:64);
+ * - session tokens removed from JSON bodies (stripTokens).
  */
-function finalise(response: Response): Response {
+async function finalise(response: Response): Promise<Response> {
   const headers = new Headers(response.headers);
   headers.set("Cache-Control", "private, no-store");
   const retry = headers.get("X-Retry-After");
   if (response.status === 429 && !headers.has("Retry-After") && retry) {
     headers.set("Retry-After", retry);
   }
-  return new Response(response.body, {
+  let body: BodyInit | null = response.body;
+  if (headers.get("Content-Type")?.toLowerCase().includes("json")) {
+    const text = await response.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = undefined;
+    }
+    // A body that isn't valid JSON passes through as it was; an empty one
+    // stays null, because a 204/304 Response refuses any body, even "".
+    body =
+      json === undefined ? text || null : JSON.stringify(stripTokens(json));
+    headers.delete("Content-Length");
+  }
+  return new Response(body, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+}
+
+/*
+ * True when the browser went away mid-request (tab closed, navigation):
+ * either the request's own signal says so, or reading the body failed with
+ * Node's `Error: aborted` (code ECONNRESET). An ECONNRESET or AbortError
+ * from an outgoing call (MongoDB, Resend) is a server fault and still logs.
+ */
+function isClientAbort(request: Request, error: unknown): boolean {
+  if (request.signal.aborted) return true;
+  return (
+    error instanceof Error &&
+    error.message === "aborted" &&
+    (error as { code?: unknown }).code === "ECONNRESET"
+  );
 }
 
 /**
@@ -63,8 +113,17 @@ export async function handleAuthRequest(request: Request): Promise<Response> {
     return failure(503);
   }
   try {
-    return finalise(await getAuth().handler(request));
+    return await finalise(await getAuth().handler(request));
   } catch (error) {
+    if (isClientAbort(request, error)) {
+      // Nobody is listening; 499 ("client closed request") keeps it out of
+      // 5xx error counts.
+      console.info("[auth] client closed the request");
+      return new Response(null, {
+        status: 499,
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
     if (error instanceof RateLimitUnavailableError) {
       logAuthProblem("rate limiter unavailable", error);
       return failure(503);

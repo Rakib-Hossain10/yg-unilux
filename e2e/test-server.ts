@@ -11,6 +11,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import process from "node:process";
 
@@ -20,8 +21,26 @@ import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 
 const PORT = "3000";
 
-// Fresh secrets per run: they only have to be valid, never stable.
+/*
+ * Every variable named in .env.example starts out empty, so `next start`
+ * never falls back to the developer's .env.local: @next/env keeps a variable
+ * that is already in process.env, even an empty one, and env.ts reads "" as
+ * unset. Real email, image, R2, whistleblower and cron secrets stay out
+ * (rule 11). Read from the file so a new variable can't be missed.
+ */
+const blanks: Record<string, string> = Object.fromEntries(
+  readFileSync(new URL("../.env.example", import.meta.url), "utf8")
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const name = /^([A-Z][A-Z0-9_]*)=/.exec(line)?.[1];
+      return name ? [[name, ""]] : [];
+    }),
+);
+
+/* MONGODB_URI is added per run by main(), once the replica set exists. */
 const testEnv = {
+  ...blanks,
+  // Fresh secrets per run: they only have to be valid, never stable.
   AUTH_SECRET: randomBytes(32).toString("base64url"),
   IP_HASH_SECRET: randomBytes(32).toString("base64url"),
   AUTH_URL: `http://localhost:${PORT}`,
@@ -77,7 +96,8 @@ async function main(): Promise<void> {
     await replSet.stop();
     process.exit(code);
   };
-  child.on("exit", (code) => void stop(code ?? 0));
+  // A crash by signal has no exit code; it must still fail the run.
+  child.on("exit", (code, signal) => void stop(code ?? (signal ? 1 : 0)));
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     process.on(signal, () => void stop(0));
   }

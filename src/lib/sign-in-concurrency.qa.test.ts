@@ -90,10 +90,13 @@ describe("concurrent sign-ins for one email on a cold replica set", () => {
 });
 
 describe("a client that disconnects mid-body (the e2e log line)", () => {
-  it('is answered 500 and logged as "[auth] request failed: Error"', async () => {
+  // Before the task-12 QA fix this was a 500 plus an error log line; a
+  // client abort is now a quiet 499.
+  it("is answered 499 with no error log line", async () => {
     stubEnv(replSet.getUri("yg_conc_qa"));
     const { handleAuthRequest } = await import("./auth-handler");
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
     // What Node's http server does when the socket closes before the body
     // is read: the body stream errors with `Error: aborted` (ECONNRESET).
     const body = new ReadableStream<Uint8Array>({
@@ -112,7 +115,7 @@ describe("a client that disconnects mid-body (the e2e log line)", () => {
         duplex: "half",
       } as RequestInit),
     );
-    expect(response.status).toBe(500);
-    expect(logged).toHaveBeenCalledWith("[auth] request failed: Error");
+    expect(response.status).toBe(499);
+    expect(logged).not.toHaveBeenCalled();
   });
 });

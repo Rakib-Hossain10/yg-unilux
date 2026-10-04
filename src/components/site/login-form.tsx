@@ -10,7 +10,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-/* The same limits the server applies (email 254, password 12–128). */
+/* The same limits as the server's sign-in schema (email 254, password 1–128). */
 const loginSchema = z.object({
   email: z.email("Enter a valid email address.").max(254),
   password: z
