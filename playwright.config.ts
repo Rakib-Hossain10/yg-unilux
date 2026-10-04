@@ -19,11 +19,16 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    // Production build, so tests see what Vercel serves (not the dev overlay).
-    command: "npm run build && npm run start",
+    // Production build, so tests see what Vercel serves (not the dev overlay),
+    // started by e2e/test-server.ts against a seeded in-memory MongoDB.
+    command:
+      "npm run build && node --conditions=react-server --import tsx e2e/test-server.ts",
     url: baseURL,
-    reuseExistingServer: !isCI,
-    timeout: 240_000,
+    // Never reuse whatever runs on :3000 (e.g. `next dev` on the real
+    // database): the tests need the seeded test accounts.
+    reuseExistingServer: false,
+    // First run on a machine downloads the MongoDB binary.
+    timeout: 600_000,
     stdout: "pipe",
     stderr: "pipe",
   },

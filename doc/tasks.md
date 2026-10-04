@@ -4,32 +4,45 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-1` (pushed through task 5). Tasks 1–11 are done and committed. **Next: task 12** (minimal `/login` + placeholder `/admin` behind `requireAdmin()` + Playwright e2e). The Phase 1 exit follows task 12.
-- **QA after:** task 12, and then the Phase 1 exit review (`qa-security-reviewer`). Every other task gets only the automatic per-file review.
+- **Branch:** `phase-1`. **Tasks 1–12 are all committed**, but only tasks 1–5 have been pushed. The Phase 1 exit criteria pass locally (QA PASS, 2026-10-04): the seeded admin signs in; `/admin` gives non-admins a real 403 on the server; a fake CN header gets 403. "On preview" waits for the client's Vercel account.
+- **Next: Phase 1 wrap-up, before the merge to `main`.** Do these in order, one commit each:
+  1. **Task-12 QA Lows** (quick):
+     - `e2e/test-server.ts`: set `RESEND_API_KEY`, `CLOUDINARY_URL`, `WHISTLEBLOWER_ENC_KEY`, `CRON_SECRET`, `COMPANY_EMAIL` and `SITE_URL` to `""` in `testEnv` (or build the child env from an allowlist), so `next start` never uses the developer's real `.env.local` secrets (rule 11);
+     - `src/components/admin/sign-out-button.tsx`: check `response.ok` and stay on the page with an error if sign-out failed;
+     - `src/lib/auth-handler.ts:72`: treat `ECONNRESET` / "aborted" as a client abort (quiet log, no 500 log line);
+     - drop `token` from the `/sign-in/email` JSON body in `finalise()` (keep the HttpOnly cookie as the only copy);
+     - fix the `login-form.tsx` comment ("12–128" → the sign-in schema uses min 1);
+     - `e2e/test-server.ts`: a Next crash by signal must not exit 0.
+  2. **Task-5 QA L1:** limit `/change-password` per user id (e.g. 5 per 15 min), before the password check, with the same 429 body.
+  3. **Task-5 QA L2 (blocks the merge):** CI audit must be green. Replace the report-only full audit with a blocking `npm audit` script that allowlists only GHSA-vfj7-8cjw-p6xm (`eslint-config-next` chain; 5 highs today), plus a review date.
+  4. Then run lint, typecheck, `npm test`, `npm run build`, `npm run test:e2e`, the audit and gitleaks.
+  5. Push `phase-1`, check CI is green on GitHub, open a PR to `main`, merge, and tick Phase 1.
+  6. Then **Phase 2 (Admin core)**: plan first (plan mode), on a `phase-2` branch.
+- **Open product decision (ask the user):** `rememberMe` is hard-coded to `true` in `login-form.tsx`, so every sign-in gets a 7-day cookie, admin included. Options: a "Keep me signed in" checkbox (default off), or a shorter admin session.
+- **QA after:** each Phase 2 feature plus the Phase 2 exit (`qa-security-reviewer`). Every changed file also gets the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
   - `AUTH_URL=http://localhost:3000` (required);
   - `IP_HASH_SECRET` (32+ random characters, different from `AUTH_SECRET`);
   - a database name in `MONGODB_URI` (`…mongodb.net/yg_unilux?…`).
-- **User should try once:** `npm run seed:admin -- --email <admin email> --name "<name>"` from **PowerShell** (hidden prompt; Git Bash needs `winpty`). QA could not test a real Windows console. From this machine Atlas currently times out (`querySrv ETIMEOUT`): check the Atlas IP access list / network.
-- **Local dev:** use `http://localhost`, not `127.0.0.1`, because the `__Host-` device cookie needs it.
-- **Open QA Lows from task 5 (do soon):**
-  - L1: limit `/change-password` per user id (e.g. 5 per 15 min), before the password check, with the same 429 body. Must land before the Phase 5 change-password UI.
-  - L2: replace the report-only full audit with a blocking audit that allowlists only GHSA-vfj7-8cjw-p6xm (a small Node script over `npm audit --json`), plus a review date. `npm audit --audit-level=high` currently reports 5 highs (already known).
-  - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, not use server actions; the change-password UI sends `revokeOtherSessions: true`.
+- **User should try once:**
+  - `npm run seed:admin -- --email <admin email> --name "<name>"` from **PowerShell** (hidden prompt; Git Bash needs `winpty`). QA could not test a real Windows console.
+  - From this machine Atlas currently times out (`querySrv ETIMEOUT`): check the Atlas IP access list / network.
+- **Local dev:** use `http://localhost`, not `127.0.0.1`, because the `__Host-` device cookie needs it. `npm run test:e2e` needs port 3000 free (it never reuses a running server) and runs on a seeded in-memory MongoDB (ADR 0029).
+- **Open QA Lows from task 5:**
+  - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, never through server actions (`/login` already does). The change-password UI sends `revokeOtherSessions: true`.
 - **Must-do items carried forward:**
-  - CSP (ADR 0027): `dangerouslySetInnerHTML` only for JSON-LD (`JSON.stringify` with `<` escaped). New external hosts (Phase 2: Cloudinary upload API and R2 presigned PUT in `connect-src`) go into `src/lib/security-headers.ts` together with a note in ADR 0027.
-  - Task 12: `/login` goes in an `(account)` route group whose layout uses `SiteShell` (ADR 0028). Use design tokens and the contrast rules in ADR 0028. Run `npm run test:e2e`, which includes axe on shell pages.
-  - Phase 4: move the footer's `new Date().getFullYear()` out of the prerender path before turning on `cacheComponents` (QA L1, task 11).
-  - The blocked-page wording lives once in `BLOCKED_COPY` (`src/lib/geo.ts`), used by the proxy's 403 page and `/blocked`. Change it there only.
-  - `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
-  - Task 12 e2e: assert CN → 403 (and HK/MO/TW → 200) against `next start` with `GEO_BLOCK_ENABLED=true`, plus `/admin` with no cookie → 307 to `/login`.
-  - Admin pages and layouts call `requireAdmin()` at the top, outside any `<Suspense>`/`loading.tsx`, so the 403 status is real. Admin Route Handlers use `requireAdminForRoute()`. Never wrap either in `try/catch` without `unstable_rethrow` (ADR 0024).
-  - The Phase 1 exit e2e test asserts `status === 403` for a customer on `/admin` (QA L3, task 6).
-  - Design-shell task: add `app/forbidden.tsx` alongside the 404/500 pages.
-  - Task 9+: each admin Server Action gets a test that calls it as a customer and asserts nothing changed (QA L2, task 6).
+  - Admin pages and layouts call `requireAdmin()` at the top, outside any `<Suspense>`/`loading.tsx`, so the 403 status is real. Admin Route Handlers use `requireAdminForRoute()`. Never wrap either in `try/catch` without `unstable_rethrow` (ADR 0024). `/admin` already guards in both the layout and the page (ADR 0029).
+  - **Phase 2:** each admin Server Action gets a test that calls it as a customer and asserts nothing changed (QA L2, task 6).
+  - **Phase 2:** admin uploads need `connect-src` hosts (Cloudinary upload API, R2 presigned PUT) added in `src/lib/security-headers.ts` with a note in ADR 0027. `dangerouslySetInnerHTML` is used only for JSON-LD (`JSON.stringify` with `<` escaped).
+  - **Phase 2:** the admin UI uses shadcn under `src/app/admin` (outside `(site)`). Use design tokens and the contrast rules in ADR 0028.
+  - **Phase 4:** move the footer's `new Date().getFullYear()` out of the prerender path before turning on `cacheComponents` (QA L1, task 11).
+  - **Phase 5:** `/change-password` must exist before any path can create an admin with `mustChangePassword: true`. Today `seedAdmin` always sets it to false, and `requireAdmin()` would redirect such an admin to a 404. Customers currently land on `/` after sign-in.
+  - **Phase 7:** remove the smoke test's "404 resource" console filter once every nav page exists (ADR 0029).
+  - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
+  - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 1 — Foundations — in progress (tasks 1–11 done)
+**Current focus:** Phase 1 — Foundations — in progress (tasks 1–12 done; exit met locally; wrap-up + merge pending)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -101,9 +114,10 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Task 10: `app/blocked/page.tsx` (static, noindex, shares `BLOCKED_COPY` with the proxy's 403 page)
 - [x] Task 7: `scripts/seed-admin.ts` + `src/lib/seed-admin.ts` (`npm run seed:admin`: create, or `--reset` that ends sessions, unbans, bumps device epoch, clears counters); QA PASS, L-1..L-3 fixed — ADR 0025
 - [x] Task 11: design tokens, fonts (Cormorant Garamond + Inter), header/footer shell, `(site)` group, 404/403/error/global-error; QA FAIL (footer focus + contrast) → fixed, QA e2e + axe green — ADR 0028
-- [ ] Minimal `/login` page + placeholder `/admin` page behind `requireAdmin()`; e2e: admin logs in, customer gets 403, visitor redirected
-- [ ] Tests: permissions matrix, rate limiter, proxy country matrix, env validation
-- **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview
+- [x] Task 12: `/login` (posts to `/api/auth`, method=post), `/admin` placeholder guarded in layout + page, sign-out; e2e on a seeded in-memory replica set (admin login, customer real 403, visitor/forged cookie → /login, CN 403, HK/MO/TW 200); QA PASS — ADR 0029
+- [x] Tests: permissions matrix, rate limiter, proxy country matrix, env validation (773 unit + 34 e2e)
+- **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview — **met locally on `next start` (2026-10-04); preview pending the Vercel account**
+- [ ] Phase 1 wrap-up: task-12 Lows, task-5 L1 + L2 (blocking audit), push, CI green, PR, merge to `main`
 
 ## Phase 2 — Admin core
 - [ ] shadcn init; admin layout with `requireAdmin()` everywhere
@@ -186,6 +200,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-04 — Task 12 committed (/login, guarded /admin, e2e test server on in-memory MongoDB, ADR 0029). QA PASS and Phase 1 exit met locally; fixed the pre-hydration GET password leak (method=post); the stray `[auth] request failed` was a client abort (ECONNRESET). Next session: the Phase 1 wrap-up list in Resume, then merge and Phase 2.
 - 2026-10-04 — Task 11 committed (design shell, ADR 0028). User picked Cormorant Garamond + Inter. QA FAIL on footer focus visibility (H1) and grey-500-on-ink contrast (H2); fixed, plus a mobile menu that closes on navigation/Escape/outside click (M1), wordmark size, footer prefetch. All 14 e2e (axe) tests and 771 unit tests green. Next: task 12.
 - 2026-10-04 — Task 10 committed (/blocked page sharing BLOCKED_COPY with the proxy 403; verified live). Next: task 11 (design shell, QA).
 - 2026-10-03 — Task 9 committed (security headers, ADR 0027). A browser test showed experimental SRI leaves App Router inline scripts blocked (hydration fails), so the CSP allows inline scripts; zero violations in prod, dev and on the 403 page. Next: task 10 (/blocked page).

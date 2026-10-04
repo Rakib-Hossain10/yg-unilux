@@ -116,6 +116,12 @@ const eslintConfig = defineConfig([
     },
   },
   {
+    // The e2e test server sets test-only env for its in-memory database and
+    // `next start`. Only process.env is allowed; import guards stay on.
+    files: ["e2e/test-server.ts"],
+    rules: { "no-restricted-properties": "off" },
+  },
+  {
     // This test asserts that NEXT_PUBLIC_ never appears in the repo, so it has
     // to spell the name. It is never bundled.
     files: ["test/repo-security.test.ts"],
