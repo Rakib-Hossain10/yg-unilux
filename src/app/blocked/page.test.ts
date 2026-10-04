@@ -23,6 +23,7 @@ describe("/blocked page", () => {
 
   it("is noindex and titled like the proxy page", () => {
     expect(metadata.robots).toEqual({ index: false, follow: false });
-    expect(metadata.title).toBe(`${BLOCKED_COPY.title} | YG UniLUX`);
+    // The root template ("%s | YG UniLUX") completes it to match.
+    expect(metadata.title).toBe(BLOCKED_COPY.title);
   });
 });

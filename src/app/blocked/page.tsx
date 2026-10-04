@@ -7,7 +7,8 @@ import type { Metadata } from "next";
 import { BLOCKED_COPY } from "@/lib/geo";
 
 export const metadata: Metadata = {
-  title: `${BLOCKED_COPY.title} | YG UniLUX`,
+  // The root layout's template adds " | YG UniLUX".
+  title: BLOCKED_COPY.title,
   robots: { index: false, follow: false },
 };
 
@@ -17,12 +18,10 @@ export default function BlockedPage() {
   return (
     <main className="flex flex-1 items-center justify-center p-4">
       <div className="max-w-lg text-center">
-        <h1 className="mb-3 text-2xl font-semibold tracking-wide">
+        <h1 className="mb-3 font-display text-3xl font-medium tracking-wide">
           {BLOCKED_COPY.heading}
         </h1>
-        <p className="text-neutral-600 dark:text-neutral-400">
-          {BLOCKED_COPY.message}
-        </p>
+        <p className="text-grey-600">{BLOCKED_COPY.message}</p>
       </div>
     </main>
   );
