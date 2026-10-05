@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "audit": "node scripts/audit.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:indexes": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sync-indexes.ts",

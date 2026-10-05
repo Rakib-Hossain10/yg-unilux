@@ -69,14 +69,11 @@ jobs:
       # Blocking: no high or critical advisory in anything that ships.
       - name: npm audit (production dependencies, blocking)
         run: npm audit --omit=dev --audit-level=high
-      # Full tree, report only. It currently fails on `braces`
-      # (GHSA-vfj7-8cjw-p6xm), a dev-only dependency reached through
-      # eslint-config-next with no patched release. We don't override it or
-      # use `audit fix --force` (that crosses declared ranges). Look at this
-      # step's output on every run, and make it blocking again once a fix ships.
-      - name: npm audit (all dependencies, report only)
-        run: npm audit --audit-level=high
-        continue-on-error: true
+      # Full tree, blocking. Allows only the advisories listed in
+      # scripts/audit.mjs (one dev-only `braces` finding with no patched
+      # release), and fails when its review date passes.
+      - name: npm audit (all dependencies, blocking with allowlist)
+        run: npm run audit
 
   e2e:
     name: Playwright (Chromium)

@@ -136,10 +136,10 @@ describe("CI workflow", () => {
     expect(ci).toMatch(
       /run: npm audit --omit=dev --audit-level=high\r?\n(?!\s*continue-on-error)/,
     );
-    // The full-tree audit still runs, report-only (dev-only `braces` advisory).
-    expect(ci).toMatch(
-      /run: npm audit --audit-level=high\r?\n\s*continue-on-error: true/,
-    );
+    // The full-tree audit is blocking too, through the allowlisting script
+    // (scripts/audit.mjs); the old report-only step must not come back.
+    expect(ci).toMatch(/run: npm run audit\r?\n(?!\s*continue-on-error)/);
+    expect(ci).not.toMatch(/run: npm audit --audit-level=high\r?\n/);
   });
 
   it("verifies the pinned gitleaks archive checksum, fail-closed", () => {
