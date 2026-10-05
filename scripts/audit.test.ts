@@ -11,6 +11,7 @@ const advisory = (ghsa: string, severity = "high") => ({
   severity,
 });
 const report = (...vias: object[]) => ({
+  auditReportVersion: 2,
   vulnerabilities: {
     braces: { via: vias },
     micromatch: { via: ["braces"] },
@@ -23,7 +24,7 @@ const allowed = [
 describe("evaluateAudit", () => {
   it("passes with nothing found, and says an unused allowance can go", () => {
     const result = evaluateAudit(
-      { vulnerabilities: {} },
+      { auditReportVersion: 2, vulnerabilities: {} },
       { allowed, today: "2026-10-05" },
     );
     expect(result.ok).toBe(true);
@@ -87,6 +88,28 @@ describe("evaluateAudit", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.failures.join()).toContain("advisory-4242");
+  });
+});
+
+describe("evaluateAudit on reports it does not understand", () => {
+  const options = { allowed, today: "2026-10-05" };
+
+  it("fails on an empty object, a missing version or an error report", () => {
+    for (const bad of [{}, { vulnerabilities: {} }, { error: { code: "E" } }]) {
+      expect(evaluateAudit(bad, options).ok).toBe(false);
+    }
+  });
+
+  it("fails when npm counts high findings that we could not parse", () => {
+    const result = evaluateAudit(
+      {
+        auditReportVersion: 2,
+        vulnerabilities: { x: { via: ["y"] } },
+        metadata: { vulnerabilities: { high: 1, critical: 0 } },
+      },
+      options,
+    );
+    expect(result.ok).toBe(false);
   });
 });
 

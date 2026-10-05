@@ -7,6 +7,7 @@
 // tested without running npm.
 
 import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -37,7 +38,7 @@ function ghsaOf(url) {
 }
 
 /**
- * @param {{ vulnerabilities?: Record<string, { via?: unknown[] }> }} report
+ * @param {{ auditReportVersion?: number, vulnerabilities?: Record<string, { via?: unknown[] }>, metadata?: { vulnerabilities?: Record<string, number> } }} report
  *   `npm audit --json` output
  * @param {{ allowed?: typeof ALLOWED, today?: string }} [options]
  * @returns {{ ok: boolean, failures: string[], notes: string[] }}
@@ -50,8 +51,16 @@ export function evaluateAudit(report, options = {}) {
 
   // Every advisory is an object in some `via`; string entries only point at
   // another vulnerable package, so they add nothing new.
+  // Fail closed on a report we don't understand (npm changed its format, or
+  // an error object): an empty `{}` must never read as "no vulnerabilities".
+  if (report.auditReportVersion !== 2 || !report.vulnerabilities) {
+    failures.push(
+      "unexpected `npm audit --json` format; update scripts/audit.mjs",
+    );
+    return { ok: false, failures, notes };
+  }
   const found = new Map();
-  for (const [name, vuln] of Object.entries(report.vulnerabilities ?? {})) {
+  for (const [name, vuln] of Object.entries(report.vulnerabilities)) {
     for (const via of vuln.via ?? []) {
       if (typeof via !== "object" || via === null) continue;
       if (!BLOCKING.has(via.severity)) continue;
@@ -60,6 +69,15 @@ export function evaluateAudit(report, options = {}) {
       entry.packages.add(name);
       found.set(id, entry);
     }
+  }
+
+  // Cross-check npm's own totals: blocking-severity packages reported but no
+  // advisory found above means the shape changed under us.
+  const counts = report.metadata?.vulnerabilities ?? {};
+  if ((counts.high ?? 0) + (counts.critical ?? 0) > 0 && found.size === 0) {
+    failures.push(
+      "npm reports high/critical findings but no advisory was parsed",
+    );
   }
 
   const allowance = new Map(allowed.map((a) => [a.id, a]));
@@ -82,9 +100,12 @@ export function evaluateAudit(report, options = {}) {
   return { ok: failures.length === 0, failures, notes };
 }
 
+// Compare real paths so a symlinked checkout or different path casing can't
+// make the CLI silently do nothing (and CI go green without auditing).
 const isMain =
-  process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  Boolean(process.argv[1]) &&
+  realpathSync(path.resolve(process.argv[1])) ===
+    realpathSync(fileURLToPath(import.meta.url));
 
 if (isMain) {
   // npm exits non-zero whenever it finds anything, so the exit code is

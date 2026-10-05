@@ -14,3 +14,8 @@
 ## Consequences
 - Signing in by default no longer outlives the browser or a day. Users who want 7 days must tick the box each time they sign in.
 - Tests: `auth.qa.test.ts` covers both server-side cookie shapes. The e2e test `auth-access.spec.ts` checks that the box is unchecked by default and that the cookie is session-only, and that checking it gives about a 7-day cookie.
+
+## Known gap (QA, 2026-10-05)
+The 24-hour cap does not hold after `/change-password` with `revokeOtherSessions: true`. Better Auth creates the replacement session without the don't-remember flag (`update-user.mjs:176`), so the server stores it for 7 days. The cookie stays session-only and the session is never refreshed. A user who unchecked the box and then changes their password can therefore stay signed in for up to 7 days if their browser restores session cookies.
+- `src/lib/remember-me.qa.test.ts` pins this with an `it.fails` test. Turn it into a plain `it` once fixed.
+- Fix before the Phase 5 change-password UI ships: in the `/change-password` after-hook, if the signed `dont_remember` cookie is present and a new session was issued, set that session's `expiresAt` to now + 24 hours.

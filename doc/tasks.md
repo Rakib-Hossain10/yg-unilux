@@ -26,6 +26,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Open QA Lows from task 5:**
   - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, never through server actions (`/login` already does). The change-password UI sends `revokeOtherSessions: true`.
 - **Must-do items carried forward:**
+  - **Phase 5 (before the change-password UI):** enforce the 24 h server cap on the replacement session that `/change-password` creates when "Keep me signed in" was off (ADR 0032 "Known gap"). Then turn the `it.fails` test in `src/lib/remember-me.qa.test.ts` into a plain `it`.
+  - **Phase 2:** per-session revoke must use `auth.api` on the server with session ids, because tokens are stripped from `/api/auth` JSON (ADR 0030; also affects `/admin/list-user-sessions`).
   - Admin pages and layouts call `requireAdmin()` at the top, outside any `<Suspense>`/`loading.tsx`, so the 403 status is real. Admin Route Handlers use `requireAdminForRoute()`. Never wrap either in `try/catch` without `unstable_rethrow` (ADR 0024). `/admin` already guards in both the layout and the page (ADR 0029).
   - **Phase 2:** each admin Server Action gets a test that calls it as a customer and asserts nothing changed (QA L2, task 6).
   - **Phase 2:** admin uploads need `connect-src` hosts (Cloudinary upload API, R2 presigned PUT) added in `src/lib/security-headers.ts` with a note in ADR 0027. `dangerouslySetInnerHTML` is used only for JSON-LD (`JSON.stringify` with `<` escaped).
@@ -194,7 +196,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
-- 2026-10-05 — Wrap-up step 3 committed, ADR 0033: the full-tree audit is blocking through `scripts/audit.mjs` with one dated allowance. Next: the final checks (step 4), push, CI, PR and merge.
+- 2026-10-05 — Wrap-up step 3 committed, ADR 0033: the full-tree audit is blocking through `scripts/audit.mjs` with one dated allowance. QA on the wrap-up diff: PASS (L1 session-cap gap after change-password recorded in ADR 0032; L2 audit-script fail-open cases fixed). Next: push, CI, PR, merge.
 - 2026-10-05 — Wrap-up step 2b committed, ADR 0032: a "Keep me signed in" checkbox, off by default, the same for admin and customers. 786 unit and 36 e2e tests green. Next: task-5 L2 (blocking audit script).
 - 2026-10-05 — Wrap-up step 2 (task-5 QA L1) committed, ADR 0031: a per-user `/change-password` limit (5 per 15 min) runs before the password check; 786 unit tests green. The user accepted ADR 0030 and chose a "Keep me signed in" checkbox (default off, same for every role); that is step 2b, next.
 - 2026-10-04 — Wrap-up step 1 (task-12 QA Lows) committed, ADR 0030. The auto-review widened two items: `token` is now stripped from every auth JSON body, not just sign-in (get-session and list-sessions leaked it too), and the abort check no longer swallows outgoing ECONNRESET or AbortError. It also caught the missing R2 variables in the e2e env, so the blanks are now read from `.env.example`. 779 unit and 34 e2e tests green. Next: task-5 L1.
