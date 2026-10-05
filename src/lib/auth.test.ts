@@ -11,6 +11,7 @@ import { setupMemoryDb } from "../../test/helpers/memory-db";
 import {
   type Auth,
   DISABLED_PATHS,
+  TOO_MANY_REQUESTS_BODY,
   createAuth,
   getSessionFromDb,
   hasRole,
@@ -454,6 +455,125 @@ describe("change-password (QA L2)", () => {
     );
     expect(changed.status).toBe(400);
     expect(await userDoc(email)).toMatchObject({ deviceEpoch: 0 });
+  });
+});
+
+describe("change-password per-user limit (task-5 QA L1)", () => {
+  /* Signs in from its own network and returns the session cookie. */
+  async function session(email: string, password: string, ip: string) {
+    const response = await signIn(email, password, { ip });
+    expect(response.status).toBe(200);
+    return { [SESSION_COOKIE]: setCookies(response)[SESSION_COOKIE] ?? "" };
+  }
+
+  it("refuses the 6th attempt in 15 minutes with the generic 429, before the password check, for every session and network", async () => {
+    const email = "pwlimit@example.com";
+    const password = "pw-limit-right-12";
+    await auth.api.createUser({ body: { email, password, name: "Pw Limit" } });
+    const first = await session(email, password, "203.0.113.110");
+    const second = await session(email, password, "203.0.113.111");
+
+    // Five wrong guesses from five networks: each one is checked (400).
+    for (let i = 0; i < 5; i++) {
+      const wrong = await post(
+        "/change-password",
+        {
+          currentPassword: `wrong-guess-${i}-xx`,
+          newPassword: "pw-limit-new-12",
+        },
+        { ip: `198.51.100.${10 + i}`, cookies: first },
+      );
+      expect(wrong.status).toBe(400);
+    }
+
+    // The right password from another session and network is now refused,
+    // so the password is never checked and nothing changes.
+    const blocked = await post(
+      "/change-password",
+      { currentPassword: password, newPassword: "pw-limit-new-12" },
+      { ip: "198.51.100.99", cookies: second },
+    );
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toEqual(TOO_MANY_REQUESTS_BODY);
+    expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(
+      await signIn(email, password, { ip: "203.0.113.112" }),
+    ).toHaveProperty("status", 200);
+
+    const audit = await AuditLogModel.find({ action: "auth.rate_limited" })
+      .lean()
+      .exec();
+    expect(audit.map((entry) => entry.meta)).toEqual([
+      { namespace: "user-pw-change", reason: "hard_limit" },
+    ]);
+  });
+
+  it("counts per user: another user's attempts are not affected", async () => {
+    const a = {
+      email: "pwlimit-a@example.com",
+      password: "pw-limit-a-pass-12",
+    };
+    const b = {
+      email: "pwlimit-b@example.com",
+      password: "pw-limit-b-pass-12",
+    };
+    for (const user of [a, b]) {
+      await auth.api.createUser({ body: { ...user, name: "Pw Limit" } });
+    }
+    const cookiesA = await session(a.email, a.password, "203.0.113.120");
+    const statusesA: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const response = await post(
+        "/change-password",
+        {
+          currentPassword: `wrong-guess-${i}-xx`,
+          newPassword: "pw-limit-new-12",
+        },
+        { ip: "203.0.113.120", cookies: cookiesA },
+      );
+      statusesA.push(response.status);
+    }
+    // User A really is limited...
+    expect(statusesA).toEqual([400, 400, 400, 400, 400, 429]);
+    // ...while user B can still change their password.
+    const cookiesB = await session(b.email, b.password, "203.0.113.121");
+    const changed = await post(
+      "/change-password",
+      { currentPassword: b.password, newPassword: "pw-limit-b-new-12" },
+      { ip: "203.0.113.121", cookies: cookiesB },
+    );
+    expect(changed.status).toBe(200);
+  });
+
+  it("without a session answers 401 and counts nothing", async () => {
+    const response = await post(
+      "/change-password",
+      { currentPassword: "anything-at-all", newPassword: "pw-limit-new-12" },
+      { ip: "203.0.113.130" },
+    );
+    expect(response.status).toBe(401);
+    expect(
+      await LoginAttemptModel.countDocuments({ key: /^user-pw-change:/ }),
+    ).toBe(0);
+  });
+
+  it("stores only an HMAC of the user id in the counter key", async () => {
+    const email = "pwlimit-key@example.com";
+    const password = "pw-limit-key-pass-12";
+    await auth.api.createUser({ body: { email, password, name: "Pw Limit" } });
+    const cookies = await session(email, password, "203.0.113.140");
+    await post(
+      "/change-password",
+      { currentPassword: "wrong-guess-key-xx", newPassword: "pw-limit-new-12" },
+      { ip: "203.0.113.140", cookies },
+    );
+    const id = String((await userDoc(email))?._id);
+    const keys = await LoginAttemptModel.find({ key: /^user-pw-change:/ })
+      .lean()
+      .exec();
+    expect(keys).toHaveLength(1);
+    expect(keys[0]?.key).toMatch(/^user-pw-change:[0-9a-f]{64}$/);
+    expect(keys[0]?.key).not.toContain(id);
   });
 });
 

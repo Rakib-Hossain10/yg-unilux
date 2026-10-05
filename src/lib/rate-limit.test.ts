@@ -20,6 +20,7 @@ import {
   consume,
   emailKey,
   hashEmail,
+  hashUserId,
   recordAttempt,
 } from "./rate-limit";
 
@@ -86,6 +87,27 @@ describe("emailKey", () => {
   it("throws EnvError when AUTH_SECRET is missing", () => {
     vi.stubEnv("AUTH_SECRET", undefined);
     expect(() => emailKey("email-reset", EMAIL)).toThrow(EnvError);
+  });
+});
+
+describe("hashUserId", () => {
+  const ID = "6702a1b2c3d4e5f6a7b8c9d0";
+
+  it("is a stable 64-hex digest that holds no part of the id", () => {
+    const digest = hashUserId(ID);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(hashUserId(ID)).toBe(digest);
+    expect(digest).not.toContain(ID.slice(0, 8));
+    expect(hashUserId(`${ID}x`)).not.toBe(digest);
+  });
+
+  it("is domain-separated from hashEmail for the same string", () => {
+    expect(hashUserId(EMAIL)).not.toBe(hashEmail(EMAIL));
+  });
+
+  it("rejects an empty or oversized id", () => {
+    expect(() => hashUserId("")).toThrow(TypeError);
+    expect(() => hashUserId("a".repeat(129))).toThrow(TypeError);
   });
 });
 

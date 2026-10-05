@@ -6,7 +6,12 @@ import "server-only";
 
 import type { AuthContext } from "better-auth";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import {
+  APIError,
+  createAuthMiddleware,
+  getAuthoritativeSessionFromCtx,
+  isAPIError,
+} from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { nextCookies } from "better-auth/next-js";
 import { createAccessControl } from "better-auth/plugins/access";
@@ -33,6 +38,7 @@ import {
   type SignInPath,
   authLimiterStorage,
   clearSignIn,
+  consumePasswordChange,
   consumeResetRequest,
   consumeSignIn,
 } from "./sign-in-limit";
@@ -521,6 +527,23 @@ export function createAuth(deps: AuthDependencies) {
                 headers: ctx.headers ?? new Headers(),
               }),
             );
+            if (!gate.allowed) {
+              await auditRefusal(gate.audit);
+              throw tooManyRequests(gate.retryAfterSeconds);
+            }
+            return;
+          }
+          // Password change by a signed-in user (task-5 QA L1): count the
+          // attempt per user BEFORE Better Auth checks the current password.
+          // The session is read from the database, and the endpoint's own
+          // sensitiveSessionMiddleware reads it again: two reads on purpose,
+          // so never hand this one through. No session: the endpoint
+          // answers its own 401.
+          case "/change-password": {
+            const session = await getAuthoritativeSessionFromCtx(ctx);
+            if (!session?.user.id) return;
+            const userId = session.user.id;
+            const gate = await runLimiter(() => consumePasswordChange(userId));
             if (!gate.allowed) {
               await auditRefusal(gate.audit);
               throw tooManyRequests(gate.retryAfterSeconds);

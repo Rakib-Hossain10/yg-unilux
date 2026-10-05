@@ -46,3 +46,4 @@ Template:
 | [0028](0028-design-shell.md) | Design shell: Cormorant Garamond + Inter via next/font, warm-grey tokens, `(site)` group with SiteShell, shared 404/403/error pages | Accepted |
 | [0029](0029-login-admin-placeholder-e2e.md) | `/login` posts to `/api/auth` (method=post), `/admin` guarded in layout + page, e2e on a seeded in-memory replica set | Accepted |
 | [0030](0030-auth-responses-tokens-aborts.md) | Auth JSON answers carry no session token; client aborts are a quiet 499; e2e server blanks every `.env.example` variable | Accepted |
+| [0031](0031-change-password-per-user-limit.md) | `/change-password` limited to 5 per user per 15 min (HMAC'd user id), checked before the password | Accepted |

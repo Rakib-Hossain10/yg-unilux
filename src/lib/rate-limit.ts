@@ -39,6 +39,7 @@ export interface SlowdownRule {
  * - "email-dev-login": per-(email + known device) sign-in hard limit;
  * - "email-reset":     per-email password-reset-request throttle (slow-down);
  * - "email-ip-reset":  per-(email + network) password-reset-request hard limit;
+ * - "user-pw-change":  per-user /change-password hard limit (by user id);
  * - "ba-limit":        Better Auth's own per-network limiter (HMAC'd keys).
  * Phase 8 adds "wb-case" (keyed by case number, never by IP).
  */
@@ -48,6 +49,7 @@ export type KeyNamespace =
   | "email-dev-login"
   | "email-reset"
   | "email-ip-reset"
+  | "user-pw-change"
   | "ba-limit";
 
 /** Namespaces keyed by the email alone, which emailKey() builds. */
@@ -116,6 +118,20 @@ export function hashEmail(email: string): string {
   }
   return createHmac("sha256", rateLimitSubkey())
     .update(email.trim().toLowerCase())
+    .digest("hex");
+}
+
+/**
+ * HMAC-SHA256 of a user id, as 64 hex chars, with the same subkey as
+ * hashEmail(). The "user-id:" prefix keeps it apart from email digests, so
+ * the collection never holds a raw id either.
+ */
+export function hashUserId(userId: string): string {
+  if (typeof userId !== "string" || userId === "" || userId.length > 128) {
+    throw new TypeError("hashUserId: userId must be 1-128 characters");
+  }
+  return createHmac("sha256", rateLimitSubkey())
+    .update(`user-id:${userId}`)
     .digest("hex");
 }
 

@@ -19,6 +19,7 @@ import {
   consume,
   consumeSlowdown,
   hashEmail,
+  hashUserId,
 } from "./rate-limit";
 
 /**
@@ -75,6 +76,18 @@ export const RESET_SLOWDOWN = {
 } as const satisfies SlowdownRule;
 
 /**
+ * /change-password: 5 attempts per signed-in user per 15 minutes, hard,
+ * counted before the current password is checked (task-5 QA L1). Every
+ * attempt counts, right or wrong, so a stolen session can't guess the
+ * current password faster than this. Better Auth's per-network rule caps
+ * the same path at 10 per 15 minutes on top.
+ */
+export const PASSWORD_CHANGE = {
+  limit: 5,
+  windowSeconds: 15 * 60,
+} as const satisfies RateLimitRule;
+
+/**
  * Better Auth's own limiter windows must stay within 15 minutes, so its
  * HMAC'd network counters are gone as fast as the sign-in ones (ADR 0022).
  */
@@ -87,7 +100,8 @@ export interface AuthLimitAudit {
     | "email-login"
     | "email-dev-login"
     | "email-ip-reset"
-    | "email-reset";
+    | "email-reset"
+    | "user-pw-change";
   reason: "hard_limit" | "slowdown";
 }
 
@@ -112,6 +126,9 @@ export type SignInGate =
 export type ResetRequestGate =
   | { allowed: true; retryAfterSeconds: 0; audit: null }
   | { allowed: false; retryAfterSeconds: number; audit: AuthLimitAudit };
+
+/** The decision for one /change-password attempt: same shape as a reset. */
+export type PasswordChangeGate = ResetRequestGate;
 
 interface AttemptBase {
   /** The email as submitted, after Zod validation. */
@@ -323,6 +340,28 @@ export async function consumeResetRequest(
       allowed: false,
       retryAfterSeconds: throttle.retryAfterSeconds,
       audit: { namespace: "email-reset", reason: "slowdown" },
+    };
+  }
+  return { allowed: true, retryAfterSeconds: 0, audit: null };
+}
+
+/**
+ * Call BEFORE handling a /change-password request for a signed-in user;
+ * proceed only if `allowed`. Keyed by the user id (HMAC'd), never by IP.
+ * Throws RateLimitUnavailableError or EnvError like consumeSignIn().
+ */
+export async function consumePasswordChange(
+  userId: string,
+): Promise<PasswordChangeGate> {
+  const result = await consume(
+    buildKey("user-pw-change", hashUserId(userId)),
+    PASSWORD_CHANGE,
+  );
+  if (!result.allowed) {
+    return {
+      allowed: false,
+      retryAfterSeconds: result.retryAfterSeconds,
+      audit: { namespace: "user-pw-change", reason: "hard_limit" },
     };
   }
   return { allowed: true, retryAfterSeconds: 0, audit: null };
