@@ -1,15 +1,22 @@
 // Phase 1 exit checks: the seeded admin signs in and reaches /admin; a
 // customer gets a real 403 there; a visitor is sent to /login; a forged
-// cookie gets no further; CN is geo-blocked and HK/MO/TW are not.
+// cookie gets no further; CN is geo-blocked and HK/MO/TW are not. Also
+// "Keep me signed in": off by default, a 7-day cookie only when checked.
 
 import { type Page, expect, test } from "@playwright/test";
 
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 
-async function signIn(page: Page, email: string, password: string) {
+async function signIn(
+  page: Page,
+  email: string,
+  password: string,
+  keepSignedIn = false,
+) {
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
+  if (keepSignedIn) await page.getByLabel("Keep me signed in").check();
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
@@ -77,6 +84,39 @@ test.describe("admin access", () => {
     const response = await request.get("/admin", { maxRedirects: 0 });
     expect(response.status()).toBe(307);
     expect(response.headers()["location"]).toBe("/login");
+  });
+});
+
+test.describe("keep me signed in (same for every role)", () => {
+  test("unchecked by default: the session cookie ends with the browser", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/login");
+    await expect(page.getByLabel("Keep me signed in")).not.toBeChecked();
+    await signIn(page, E2E_ADMIN.email, E2E_ADMIN.password);
+    await expect(page).toHaveURL(/\/admin$/);
+    const session = (await context.cookies()).find((c) =>
+      c.name.endsWith("session_token"),
+    );
+    expect(session, "no session cookie was set").toBeDefined();
+    // Playwright reports a browser-session cookie as expires -1.
+    expect(session?.expires).toBe(-1);
+  });
+
+  test("checked: the session cookie lasts about 7 days", async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, E2E_CUSTOMER.email, E2E_CUSTOMER.password, true);
+    await expect(page).toHaveURL(/\/$/);
+    const session = (await context.cookies()).find((c) =>
+      c.name.endsWith("session_token"),
+    );
+    expect(session, "no session cookie was set").toBeDefined();
+    const days = ((session?.expires ?? 0) - Date.now() / 1000) / 86_400;
+    expect(days).toBeGreaterThan(6.9);
+    expect(days).toBeLessThanOrEqual(7);
   });
 });
 

@@ -17,6 +17,8 @@ const loginSchema = z.object({
     .string()
     .min(1, "Enter your password.")
     .max(128, "Passwords are at most 128 characters."),
+  // Off by default for every role (user decision 2026-10-05).
+  rememberMe: z.boolean(),
 });
 type LoginValues = z.infer<typeof loginSchema>;
 
@@ -54,7 +56,10 @@ export function LoginForm() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<LoginValues>({ resolver: zodResolver(loginSchema) });
+  } = useForm<LoginValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "", rememberMe: false },
+  });
 
   async function onSubmit(values: LoginValues) {
     setFormError(null);
@@ -66,7 +71,9 @@ export function LoginForm() {
         body: JSON.stringify({
           email: values.email,
           password: values.password,
-          rememberMe: true,
+          // false: a browser-session cookie, and Better Auth ends the
+          // session after 24 hours without refreshing it. true: 7 days.
+          rememberMe: values.rememberMe,
         }),
         credentials: "same-origin",
       });
@@ -142,6 +149,18 @@ export function LoginForm() {
             {errors.password.message}
           </p>
         ) : null}
+      </div>
+
+      <div className="flex items-center gap-2.5">
+        <input
+          id="remember-me"
+          type="checkbox"
+          className="size-4 accent-ink"
+          {...register("rememberMe")}
+        />
+        <label htmlFor="remember-me" className="text-sm">
+          Keep me signed in
+        </label>
       </div>
 
       {/* Announced to screen readers when it appears. */}
