@@ -16,10 +16,11 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - T4 (category schemas + service, ADR 0037): `src/lib/schemas/{common,category}.ts`, `src/lib/admin/{write-result,categories}.ts`; 991 tests green.
   - T5 (categories UI, ADR 0038): `/admin/categories` (tree, new, edit, move, delete), reusable `callAction`/`ActionResult` pattern, action guard rules in `test/admin-guards.test.ts`; 1062 tests green, build OK.
 
+  - T6 (areas, ADR 0039): schemas + service + UI; 1141 tests green. Built with Sonnet 5.5 subagents because the user asked for it.
+
   The review hook is on.
-- **Next: T6a/T6b: areas** (schemas + service, then UI; `backend-architect` then `admin-panel-builder`, both model `opus`):
-  - reuse `src/lib/admin/write-result.ts`, `src/lib/schemas/common.ts`, and for the UI the ADR 0038 pattern (`callAction`, `ActionResult`, `actions.ts` guard rules);
-  - **QA gate A** (`qa-security-reviewer`, Opus) runs after T6 and covers T1–T6. Consider adding a Playwright flow for categories (create → move → delete blocked → delete).
+- **Next: QA gate A** (`qa-security-reviewer`, Opus) covering T1–T6; consider a Playwright flow for categories and areas (create → move → delete blocked → delete). Then **T7**: product Zod schemas (`backend-architect`).
+  - T11b must add the areas `bwImage` uploader and tighten the field to the publicId regex.
 
 - **Admin guards (ADR 0036):**
   - The layout's `requireAdmin()` gives the real 403; `loading.tsx` doesn't wrap the layout.
@@ -62,7 +63,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T5 done, next T6 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T6 done, next QA gate A then T7 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -143,8 +144,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T1: shadcn init (radix-nova, 16 ui components), tokens mapped, animation and dark mode stripped, contrast pairs tested — ADR 0034
 - [x] T3: admin layout with `requireAdmin()` everywhere (static guard test), sidebar + mobile nav, loading/error — ADR 0036
 - [x] T3: dashboard counts (`src/lib/admin/dashboard.ts`, uncached)
-- [ ] Categories tree editor
-- [ ] Areas module
+- [x] T4/T5: categories schemas, service and tree editor UI — ADR 0037, 0038
+- [x] T6: areas module (service + UI) — ADR 0039
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
@@ -222,6 +223,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T6 done on Sonnet 5.5 subagents at the user's request (ADR 0039). 1141 tests green. Next: QA gate A, then T7.
 - 2026-10-06 — T3 committed (ADR 0036). Found that Next puts static admin metadata into a customer's 403 payload, so admin metadata stays static. 933 unit and 42 e2e tests green. The user ends the session here; the next session starts at T4.
 - 2026-10-06 — T2 committed (ADR 0035; ADR 0008 status points to it). The auto-review raised a Medium: `"max"` could serve newly restricted columns stale. Fixed: `settings:columns` always uses `{ expire: 0 }`. 899 tests green. Next: T3.
 - 2026-10-06 — T1 committed (shadcn + token mapping, ADR 0034). The user ruled that UI work always goes to the frontend subagents on Opus. A Sonnet run was stopped and an Opus run reviewed its draft, fixing 11 issues: a dead QA regex, a nearly invisible destructive focus ring, leftover motion, needless `"use client"`, raw black overlays, CRLF. 819 tests and the build are green. Next: T2.
