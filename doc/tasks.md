@@ -13,15 +13,16 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - the audit vocabulary in `src/models/audit-actions.ts`.
 
   - T3 (admin shell + dashboard, ADR 0036).
+  - T4 (category schemas + service, ADR 0037): `src/lib/schemas/{common,category}.ts`, `src/lib/admin/{write-result,categories}.ts`; 991 tests green.
 
   The review hook is on.
-- **Next: T4: category schemas + service** (`backend-architect`, Opus):
-  - `src/lib/schemas/category.ts` and `src/lib/admin/categories.ts`;
-  - rules: depth ≤ `MAX_CATEGORY_DEPTH`, the parent must be top-level, the slug is unique per parent, move up/down swaps `order`, and delete is blocked while there are children or products (`mainCategory`/`extraCategories`);
-  - every write goes through `recordAudit` and returns tags (ADR 0035);
-  - tests: schemas and services (depth, in-use block, audit, tags) on the memory DB.
+- **Next: T5: categories UI** (`admin-panel-builder`, model `opus`):
+  - pages and Server Actions under `src/app/admin/categories` using the T4 service (ADR 0037);
+  - actions: `requireAdmin()` first → service with `viewer.user.id` → `revalidateCatalogInAction(result.tags)` on both ok and audit-failed branches → `redirect` outside `try`;
+  - parent picker offers main categories only (`""` = none); show `errors.formErrors` above the form; move up/down and delete buttons;
+  - add the Server Action `describe` block to `test/admin-guards.test.ts` plus customer/visitor behavioural tests (QA L2, task 6).
 
-  After T4: T5 (categories UI, `admin-panel-builder` on Opus), then T6a/T6b (areas). **QA gate A** (`qa-security-reviewer`, Opus) runs after T6 and covers T1–T6.
+  After T5: T6a/T6b (areas, reuse `write-result.ts` and `schemas/common.ts`). **QA gate A** (`qa-security-reviewer`, Opus) runs after T6 and covers T1–T6.
 - **Admin guards (ADR 0036):**
   - The layout's `requireAdmin()` gives the real 403; `loading.tsx` doesn't wrap the layout.
   - Pages still guard first, because client navigation skips the layout.
@@ -63,7 +64,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T3 done, next T4 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T4 done, next T5 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
