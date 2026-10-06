@@ -1,8 +1,8 @@
 "use client";
 
-// The product edit form (T10a): status card, Basics, Categories and areas,
-// Filters, a read-only variants list, Save and Delete. The client sends JSON;
-// the Server Action re-parses it with productInputSchema (rule 8).
+// The product edit form (T10a/b): status card, Basics, Categories and areas,
+// Filters, Specs, Variants, Extra specs, Public files, Save and Delete. The
+// client sends JSON; the Server Action re-parses it with productInputSchema.
 
 import { CircleAlert } from "lucide-react";
 import Link from "next/link";
@@ -36,6 +36,7 @@ import { PRODUCTS_PATH } from "../product-paths";
 import { BasicsSection } from "./basics-section";
 import { CategoriesSection, type PickerOption } from "./categories-section";
 import { DeleteProduct } from "./delete-product";
+import { ExtraSpecsSection, PublicFilesSection } from "./extra-info-sections";
 import {
   applyServerErrors,
   flattenFormErrors,
@@ -50,9 +51,19 @@ import {
   toProductInput,
   type ProductEditValues,
 } from "./form-values";
-import { isRenderedField } from "./sections";
+import { isRenderedField, type RenderedRows } from "./sections";
+import { SpecsSection } from "./specs-section";
 import { StatusPanel } from "./status-panel";
-import { VariantsSummary } from "./variants-summary";
+import { VariantsEditor } from "./variants-editor";
+
+/* Just the row lists of the form values (for isRenderedField). */
+function rowLists(values: ProductEditValues): RenderedRows {
+  return {
+    variants: values.variants,
+    extraSpecs: values.extraSpecs,
+    publicFiles: values.publicFiles,
+  };
+}
 
 /** The product as the edit page loaded it (plain JSON from the server). */
 export interface EditedProduct {
@@ -96,8 +107,9 @@ export function ProductEditForm({
     { mainCategory, extraCategories },
     magnetic,
   );
+  // Rows are read when errors arrive, not watched: no re-render per keystroke.
   const rendered = (field: string) =>
-    isRenderedField(field, { trackSize: showTrackSize });
+    isRenderedField(field, { trackSize: showTrackSize }, form.getValues());
 
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [saved, setSaved] = useState<boolean | "unknown">(false);
@@ -140,6 +152,8 @@ export function ProductEditForm({
       return;
     }
     inFlight.current = true;
+    // The rows as sent: server errors name rows by these indices.
+    const sentRows = rowLists(values);
     startTransition(async () => {
       /*
        * Cleared in `finally`: on success the action redirects to this same
@@ -154,10 +168,24 @@ export function ProductEditForm({
         );
         if (!result || result.ok) return;
         setSaved(result.saved);
+        /*
+         * If the admin added, removed, moved or edited rows while the save
+         * ran, "variants.2" may now be another row: row errors then go to
+         * the labelled alert instead of landing on the wrong row.
+         */
+        const rowsAsSent = sameParsedInput(
+          sentRows,
+          rowLists(form.getValues()),
+        );
         const { formMessages, focusedField } = applyServerErrors(
           form,
           result.errors,
-          rendered,
+          (field) =>
+            isRenderedField(
+              field,
+              { trackSize: showTrackSize },
+              rowsAsSent ? sentRows : undefined,
+            ),
         );
         setFormErrors(formMessages);
         if (!focusedField && formMessages.length > 0) {
@@ -236,7 +264,10 @@ export function ProductEditForm({
             showTrackSize={showTrackSize}
           />
           <FiltersSection />
-          <VariantsSummary />
+          <SpecsSection />
+          <VariantsEditor />
+          <ExtraSpecsSection />
+          <PublicFilesSection />
 
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit" disabled={pending}>

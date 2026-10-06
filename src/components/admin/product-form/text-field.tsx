@@ -2,6 +2,7 @@
 // React Hook Form through the form context: help text and the error message
 // are tied to the control with aria-describedby, invalid state with aria-invalid.
 
+import type { ReactNode } from "react";
 import { Controller, useFormContext } from "react-hook-form";
 
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import type { SpecKey } from "@/models/spec-columns";
 
 import type { FilterKey, ProductEditValues } from "./form-values";
 
@@ -24,7 +26,12 @@ export type TextFieldName =
   | "productNo"
   | "type"
   | "description"
-  | `filters.${FilterKey}`;
+  | `filters.${FilterKey}`
+  | `specs.${SpecKey}`
+  | `variants.${number}.${"modelNo" | "label" | "imagePublicId"}`
+  | `variants.${number}.specs.${SpecKey}`
+  | `extraSpecs.${number}.${"group" | "label" | "value"}`
+  | `publicFiles.${number}.${"label" | "url"}`;
 
 /** The DOM id for a field, e.g. `filters.cctK` -> `product-filters-cctK`. */
 export function fieldId(name: string): string {
@@ -45,19 +52,25 @@ export function describedBy(
 export function TextField({
   name,
   label,
+  labelExtra,
   help,
   maxLength,
   multiline = false,
+  rows = 5,
   inputMode,
   spellCheck,
   required = false,
 }: {
   name: TextFieldName;
   label: string;
+  /** Shown after the label inside it, e.g. a "Restricted" badge. */
+  labelExtra?: ReactNode;
   help?: string;
   maxLength?: number;
   multiline?: boolean;
-  inputMode?: "text" | "numeric" | "decimal";
+  /** Starting height of a textarea (it grows with its content). */
+  rows?: number;
+  inputMode?: "text" | "numeric" | "decimal" | "url";
   spellCheck?: boolean;
   required?: boolean;
 }) {
@@ -70,6 +83,14 @@ export function TextField({
       render={({ field, fieldState }) => {
         const props = {
           ...field,
+          /*
+           * No name attribute: a Save clicked before hydration makes the
+           * browser submit the form natively (a GET), and named inputs would
+           * put every value, restricted specs included, into the URL.
+           */
+          name: undefined,
+          // A variant's spec difference can be removed while mounted.
+          value: field.value ?? "",
           id,
           maxLength,
           spellCheck,
@@ -83,9 +104,17 @@ export function TextField({
         };
         return (
           <Field data-invalid={fieldState.invalid}>
-            <FieldLabel htmlFor={id}>{label}</FieldLabel>
+            <FieldLabel htmlFor={id}>
+              {label}
+              {labelExtra ? <> {labelExtra}</> : null}
+            </FieldLabel>
             {multiline ? (
-              <Textarea {...props} rows={5} />
+              <Textarea
+                {...props}
+                rows={rows}
+                // Short spec texts start one line high and grow as they fill.
+                className={rows <= 2 ? "min-h-9" : undefined}
+              />
             ) : (
               <Input {...props} inputMode={inputMode} />
             )}

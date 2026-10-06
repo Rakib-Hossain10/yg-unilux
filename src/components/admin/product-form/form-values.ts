@@ -4,6 +4,7 @@
 
 import type { ProductFormValues } from "@/lib/schemas/product";
 import { TRACK_SIZES } from "@/models/product-constants";
+import { SPEC_KEYS, type SpecKey } from "@/models/spec-columns";
 
 /** The listing filters, in the order the form shows them. */
 export const FILTER_FIELDS = [
@@ -25,16 +26,110 @@ export const NO_TRACK_SIZE = "none";
 export type TrackSizeChoice =
   typeof NO_TRACK_SIZE | `${(typeof TRACK_SIZES)[number]}`;
 
-type Variants = NonNullable<ProductFormValues["variants"]>;
-type ExtraSpecs = NonNullable<ProductFormValues["extraSpecs"]>;
-type PublicFiles = NonNullable<ProductFormValues["publicFiles"]>;
-type Specs = NonNullable<ProductFormValues["specs"]>;
+type StoredSpecs = NonNullable<ProductFormValues["specs"]>;
+
+/** Product-level specs as typed: one text per key, one option per line. */
+export type SpecTexts = Record<SpecKey, string>;
+
+/**
+ * A variant's spec differences as typed. Only the keys the admin added are
+ * present (each with its own input); a key with "" is dropped on save.
+ */
+export type SpecOverrideTexts = Partial<Record<SpecKey, string>>;
+
+/** One variant row of the editor (strings only, "" = none). */
+export interface VariantFormValues {
+  modelNo: string;
+  label: string;
+  imagePublicId: string;
+  specs: SpecOverrideTexts;
+}
+
+/** One extra spec row: `group` may be "". */
+export interface ExtraSpecFormValues {
+  group: string;
+  label: string;
+  value: string;
+}
+
+/** One public file row: a label and an https:// link. */
+export interface PublicFileFormValues {
+  label: string;
+  url: string;
+}
+
+/** A new, empty row for each editor (what "Add" appends). */
+export const EMPTY_VARIANT: VariantFormValues = {
+  modelNo: "",
+  label: "",
+  imagePublicId: "",
+  specs: {},
+};
+export const EMPTY_EXTRA_SPEC: ExtraSpecFormValues = {
+  group: "",
+  label: "",
+  value: "",
+};
+export const EMPTY_PUBLIC_FILE: PublicFileFormValues = { label: "", url: "" };
+
+/** Stored options -> the editor's text: one option per line. */
+export function optionsToText(values: readonly string[] | undefined): string {
+  return (values ?? []).join("\n");
+}
+
+/**
+ * The editor's text -> options: one per line (LF or CRLF, e.g. a paste on
+ * Windows), trimmed, blank lines dropped.
+ * Lines, not commas or slashes, because real values contain both
+ * ("100-240V, 50/60Hz"); the client's sheet also puts one option per line.
+ */
+export function textToOptions(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/** Stored specs -> one text per key (all 28 keys, "" = not applicable). */
+export function specsToTexts(specs: StoredSpecs | undefined): SpecTexts {
+  return Object.fromEntries(
+    SPEC_KEYS.map((key) => [key, optionsToText(specs?.[key])]),
+  ) as SpecTexts;
+}
+
+/** A variant's stored differences -> texts for the keys it has. */
+function overridesToTexts(specs: StoredSpecs | undefined): SpecOverrideTexts {
+  const texts: SpecOverrideTexts = {};
+  for (const key of SPEC_KEYS) {
+    const values = specs?.[key];
+    if (values !== undefined && values.length > 0) {
+      texts[key] = optionsToText(values);
+    }
+  }
+  return texts;
+}
+
+/**
+ * Spec texts -> the schema's spec object, keys in SPEC_KEYS order and only
+ * keys with at least one option (the schema drops empty ones anyway, and
+ * leaving them out keeps the "no changes" check exact).
+ */
+export function textsToSpecs(texts: SpecOverrideTexts): StoredSpecs {
+  const specs: Partial<Record<SpecKey, string[]>> = {};
+  for (const key of SPEC_KEYS) {
+    const text = texts[key];
+    if (text === undefined) continue;
+    const options = textToOptions(text);
+    if (options.length > 0) specs[key] = options;
+  }
+  return specs;
+}
 
 /**
  * What React Hook Form holds. Section (a) edits the text, category, area,
- * track-size and filter fields. `specs`, `variants`, `extraSpecs`,
- * `publicFiles` and `datasheetId` have no inputs yet (T10b, T13): they are
- * loaded and sent back unchanged, so saving section (a) never wipes them.
+ * track-size and filter fields; section (b) the specs, variants, extra specs
+ * and public files. `datasheetId` has no input yet (T13): it is loaded and
+ * sent back unchanged, so a save never wipes it.
  * `status` is not form state: it comes from the server on every render, so a
  * Save after Publish can never send the old status back.
  */
@@ -53,10 +148,10 @@ export interface ProductEditValues {
   trackSize: TrackSizeChoice;
   /** One text per filter, numbers separated by commas. */
   filters: Record<FilterKey, string>;
-  specs: Specs;
-  variants: Variants;
-  extraSpecs: ExtraSpecs;
-  publicFiles: PublicFiles;
+  specs: SpecTexts;
+  variants: VariantFormValues[];
+  extraSpecs: ExtraSpecFormValues[];
+  publicFiles: PublicFileFormValues[];
   datasheetId: string | null;
 }
 
@@ -84,10 +179,22 @@ export function toFormState(values: ProductFormValues): ProductEditValues {
         ? NO_TRACK_SIZE
         : (String(values.trackSize) as TrackSizeChoice),
     filters,
-    specs: values.specs ?? {},
-    variants: values.variants ?? [],
-    extraSpecs: values.extraSpecs ?? [],
-    publicFiles: values.publicFiles ?? [],
+    specs: specsToTexts(values.specs),
+    variants: (values.variants ?? []).map((variant) => ({
+      modelNo: variant.modelNo,
+      label: variant.label ?? "",
+      imagePublicId: variant.imagePublicId ?? "",
+      specs: overridesToTexts(variant.specs),
+    })),
+    extraSpecs: (values.extraSpecs ?? []).map((extra) => ({
+      group: extra.group ?? "",
+      label: extra.label,
+      value: extra.value,
+    })),
+    publicFiles: (values.publicFiles ?? []).map((file) => ({
+      label: file.label,
+      url: file.url,
+    })),
     datasheetId: values.datasheetId ?? null,
   };
 }
@@ -167,7 +274,9 @@ export function sameParsedInput(a: unknown, b: unknown): boolean {
  * Form state -> the Server Action's input, without `status` (the caller adds
  * the server's current one). Text that fails parseNumberList/parseProductNo
  * is passed through as-is, so productInputSchema refuses it instead of it
- * silently becoming "none". A hidden track size is sent as null.
+ * silently becoming "none". A hidden track size is sent as null. Spec texts
+ * become option lists (one per line); rows are copied field by field, so no
+ * stray key (e.g. a field-array id) can reach the strict schema.
  */
 export function toProductInput(
   values: ProductEditValues,
@@ -199,11 +308,23 @@ export function toProductInput(
     extraCategories: values.extraCategories,
     areas: values.areas,
     trackSize: trackSize as ProductFormValues["trackSize"],
-    specs: values.specs,
+    specs: textsToSpecs(values.specs),
     filters: filters as ProductFormValues["filters"],
-    variants: values.variants,
-    extraSpecs: values.extraSpecs,
-    publicFiles: values.publicFiles,
+    variants: values.variants.map((variant) => ({
+      modelNo: variant.modelNo,
+      label: variant.label,
+      specs: textsToSpecs(variant.specs),
+      imagePublicId: variant.imagePublicId,
+    })),
+    extraSpecs: values.extraSpecs.map((extra) => ({
+      group: extra.group,
+      label: extra.label,
+      value: extra.value,
+    })),
+    publicFiles: values.publicFiles.map((file) => ({
+      label: file.label,
+      url: file.url,
+    })),
     datasheetId: values.datasheetId,
   };
 }

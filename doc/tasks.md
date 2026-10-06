@@ -28,19 +28,20 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - Optimistic concurrency on `updatedAt`.
   - A published product stays publishable.
   - Route groups `admin/(dashboard)` and `products/(list)` give a real 404.
-- **Next: T10b.** Run it on `admin-panel-builder`, model `opus`, in `src/components/admin/product-form/*`:
-  - Specs editor, grouped from `SPEC_COLUMNS`.
-  - Replace `variants-summary.tsx` with a `useFieldArray` editor (label, modelNo, imagePublicId, per-variant specs).
-  - Extra specs `{group,label,value}`.
-  - Public files: https-only.
-  - Add each new field to `isRenderedField` in `sections.ts`. The mapper already handles `variants.N.*`, `specs.K`, `extraSpecs.N.*` and `publicFiles.N.*`.
-  - Never add a `loading.tsx` above `products/[id]`.
-  - Measure resolver speed with about 200 variants.
-  - Then **QA gate B** (T7–T10) with `qa-security-reviewer` on Opus.
+- T10b done (ADR 0044): specs editor, variants, extra specs, public files. 1429 unit + 80 e2e green.
+- **Next: QA gate B** (T7–T10b) with `qa-security-reviewer` on Opus. Points to check:
+  - Other admin forms spread `{...field}` with `name`, so a pre-hydration GET submit puts values in the URL.
+  - Focus after a move in non-Chromium browsers.
+  - Empty extra-spec group stored as `null` vs. an omitted variant label.
+  - The publish invariant and optimistic concurrency (ADR 0043).
+  - The guard matrix on all product actions.
+- **After gate B: T11a.** Cloudinary lib, sign/verify, CSP (`backend-architect`, Opus). **Remind the user to apply the R2 CORS rule before T11/T12.**
 - **Backend follow-ups from T10a (ADR 0043, not blocking):**
   - `invalidInput` should key nested Zod issues by the full dotted path.
   - Add a shared `isMagneticTrackCategory` helper, to remove the duplicate in `product-category-options.ts`.
   - Export the createDraft schema, and move `MAX_PRODUCT_SEARCH_LENGTH` to `constants.ts`.
+  - Add a `group` field to `SPEC_COLUMNS` (ADR 0044).
+  - When the column-visibility setting lands, pass the effective restricted keys to the edit form.
 - **Open items from gate A:**
   - **P-1 (before the Phase 2 merge):** `npm audit --audit-level=high` fails on dev-only braces (GHSA-vfj7-8cjw-p6xm via eslint-config-next → fast-glob → micromatch); `--omit=dev` is clean, no non-forced fix. Add an `overrides` entry once patched, or write a deferral ADR (ADR 0015 style) and adjust CI.
   - L-1: categories and areas `[id]` pages still answer 200 on not-found because of their `[id]/loading.tsx`. Products is fixed (ADR 0043); apply the same fix, or accept it in an ADR note.
@@ -89,7 +90,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T9 and T10a done, next T10b, then QA gate B (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T10 done, next QA gate B, then T11a (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -176,7 +177,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T8: product service — ADR 0041
 - [x] T9: products list + new draft, gate A L-4/L-5 fixes — ADR 0042
 - [x] T10a: product edit form section (a), status card, delete, optimistic concurrency — ADR 0043
-- [ ] T10b: specs, variants, extra specs, public files
+- [x] T10b: specs, variants, extra specs, public files — ADR 0044
+- [ ] QA gate B (T7–T10)
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
@@ -254,6 +256,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T10b done on Opus (ADR 0044). The auto-review caught a regex with literal line breaks (Critical); it was fixed. Input `name`s are dropped so a pre-hydration submit can't put spec text in the URL. 200 variants stay responsive. 1429 unit + 80 e2e green. Next: QA gate B.
 - 2026-10-06 — T10a done on Opus (ADR 0043). The auto-review found two Highs, both fixed: every save after the first did nothing (the in-flight flag stayed set through the redirect), and a stale tab could overwrite newer data. The second fix: status now changes only through publish/unpublish, and saves are checked against `updatedAt`. Six Medium fixes followed. 1364 unit + 74 e2e green. Next: T10b.
 - 2026-10-06 — T9 done on Opus (ADR 0042): products list, new draft, shared move guard, e2e for products. Next: T10.
 - 2026-10-06 — T8 done (ADR 0041): product service with publish gate, trackSize rule, modelNo field errors. Next: T9.

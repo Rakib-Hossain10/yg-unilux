@@ -10,6 +10,11 @@ import { AreaModel, CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { setupMemoryDb } from "../../../../test/helpers/memory-db";
 
+import {
+  toFormState,
+  toProductInput,
+  type ProductEditValues,
+} from "@/components/admin/product-form/form-values";
 import { getProductForEdit, PRODUCT_CHANGED } from "@/lib/admin/products";
 
 import {
@@ -157,6 +162,21 @@ const EVERY_ACTION: [string, () => Promise<unknown>][] = [
   [
     "save the edit form",
     async () => save(productId, await editValues({ name: "Renamed" })),
+  ],
+  // Same action as above; listed so section (b)'s payload (T10b) is shown
+  // refused for every non-admin too, not only section (a)'s.
+  [
+    "save section (b): specs, variants, extra specs and public files",
+    async () =>
+      save(
+        productId,
+        await editValues({
+          specs: { driver: ["Lifud"] },
+          variants: [{ modelNo: "ZZ-1", label: "", imagePublicId: "" }],
+          extraSpecs: [{ group: "", label: "Weight", value: "1 kg" }],
+          publicFiles: [{ label: "IES", url: "https://example.com/a.ies" }],
+        }),
+      ),
   ],
   ["publish", () => publish()],
   ["unpublish", () => unpublish()],
@@ -401,6 +421,162 @@ describe("edit actions as the admin", () => {
       ok: false,
       saved: false,
       errors: { fieldErrors: { "variants.2.modelNo": [expect.any(String)] } },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  /* What the edit form sends after the admin edits section (b) (T10b). */
+  async function formPayload(
+    edit: (state: ProductEditValues) => void,
+  ): Promise<unknown> {
+    const loaded = await getProductForEdit(productId);
+    if (!loaded) throw new Error("fixture product missing");
+    const state = toFormState(loaded.values);
+    edit(state);
+    return toProductInput(state, new Set());
+  }
+
+  it("save persists specs, reordered variants with differences, extra specs and public files", async () => {
+    const values = await formPayload((state) => {
+      state.specs.cct = "2700K\n3000K";
+      state.specs.driver = "Lifud";
+      state.specs.dimensions = "Ø85 x 60 mm";
+      // New variant first, then the two stored ones swapped.
+      const [first, second] = state.variants;
+      if (!first || !second) throw new Error("fixture variants missing");
+      state.variants = [
+        {
+          modelNo: "AR-013A3",
+          label: "Wide",
+          imagePublicId: "products/ar-013a3",
+          specs: { beamAngle: "60°", lumenOutput: "800 lm" },
+        },
+        second,
+        { ...first, specs: {} },
+      ];
+      state.extraSpecs = [
+        { group: "Physical", label: "Weight", value: "0.5 kg" },
+        { group: "", label: "Packing", value: "1 pc / box" },
+      ];
+      state.publicFiles = [
+        { label: "IES", url: "https://example.com/ar.ies" },
+        { label: "Guide", url: "https://example.com/guide.pdf" },
+      ];
+    });
+    const to = await redirectOf(save(productId, values));
+    expect(to).toBe(`/admin/products/${productId}?notice=updated`);
+
+    const row = await ProductModel.findById(productId).lean();
+    expect(row?.specs).toEqual({
+      cct: ["2700K", "3000K"],
+      driver: ["Lifud"],
+      dimensions: ["Ø85 x 60 mm"],
+    });
+    expect(JSON.parse(JSON.stringify(row?.variants)) as unknown).toEqual([
+      {
+        modelNo: "AR-013A3",
+        label: "Wide",
+        imagePublicId: "products/ar-013a3",
+        specs: { beamAngle: ["60°"], lumenOutput: ["800 lm"] },
+      },
+      { modelNo: "AR-013A2" },
+      { modelNo: "AR-013A1", label: "Lens" },
+    ]);
+    expect(JSON.parse(JSON.stringify(row?.extraSpecs)) as unknown).toEqual([
+      { group: "Physical", label: "Weight", value: "0.5 kg" },
+      // The service stores an empty group as null (read back as "").
+      { group: null, label: "Packing", value: "1 pc / box" },
+    ]);
+    expect(JSON.parse(JSON.stringify(row?.publicFiles)) as unknown).toEqual([
+      { label: "IES", url: "https://example.com/ar.ies" },
+      { label: "Guide", url: "https://example.com/guide.pdf" },
+    ]);
+    expect(
+      await AuditLogModel.countDocuments({ action: "product.update" }),
+    ).toBe(1);
+    expect(nextCache.updateTag).toHaveBeenCalledWith(`product:${productId}`);
+
+    // The page reloads the saved product; saving it again changes nothing.
+    nextCache.updateTag.mockReset();
+    const again = await redirectOf(
+      save(productId, await formPayload(() => {})),
+    );
+    expect(again).toBe(`/admin/products/${productId}?notice=unchanged`);
+    expect(nextCache.updateTag).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "http://example.com/a.ies",
+    "javascript:alert(1)",
+    "https://user:pass@example.com/a.ies",
+    "//example.com/a.ies",
+  ])("save refuses the public file link %s and writes nothing", async (url) => {
+    const before = await snapshot();
+    const values = await formPayload((state) => {
+      state.publicFiles = [{ label: "IES", url }];
+    });
+    const result = await save(productId, values);
+    expect(result).toMatchObject({
+      ok: false,
+      saved: false,
+      errors: {
+        fieldErrors: { publicFiles: ["Enter a full https:// link"] },
+      },
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("save refuses a repeated model no. and a spec key the sheet doesn't have", async () => {
+    const before = await snapshot();
+    const repeated = await formPayload((state) => {
+      state.variants.push({
+        modelNo: "ar-013a1",
+        label: "",
+        imagePublicId: "",
+        specs: {},
+      });
+    });
+    // invalidInput flattens the schema's `variants.3.modelNo` path to the
+    // list name (a backend follow-up); the client resolver shows it on the row.
+    expect(await save(productId, repeated)).toMatchObject({
+      ok: false,
+      saved: false,
+      errors: {
+        fieldErrors: {
+          variants: ["This model no. is already used by another variant"],
+        },
+      },
+    });
+    const values = (await formPayload(() => {})) as Record<string, unknown>;
+    const unknownSpec = { ...values, specs: { secretColumn: ["x"] } };
+    expect(await save(productId, unknownSpec)).toMatchObject({
+      ok: false,
+      saved: false,
+    });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("save maps a new row's model no. owned by another product to that row", async () => {
+    await ProductModel.create({
+      name: "Other",
+      slug: "other",
+      mainCategory: new ObjectId(spotLights),
+      variants: [{ modelNo: "XX-9" }],
+    });
+    const before = await snapshot();
+    const values = await formPayload((state) => {
+      state.variants.splice(1, 0, {
+        modelNo: "XX-9",
+        label: "",
+        imagePublicId: "",
+        specs: {},
+      });
+    });
+    const result = await save(productId, values);
+    expect(result).toMatchObject({
+      ok: false,
+      saved: false,
+      errors: { fieldErrors: { "variants.1.modelNo": [expect.any(String)] } },
     });
     expect(await snapshot()).toEqual(before);
   });

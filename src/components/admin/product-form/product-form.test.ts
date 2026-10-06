@@ -1,8 +1,8 @@
-// Unit and render tests for the product edit form (T10a) without a browser:
-// form-state conversions and their round trip, error-path mapping (incl.
-// `variants.N.modelNo`), the client resolver, publish refusals and markup.
+// Unit and render tests for the product edit form (T10a/b) without a browser:
+// form-state conversions and their round trip (specs, variants, extra specs,
+// public files), error-path mapping, the resolver, publish refusals and markup.
 
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -19,12 +19,20 @@ vi.mock("@/app/admin/products/actions", () => ({
   deleteProductAction: vi.fn(),
 }));
 
-import type { ProductFormValues } from "@/lib/schemas/product";
+import { FormProvider, useForm, type FieldErrors } from "react-hook-form";
+
+import {
+  productInputSchema,
+  type ProductFormValues,
+} from "@/lib/schemas/product";
+import { MAX_VARIANTS } from "@/lib/constants";
+import { DEFAULT_RESTRICTED_SPEC_KEYS, SPEC_KEYS } from "@/models/spec-columns";
 
 import { magneticTrackIds } from "../product-category-options";
 import {
   applyServerErrors,
   describeField,
+  errorPath,
   flattenFormErrors,
   formFieldForPath,
   productEditResolver,
@@ -33,16 +41,22 @@ import {
 } from "./field-errors";
 import {
   allowsTrackSize,
+  EMPTY_VARIANT,
   parseNumberList,
   parseProductNo,
   sameParsedInput,
+  textsToSpecs,
+  textToOptions,
   toFormState,
   toProductInput,
   type ProductEditValues,
 } from "./form-values";
 import { ProductEditForm } from "./product-edit-form";
-import { isRenderedField } from "./sections";
+import { indexAfterRemove } from "./row-controls";
+import { isRenderedField, type RenderedRows } from "./sections";
+import { SPEC_GROUPS } from "./spec-groups";
 import { statusFailure } from "./status-panel";
+import { VariantsEditor } from "./variants-editor";
 
 const MAIN = "65f0c0ffee0000000000000a";
 const TRACK = "65f0c0ffee0000000000000b";
@@ -428,7 +442,7 @@ describe("ProductEditForm", () => {
     expect(html).toContain("Save changes");
   });
 
-  it("escapes labels and shows the kept variants read-only", () => {
+  it("escapes labels and shows the variants in their editor", () => {
     const html = render();
     expect(html).toContain("Office &lt;b&gt;");
     expect(html).toContain("Variants (1)");
@@ -466,5 +480,482 @@ describe("ProductEditForm", () => {
     expect(live).toContain("Published");
     expect(live).toContain("Move to draft");
     expect(live).toContain("changing the slug changes its URL");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T10b: specs, variants, extra specs and public files
+// ---------------------------------------------------------------------------
+
+/* A product with every section (b) field filled, as getProductForEdit sends it. */
+const full: ProductFormValues = {
+  ...stored,
+  specs: {
+    cct: ["3000K", "4000K"],
+    driver: ["Lifud"],
+    voltageInput: ["100-240V, 50/60Hz"],
+  },
+  variants: [
+    {
+      modelNo: "AR-013A1",
+      label: "Lens",
+      specs: { beamAngle: ["24°", "36°"] },
+      imagePublicId: "products/ar-013a1",
+    },
+    { modelNo: "AR-013A2", label: "", specs: {}, imagePublicId: "" },
+  ],
+  extraSpecs: [
+    { group: "Physical", label: "Weight", value: "0.4 kg" },
+    { group: "", label: "Packing", value: "1 pc / box" },
+  ],
+  publicFiles: [
+    { label: "IES", url: "https://example.com/a.ies" },
+    { label: "Guide", url: "https://example.com/guide.pdf" },
+  ],
+};
+
+describe("section (b) form state", () => {
+  it("holds specs as one text per key, one option per line", () => {
+    const state = toFormState(full);
+    expect(Object.keys(state.specs)).toEqual([...SPEC_KEYS]);
+    expect(state.specs.cct).toBe("3000K\n4000K");
+    expect(state.specs.voltageInput).toBe("100-240V, 50/60Hz");
+    expect(state.specs.lens).toBe("");
+    // A variant holds only the keys that differ.
+    expect(state.variants[0]?.specs).toEqual({ beamAngle: "24°\n36°" });
+    expect(state.variants[1]?.specs).toEqual({});
+  });
+
+  it("round-trips specs, variants, extra specs and public files in order", () => {
+    const { status, ...rest } = full;
+    expect(status).toBe("draft");
+    expect(toProductInput(toFormState(full), NO_MAGNETIC)).toEqual({
+      ...rest,
+      productNo: 76,
+      filters: { cctK: [3000, 4000] },
+    });
+    // And the server parses both to the same product.
+    expect(
+      productInputSchema.parse(toProductInput(toFormState(full), NO_MAGNETIC)),
+    ).toEqual(productInputSchema.parse(full));
+  });
+
+  it("splits lines (incl. Windows line ends), trims and drops blanks", () => {
+    expect(textToOptions("a\r\nb\n\n  c  \n")).toEqual(["a", "b", "c"]);
+    expect(textToOptions("   ")).toEqual([]);
+    // Emptied keys are left out, so "no changes" still compares equal.
+    expect(textsToSpecs({ cct: "", lens: " \n ", cri: "80\n90" })).toEqual({
+      cri: ["80", "90"],
+    });
+  });
+
+  it("sends a new variant's added-but-empty spec as nothing", () => {
+    const state = toFormState(full);
+    state.variants.push({
+      ...EMPTY_VARIANT,
+      modelNo: "AR-013A3",
+      specs: { cct: "" },
+    });
+    expect(toProductInput(state, NO_MAGNETIC).variants?.[2]).toEqual({
+      modelNo: "AR-013A3",
+      label: "",
+      specs: {},
+      imagePublicId: "",
+    });
+  });
+
+  it("copies rows field by field, so no stray key reaches the strict schema", () => {
+    const state = toFormState(full);
+    // e.g. a field-array id that leaked into the values.
+    (state.variants[0] as unknown as Record<string, unknown>).id = "x";
+    (state.publicFiles[0] as unknown as Record<string, unknown>).id = "y";
+    const input = toProductInput(state, NO_MAGNETIC);
+    expect(input.variants?.[0]).not.toHaveProperty("id");
+    expect(input.publicFiles?.[0]).not.toHaveProperty("id");
+    expect(productInputSchema.safeParse(input).success).toBe(true);
+  });
+
+  it("treats an unedited form as unchanged", () => {
+    const parse = (
+      values: ProductFormValues | ReturnType<typeof toProductInput>,
+    ) => productInputSchema.parse(values);
+    expect(
+      sameParsedInput(
+        parse(toProductInput(toFormState(full), NO_MAGNETIC)),
+        parse(full),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("SPEC_GROUPS", () => {
+  it("covers all 28 spec columns once, in sheet order", () => {
+    const keys = SPEC_GROUPS.flatMap((group) =>
+      group.columns.map((column) => column.key),
+    );
+    expect(keys).toEqual([...SPEC_KEYS]);
+    expect(SPEC_GROUPS.map((group) => group.title)).toEqual([
+      "Identification",
+      "Housing and optics",
+      "Size and mounting",
+      "Light source",
+      "Electrical and output",
+      "Lifetime and protection",
+    ]);
+  });
+
+  it("marks exactly the default-restricted columns", () => {
+    const restricted = SPEC_GROUPS.flatMap((group) =>
+      group.columns.filter((c) => c.restrictedByDefault).map((c) => c.key),
+    );
+    expect(restricted).toEqual([...DEFAULT_RESTRICTED_SPEC_KEYS]);
+    expect(restricted).toEqual([
+      "batchNo",
+      "chipType",
+      "holder",
+      "chipEfficiency",
+      "driver",
+    ]);
+  });
+});
+
+describe("section (b) error mapping", () => {
+  const rows: RenderedRows = toFormState(full);
+  const rowsWithSpec: RenderedRows = {
+    ...rows,
+    variants: rows.variants.map((variant, index) =>
+      index === 1 ? { ...variant, specs: { cct: "" } } : variant,
+    ),
+  };
+
+  it.each([
+    ["specs.cct", true],
+    ["specs.driver", true],
+    ["variants", true],
+    ["variants.root", true],
+    ["extraSpecs.root", true],
+    ["publicFiles", true],
+    ["variants.0.modelNo", true],
+    ["variants.1.label", true],
+    ["variants.1.imagePublicId", true],
+    ["variants.0.specs.beamAngle", true],
+    ["variants.0.specs.cct", false],
+    ["variants.2.modelNo", false],
+    ["variants.0", false],
+    ["variants.0.nope", false],
+    ["extraSpecs.1.group", true],
+    ["extraSpecs.1.value", true],
+    ["extraSpecs.2.label", false],
+    ["extraSpecs.0.specs.cct", false],
+    ["publicFiles.1.url", true],
+    ["publicFiles.0.group", false],
+    ["images", false],
+    ["status", false],
+  ])("%s rendered: %s", (field, expected) => {
+    expect(isRenderedField(field, { trackSize: false }, rows)).toBe(expected);
+  });
+
+  it("counts a variant's spec difference only while its input is shown", () => {
+    expect(
+      isRenderedField("variants.1.specs.cct", { trackSize: false }, rows),
+    ).toBe(false);
+    expect(
+      isRenderedField(
+        "variants.1.specs.cct",
+        { trackSize: false },
+        rowsWithSpec,
+      ),
+    ).toBe(true);
+    // Without rows (e.g. rows changed during a save), no row is rendered.
+    expect(isRenderedField("variants.0.modelNo", { trackSize: false })).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    ["extraSpecs.0.value", "extraSpecs.0.value"],
+    ["extraSpecs.0.group", "extraSpecs.0.group"],
+    ["publicFiles.3.label", "publicFiles.3.label"],
+    ["variants.0.imagePublicId", "variants.0.imagePublicId"],
+    ["variants.0.label", "variants.0.label"],
+    ["extraSpecs", "extraSpecs"],
+    ["extraSpecs.0.url", null],
+    ["publicFiles.0.value", null],
+    ["specs.driver.4", "specs.driver"],
+  ])("formFieldForPath %s -> %s", (path, field) => {
+    expect(formFieldForPath(path)).toBe(field);
+  });
+
+  it("keeps list-level errors in RHF's root slot", () => {
+    expect(errorPath("variants")).toBe("variants.root");
+    expect(errorPath("extraSpecs")).toBe("extraSpecs.root");
+    expect(errorPath("publicFiles")).toBe("publicFiles.root");
+    expect(errorPath("variants.0.modelNo")).toBe("variants.0.modelNo");
+    expect(errorPath("specs.cct")).toBe("specs.cct");
+    expect(describeField("variants.root")).toBe("Variants");
+    expect(describeField("extraSpecs.1.value")).toBe("Extra spec 2, value");
+  });
+
+  it("puts server row errors on their rows and a list error in its slot", () => {
+    const setError = vi.fn();
+    const { formMessages, focusedField } = applyServerErrors(
+      { setError },
+      {
+        formErrors: [],
+        fieldErrors: {
+          "variants.1.modelNo": [
+            "This model no. already belongs to another product",
+          ],
+          // invalidInput flattens nested Zod paths to the list name.
+          publicFiles: ["Enter a full https:// link"],
+          "variants.7.modelNo": ["Gone"],
+        },
+      },
+      (field) => isRenderedField(field, { trackSize: false }, rows),
+    );
+    expect(setError).toHaveBeenNthCalledWith(
+      1,
+      "variants.1.modelNo",
+      {
+        type: "server",
+        message: "This model no. already belongs to another product",
+      },
+      { shouldFocus: true },
+    );
+    expect(setError).toHaveBeenNthCalledWith(
+      2,
+      "publicFiles.root",
+      { type: "server", message: "Enter a full https:// link" },
+      { shouldFocus: false },
+    );
+    // A row that no longer exists goes to the alert, labelled.
+    expect(formMessages).toEqual(["Variant 8, model no.: Gone"]);
+    expect(focusedField).toBe(true);
+  });
+
+  const resolve = (values: ProductEditValues) =>
+    productEditResolver(NO_MAGNETIC)(values, undefined, {
+      fields: {},
+      shouldUseNativeValidation: false,
+    });
+
+  it("flags a bad link, an empty extra spec and a long spec on their inputs", async () => {
+    const state = toFormState(full);
+    state.publicFiles[1] = { label: "Guide", url: "http://example.com/x" };
+    state.extraSpecs[0] = { group: "", label: "", value: "1" };
+    state.specs.lens = "x".repeat(501);
+    state.variants[0]!.specs.beamAngle = "y".repeat(501);
+    const flat = flattenFormErrors((await resolve(state)).errors);
+    expect(flat).toEqual(
+      expect.arrayContaining([
+        { field: "specs.lens", message: "At most 500 characters" },
+        {
+          field: "variants.0.specs.beamAngle",
+          message: "At most 500 characters",
+        },
+        { field: "extraSpecs.0.label", message: "Enter a label" },
+        { field: "publicFiles.1.url", message: "Enter a full https:// link" },
+      ]),
+    );
+    expect(flat).toHaveLength(4);
+  });
+
+  it("keeps a list-level error and a row error side by side", async () => {
+    const state = toFormState(full);
+    state.variants = Array.from({ length: MAX_VARIANTS + 1 }, (_, index) => ({
+      ...EMPTY_VARIANT,
+      modelNo: index === 5 ? "M-0" : `M-${index}`,
+    }));
+    // Both survive: the list message in `variants.root`, the row's on row 6.
+    const flat = flattenFormErrors((await resolve(state)).errors);
+    expect(flat).toEqual(
+      expect.arrayContaining([
+        { field: "variants.root", message: `At most ${MAX_VARIANTS} variants` },
+        {
+          field: "variants.5.modelNo",
+          message: "This model no. is already used by another variant",
+        },
+      ]),
+    );
+    expect(flat).toHaveLength(2);
+    // Under the cap only the row error is left.
+    state.variants = state.variants.slice(0, MAX_VARIANTS);
+    expect(flattenFormErrors((await resolve(state)).errors)).toEqual([
+      {
+        field: "variants.5.modelNo",
+        message: "This model no. is already used by another variant",
+      },
+    ]);
+  });
+});
+
+describe("indexAfterRemove", () => {
+  it.each([
+    [0, 3, 0],
+    [1, 3, 1],
+    [2, 3, 1],
+    [0, 1, null],
+  ])("removing %i of %i focuses %s", (index, count, next) => {
+    expect(indexAfterRemove(index, count)).toBe(next);
+  });
+});
+
+describe("section (b) markup", () => {
+  const render = (values: ProductFormValues = full) =>
+    renderToStaticMarkup(
+      createElement(ProductEditForm, {
+        product: {
+          id: P,
+          status: "draft",
+          values,
+          updatedAt: "2026-10-06T12:00:00.000Z",
+        },
+        categories: [{ id: MAIN, label: "Spot Lights" }],
+        areas: [{ id: AREA, label: "Office" }],
+        magneticTrackIds: [],
+        publishProblems: [],
+      }),
+    );
+
+  it("labels every spec input, grouped, with restricted columns marked", () => {
+    const html = render();
+    for (const key of SPEC_KEYS) {
+      expect(html, key).toContain(`for="product-specs-${key}"`);
+      expect(html, key).toContain(`id="product-specs-${key}"`);
+    }
+    expect(html).toContain("<legend");
+    expect(html).toContain("Light source");
+    // The badge sits inside the Driver label, so it is part of its name.
+    expect(html).toMatch(
+      /<label[^>]*for="product-specs-driver"[^>]*>Driver <span[^>]*>Restricted by default<\/span><\/label>/,
+    );
+    expect(html).not.toMatch(
+      /<label[^>]*for="product-specs-cct"[^>]*>CCT <span/,
+    );
+    // One option per line: the stored options come back as lines.
+    expect(html).toContain(">3000K\n4000K</textarea>");
+  });
+
+  it("makes each row a labelled group with named buttons", () => {
+    const html = render();
+    for (const [title, prefix] of [
+      ["Variant 1", "variant 1"],
+      ["Variant 2", "variant 2"],
+      ["Extra spec 1", "extra spec 1"],
+      ["Extra spec 2", "extra spec 2"],
+      ["Public file 1", "public file 1"],
+      ["Public file 2", "public file 2"],
+    ] as const) {
+      const heading = new RegExp(`<h3 id="([^"]+)"[^>]*>${title}</h3>`).exec(
+        html,
+      );
+      expect(heading, title).not.toBeNull();
+      expect(html).toContain(`role="group" aria-labelledby="${heading?.[1]}"`);
+      for (const name of [
+        `Move ${prefix} up`,
+        `Move ${prefix} down`,
+        `Remove ${prefix}`,
+      ]) {
+        expect(html, name).toContain(`aria-label="${name}"`);
+      }
+    }
+    // Edge buttons stay focusable but say they are unavailable.
+    expect(html).toMatch(
+      /aria-label="Move variant 1 up" aria-disabled="true"|aria-disabled="true"[^>]*aria-label="Move variant 1 up"/,
+    );
+    expect(html).toMatch(
+      /aria-label="Move variant 1 down" aria-disabled="false"|aria-disabled="false"[^>]*aria-label="Move variant 1 down"/,
+    );
+    expect(html).toContain('aria-label="Remove Beam Angle from variant 1"');
+    expect(html).toContain('id="product-variants-0-specs-beamAngle"');
+    expect(html).toContain('for="product-variants-0-specs-add"');
+    expect(html).toContain("Variants (2)");
+    expect(html).toContain("Add variant");
+    expect(html).toContain("Add extra spec");
+    expect(html).toContain("Add public file");
+  });
+
+  it("never gives text inputs a name, so a pre-hydration submit leaks nothing", () => {
+    const html = render();
+    expect(html).not.toMatch(
+      /<(input|textarea)[^>]*\sname="(specs|variants|extraSpecs|publicFiles|name|slug)/,
+    );
+  });
+
+  it("shows the empty state for every list", () => {
+    const html = render({
+      ...full,
+      variants: [],
+      extraSpecs: [],
+      publicFiles: [],
+    });
+    expect(html).toContain("No variants yet.");
+    expect(html).toContain("No extra specs.");
+    expect(html).toContain("No public files.");
+  });
+
+  /* The variants editor with RHF errors already set (as after a submit). */
+  function Harness({ errors }: { errors: FieldErrors<ProductEditValues> }) {
+    const form = useForm<ProductEditValues>({
+      defaultValues: toFormState(full),
+      errors,
+    });
+    // Children go in as createElement's third argument (react/no-children-prop).
+    return createElement(
+      FormProvider<ProductEditValues>,
+      form as ComponentProps<typeof FormProvider<ProductEditValues>>,
+      createElement(VariantsEditor),
+    );
+  }
+
+  it("shows a duplicate model no. on its row, tied to the input", () => {
+    const html = renderToStaticMarkup(
+      createElement(Harness, {
+        errors: {
+          variants: [
+            undefined,
+            {
+              modelNo: {
+                type: "validate",
+                message: "This model no. is already used by another variant",
+              },
+            },
+          ],
+        } as FieldErrors<ProductEditValues>,
+      }),
+    );
+    // The message is inside the Variant 2 group, after its heading.
+    const second = html.slice(html.indexOf(">Variant 2</h3>"));
+    expect(second).toContain('id="product-variants-1-modelNo-error"');
+    expect(second).toContain(
+      "This model no. is already used by another variant",
+    );
+    const input = /<input[^>]*id="product-variants-1-modelNo"[^>]*>/.exec(
+      html,
+    )?.[0];
+    expect(input).toContain('aria-invalid="true"');
+    expect(input).toContain(
+      'aria-describedby="product-variants-1-modelNo-error"',
+    );
+    const first = /<input[^>]*id="product-variants-0-modelNo"[^>]*>/.exec(
+      html,
+    )?.[0];
+    expect(first).toContain('aria-invalid="false"');
+    expect(first).not.toContain("aria-describedby");
+  });
+
+  it("shows a list-level error above the rows", () => {
+    const html = renderToStaticMarkup(
+      createElement(Harness, {
+        errors: {
+          variants: {
+            root: { type: "server", message: "At most 200 variants" },
+          },
+        } as FieldErrors<ProductEditValues>,
+      }),
+    );
+    expect(html).toMatch(
+      /id="product-variants-error" role="alert"[^>]*>At most 200 variants</,
+    );
   });
 });

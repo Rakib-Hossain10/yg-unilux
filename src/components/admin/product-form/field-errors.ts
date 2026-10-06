@@ -21,6 +21,8 @@ import {
   toProductInput,
   type ProductEditValues,
 } from "./form-values";
+import { isRowList, ROW_INPUTS } from "./sections";
+import { specHeader } from "./spec-groups";
 
 /** Top-level fields that map 1:1 onto one form field. */
 const SIMPLE_FIELDS = new Set([
@@ -38,13 +40,18 @@ const SIMPLE_FIELDS = new Set([
 /** List fields whose entries share one input group. */
 const LIST_FIELDS = new Set(["extraCategories", "areas"]);
 const SPEC_KEYS = new Set<string>(SPEC_COLUMNS.map((column) => column.key));
-const ROW_FIELDS: Record<string, Set<string>> = {
-  variants: new Set(["modelNo", "label", "imagePublicId"]),
-  extraSpecs: new Set(["group", "label", "value"]),
-  publicFiles: new Set(["label", "url"]),
-};
 const isIndex = (part: string | undefined) =>
   part !== undefined && /^\d+$/.test(part);
+
+/**
+ * Where React Hook Form keeps the error for `field`. A message about a whole
+ * row list (`variants`, e.g. "At most 200 variants") goes to `variants.root`,
+ * RHF's slot for field-array errors, so it never overwrites the row errors
+ * kept under the same name. Every other field keeps its own path.
+ */
+export function errorPath(field: string): string {
+  return isRowList(field) ? `${field}.root` : field;
+}
 
 /**
  * The form field an error path belongs to, or null when no single field owns
@@ -78,8 +85,9 @@ export function formFieldForPath(
   if (head === "specs") {
     return SPEC_KEYS.has(second ?? "") ? `specs.${second}` : null;
   }
-  const rowFields = ROW_FIELDS[head];
-  if (rowFields) {
+  // The row lists and their inputs, shared with isRenderedField.
+  if (isRowList(head)) {
+    const rowFields = ROW_INPUTS[head];
     if (parts.length === 1) return head;
     if (!isIndex(second)) return null;
     if (parts.length === 2) return `${head}.${second}`;
@@ -130,9 +138,6 @@ const FIELD_NAMES: Record<string, string> = {
   publicFiles: "Public files",
   images: "Images",
 };
-const SPEC_HEADERS = new Map<string, string>(
-  SPEC_COLUMNS.map((column) => [column.key, column.header]),
-);
 const FILTER_LABELS = new Map<string, string>(
   FILTER_FIELDS.map((field) => [field.key, field.label]),
 );
@@ -149,13 +154,13 @@ export function describeField(field: string): string {
     return `Filter ${FILTER_LABELS.get(second) ?? second}`;
   }
   if (head === "specs" && second) {
-    return `Spec ${SPEC_HEADERS.get(second) ?? second}`;
+    return `Spec ${specHeader(second)}`;
   }
   const row = ROW_NAMES[head];
   if (row && isIndex(second)) {
     const name = `${row} ${Number(second) + 1}`;
     if (third === "specs" && fourth) {
-      return `${name}, ${SPEC_HEADERS.get(fourth) ?? fourth}`;
+      return `${name}, ${specHeader(fourth)}`;
     }
     return third ? `${name}, ${ROW_FIELD_NAMES[third] ?? third}` : name;
   }
@@ -243,7 +248,7 @@ export function applyServerErrors(
   fields.forEach(({ field, message }, index) => {
     form.setError(
       // A path the form state has (checked by formFieldForPath).
-      field as Parameters<typeof form.setError>[0],
+      errorPath(field) as Parameters<typeof form.setError>[0],
       { type: "server", message },
       { shouldFocus: index === 0 },
     );
@@ -333,7 +338,7 @@ export function productEditResolver(
     if (messages.length === 0) return { values, errors: {} };
     const errors: Record<string, unknown> = {};
     for (const { field, message } of messages) {
-      setPath(errors, field, { type: "validate", message });
+      setPath(errors, errorPath(field), { type: "validate", message });
     }
     return { values: {}, errors: errors as FieldErrors<ProductEditValues> };
   };
