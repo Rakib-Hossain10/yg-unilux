@@ -6,7 +6,6 @@
 
 import { ArrowDown, ArrowUp, CircleAlert, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
 
 import { deleteAreaAction, moveAreaAction } from "@/app/admin/areas/actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -23,8 +22,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
-import { allMessages, callAction, type ActionResult } from "./action-result";
 import { areaEditPath } from "./area-paths";
+import { useSerialAction } from "./use-serial-action";
 
 /** One row as the list needs it (the page strips everything else). */
 export interface AreaListRow {
@@ -36,30 +35,9 @@ export interface AreaListRow {
 type Direction = "up" | "down";
 
 export function AreaList({ items }: { items: AreaListRow[] }) {
-  const [pending, startTransition] = useTransition();
-  const [errors, setErrors] = useState<string[]>([]);
-  // Read out by screen readers after a move, since the row changes place.
-  const [status, setStatus] = useState("");
-
-  /*
-   * Runs one action at a time. Success of a move is announced; a delete
-   * that succeeds redirects with its own notice, so nothing comes back.
-   */
-  function run(action: () => Promise<ActionResult>, done?: string) {
-    // The buttons are blocked while pending; this is a second line of defence.
-    if (pending) return;
-    setErrors([]);
-    setStatus("");
-    startTransition(async () => {
-      const result = await callAction(action);
-      if (!result) return;
-      if (result.ok) {
-        if (done) setStatus(done);
-        return;
-      }
-      setErrors(allMessages(result.errors));
-    });
-  }
+  // One request at a time; `status` is read out after a move, since the row
+  // changes place (see use-serial-action.ts).
+  const { pending, errors, status, run } = useSerialAction();
 
   const move = (item: AreaListRow, direction: Direction) =>
     run(

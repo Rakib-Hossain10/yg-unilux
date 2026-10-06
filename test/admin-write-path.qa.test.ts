@@ -56,10 +56,11 @@ describe("Server Actions exist only in admin actions.ts files", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("still sees the two known actions files", () => {
+  it("still sees the known actions files", () => {
     expect(files.filter((file) => ACTIONS_FILE.test(file))).toEqual([
       "src/app/admin/areas/actions.ts",
       "src/app/admin/categories/actions.ts",
+      "src/app/admin/products/actions.ts",
     ]);
   });
 });

@@ -13,6 +13,12 @@ vi.mock("@/app/admin/categories/actions", () => ({
   moveCategoryAction: vi.fn(),
   deleteCategoryAction: vi.fn(),
 }));
+// The tree clears a stale ?notice= through the router (L-4); there is no app
+// router outside Next, so useRouter gets a stub. The rest stays real.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ replace: vi.fn() }),
+}));
 
 import { ACTION_FAILED_MESSAGE, callAction } from "./action-result";
 import { applyServerErrors, CategoryForm } from "./category-form";

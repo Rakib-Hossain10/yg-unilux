@@ -1,7 +1,7 @@
-// QA gate A (Phase 2, T1-T6): the categories and areas admin modules end to
-// end on the production build. create -> move -> delete blocked -> delete for
-// both, the guard on every new URL and on a replayed Server Action, CSRF on
-// actions, notice allow-listing, no-store headers, keyboard focus and axe.
+// QA gate A (Phase 2, T1-T6) plus T9: the categories, areas and products admin
+// modules end to end on the production build. create -> move -> delete
+// blocked -> delete, the guard on every new URL and on a replayed Server
+// Action, CSRF, notice allow-listing, no-store headers, focus and axe.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -692,6 +692,237 @@ test.describe("guards and pages", () => {
     expect(
       await db.collection("categories").countDocuments({ name: "Anything" }),
     ).toBe(0);
+    await page.context().close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T9: products list + new draft, and gate A's L-4 / L-5 on the areas list.
+// In this serial file on purpose: the category tree and the area order are
+// shared, ordered lists, so a separate spec running in parallel (local runs
+// are fullyParallel) would shift the edges the tests above assert.
+// ---------------------------------------------------------------------------
+
+test.describe("products", () => {
+  const CATEGORY = `QA ProdCat ${RUN}`;
+  // Leads with RUN so the file's afterAll (slug ^qa-<RUN>) removes it.
+  const PRODUCT = `QA ${RUN} Lamp`;
+
+  test.beforeAll(async () => {
+    const now = new Date();
+    await db.collection("categories").insertOne({
+      name: CATEGORY,
+      slug: `qa-prodcat-${RUN}`,
+      parent: null,
+      order: 98,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  test("a customer gets 403 and a visitor goes to /login", async ({
+    browser,
+    page,
+  }) => {
+    const context = await browser.newContext({ storageState: customerState });
+    const customer = await context.newPage();
+    for (const path of ["/admin/products", "/admin/products/new"]) {
+      expect((await customer.goto(path))?.status(), path).toBe(403);
+      expect(await customer.content(), path).not.toContain(CATEGORY);
+      const response = await page.request.get(path, { maxRedirects: 0 });
+      expect([302, 303, 307, 308], path).toContain(response.status());
+      expect(response.headers().location, path).toMatch(/\/login$/);
+    }
+    await context.close();
+  });
+
+  test("create a draft: name + main category, then its edit page", async ({
+    browser,
+  }) => {
+    const page = await asAdmin(browser);
+    await page.goto("/admin/products/new");
+
+    // Empty submit: both fields flagged, focus on the first.
+    await page.getByRole("button", { name: "Create draft" }).click();
+    await expect(page.getByLabel("Name")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    await expect(page.getByText("Choose a main category")).toBeVisible();
+    await expect(page.getByLabel("Name")).toBeFocused();
+
+    await page.getByLabel("Name").fill(PRODUCT);
+    await page.getByLabel("Main category").click();
+    await page.getByRole("option", { name: CATEGORY }).click();
+
+    // Server Action calls are POSTs carrying a Next-Action header.
+    let actionPosts = 0;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.headers()["next-action"]) {
+        actionPosts += 1;
+      }
+    });
+    // Both clicks land before the first request returns; the in-flight
+    // guard must turn them into one create.
+    await page.getByRole("button", { name: "Create draft" }).dblclick();
+    // The edit page arrives in T10; the URL is what matters here.
+    await page.waitForURL(/\/admin\/products\/[0-9a-f]{24}\?notice=created$/);
+
+    const rows = await db
+      .collection("products")
+      .find({ name: PRODUCT })
+      .toArray();
+    expect(actionPosts).toBe(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("draft");
+    expect(page.url()).toContain(String(rows[0]?._id));
+    expect(
+      await db.collection("auditLog").countDocuments({
+        action: "product.create",
+        "target.id": String(rows[0]?._id),
+      }),
+    ).toBe(1);
+    await page.context().close();
+  });
+
+  test("the list finds it by search and filters by status and category", async ({
+    browser,
+  }) => {
+    const page = await asAdmin(browser);
+    await page.goto("/admin/products");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Products" }),
+    ).toBeVisible();
+
+    await page.getByLabel("Search").fill(RUN);
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(new RegExp(`[?&]q=${RUN}`));
+    const link = page.getByRole("link", { name: PRODUCT });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute(
+      "href",
+      /^\/admin\/products\/[0-9a-f]{24}$/,
+    );
+    await expect(page.getByText("1 matching product.")).toBeVisible();
+
+    await page.getByLabel("Status").click();
+    await page.getByRole("option", { name: "Published" }).click();
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page).toHaveURL(/status=published/);
+    await expect(page.getByText("No products match")).toBeVisible();
+    await page.getByRole("link", { name: "Clear filters" }).click();
+    await expect(page).toHaveURL(/\/admin\/products$/);
+
+    const category = await db
+      .collection("categories")
+      .findOne({ name: CATEGORY });
+    await page.goto(`/admin/products?category=${String(category?._id)}`);
+    await expect(page.getByRole("link", { name: PRODUCT })).toBeVisible();
+    await page.context().close();
+  });
+
+  test("crafted query values fall back instead of failing", async ({
+    browser,
+  }) => {
+    const page = await asAdmin(browser);
+    for (const query of [
+      // JSON operator objects in `status` and `category` ({"$ne": ...}).
+      "?status=%7B%22%24ne%22%3A%22x%22%7D&category=%7B%22%24ne%22%3Anull%7D",
+      `?category=${new ObjectId().toHexString()}&page=-4`,
+      "?page=999999&q=" + "a".repeat(500),
+      "?notice=%3Cimg%20src%3Dx%3E",
+    ]) {
+      const response = await page.goto(`/admin/products${query}`);
+      expect(response?.status(), query).toBe(200);
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Products" }),
+      ).toBeVisible();
+      await expect(page.locator('img[src="x"]')).toHaveCount(0);
+    }
+    await page.context().close();
+  });
+
+  for (const path of ["/admin/products", "/admin/products/new"]) {
+    test(`axe WCAG 2.2 AA: ${path}`, async ({ browser }) => {
+      const page = await asAdmin(browser);
+      const response = await page.goto(path);
+      const cacheControl = response?.headers()["cache-control"] ?? "";
+      expect(cacheControl).toContain("no-store");
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      expect(await axeViolations(page)).toEqual([]);
+      await page.context().close();
+    });
+  }
+});
+
+test.describe("areas list fixes from gate A", () => {
+  const AREA_A = `QA AreaA ${RUN}`;
+  const AREA_B = `QA AreaB ${RUN}`;
+  const AREA_C = `QA AreaC ${RUN}`;
+
+  test.beforeAll(async () => {
+    const now = new Date();
+    await db.collection("areas").insertMany(
+      [AREA_A, AREA_B].map((name, index) => ({
+        name,
+        slug: `qa-area-${index}-${RUN}`,
+        order: 900 + index,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    );
+  });
+
+  test("a move clears the earlier 'created' notice (L-4)", async ({
+    browser,
+  }) => {
+    const page = await asAdmin(browser);
+    await createArea(page, AREA_C);
+
+    await page.getByRole("button", { name: `Move ${AREA_C} up` }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: `${AREA_C} moved up.` }),
+    ).toBeAttached();
+    await expect(page).toHaveURL(/\/admin\/areas$/);
+    await expect(page.getByText("Area created.")).toHaveCount(0);
+    await page.context().close();
+  });
+
+  test("two fast clicks on a move button send one move (L-5)", async ({
+    browser,
+  }) => {
+    const page = await asAdmin(browser);
+    await page.goto("/admin/areas");
+    const names = async () =>
+      (
+        await db
+          .collection("areas")
+          .find({}, { projection: { name: 1 } })
+          .sort({ order: 1, _id: 1 })
+          .toArray()
+      ).map((row) => String(row.name));
+
+    const before = await names();
+    const from = before.indexOf(AREA_A);
+    expect(from).toBeGreaterThanOrEqual(0);
+    expect(from).toBeLessThan(before.length - 2);
+
+    // Server Action calls are POSTs carrying a Next-Action header.
+    let actionPosts = 0;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.headers()["next-action"]) {
+        actionPosts += 1;
+      }
+    });
+
+    await page.getByRole("button", { name: `Move ${AREA_A} down` }).dblclick();
+    await expect(
+      page.getByRole("status").filter({ hasText: `${AREA_A} moved down.` }),
+    ).toBeAttached();
+    // Both clicks fire before the first request returns, so a second POST
+    // would already have been counted by now.
+    expect(actionPosts).toBe(1);
+    expect((await names()).indexOf(AREA_A)).toBe(from + 1);
     await page.context().close();
   });
 });
