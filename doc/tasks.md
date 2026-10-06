@@ -29,13 +29,16 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - A published product stays publishable.
   - Route groups `admin/(dashboard)` and `products/(list)` give a real 404.
 - T10b done (ADR 0044): specs editor, variants, extra specs, public files. 1429 unit + 80 e2e green.
-- **Next: QA gate B** (T7–T10b) with `qa-security-reviewer` on Opus. Points to check:
-  - Other admin forms spread `{...field}` with `name`, so a pre-hydration GET submit puts values in the URL.
-  - Focus after a move in non-Chromium browsers.
-  - Empty extra-spec group stored as `null` vs. an omitted variant label.
-  - The publish invariant and optimistic concurrency (ADR 0043).
-  - The guard matrix on all product actions.
-- **After gate B: T11a.** Cloudinary lib, sign/verify, CSP (`backend-architect`, Opus). **Remind the user to apply the R2 CORS rule before T11/T12.**
+- **QA gate B: PASS** (T7–T10b, 2026-10-06; run on Sonnet 5.5 at the user's request). No Critical, High or Medium findings. Added `test/admin-products.qa.test.ts` (48) and `e2e/admin-products-gate-b.qa.spec.ts` (4). 1476 unit + 84 e2e green, build OK, audit ok. Firefox and WebKit are not installed, so focus after a move is checked in Chromium only.
+- **Next: T11a.** Cloudinary lib, sign/verify services, CSP and `next.config` change (`backend-architect`, Opus unless the user says otherwise). See the plan's T11a row, and fold in gate B L-C. **Remind the user to apply the R2 CORS rule before T11/T12.**
+- **Open items from gate B:**
+  - **L-A:** model numbers are case-insensitive within a product but case-sensitive across products (`takenModelNos`, unique index), so `ZZ-9` and `zz-9` can coexist. Fix with a collation on the index or normalised case, before Phase 3 import (upsert by model no.). The `it.fails` test in `admin-products.qa.test.ts` turns into a plain `it` once fixed.
+  - **L-B:** same as gate A L-1, below.
+  - **L-C (T11b):** `variants.imagePublicId` must match the publicId regex and be one of the product's own `images`; same task as gate A L-2 (`bwImage`).
+  - **L-D:** same as gate A L-3, below.
+  - **L-E (Phase 4):** changing a published product's slug leaves no redirect.
+  - **I-1:** area, category and new-draft forms still give inputs a `name` (low value, admin-only, no-store). Drop it when those forms are next touched.
+  - **I-2:** publish doesn't re-check that `mainCategory` / `datasheetId` still exist. Re-check it in T13 when datasheets land.
 - **Backend follow-ups from T10a (ADR 0043, not blocking):**
   - `invalidInput` should key nested Zod issues by the full dotted path.
   - Add a shared `isMagneticTrackCategory` helper, to remove the duplicate in `product-category-options.ts`.
@@ -43,7 +46,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - Add a `group` field to `SPEC_COLUMNS` (ADR 0044).
   - When the column-visibility setting lands, pass the effective restricted keys to the edit form.
 - **Open items from gate A:**
-  - **P-1 (before the Phase 2 merge):** `npm audit --audit-level=high` fails on dev-only braces (GHSA-vfj7-8cjw-p6xm via eslint-config-next → fast-glob → micromatch); `--omit=dev` is clean, no non-forced fix. Add an `overrides` entry once patched, or write a deferral ADR (ADR 0015 style) and adjust CI.
+  - **P-1:** covered. `scripts/audit.mjs` allows GHSA-vfj7-8cjw-p6xm until 2027-01-05 (ADR 0033), and gate B ran it: "audit: ok". Before the merge, check that CI uses the script; add an `overrides` entry once a patch exists.
   - L-1: categories and areas `[id]` pages still answer 200 on not-found because of their `[id]/loading.tsx`. Products is fixed (ADR 0043); apply the same fix, or accept it in an ADR note.
   - L-2 (T11b): tighten `bwImage` (schema + `publicIdField`) to the publicId regex before anything public renders it.
   - L-3: add the planned ESLint rule (no `"use client"` import of `server-only`/`src/lib/admin/*`); a static test covers it now.
@@ -90,7 +93,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T10 done, next QA gate B, then T11a (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T10 done, QA gate B PASS, next T11a (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -178,7 +181,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T9: products list + new draft, gate A L-4/L-5 fixes — ADR 0042
 - [x] T10a: product edit form section (a), status card, delete, optimistic concurrency — ADR 0043
 - [x] T10b: specs, variants, extra specs, public files — ADR 0044
-- [ ] QA gate B (T7–T10)
+- [x] QA gate B (T7–T10): PASS, Lows L-A to L-E recorded
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
@@ -256,6 +259,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — QA gate B PASS (T7–T10b) on Sonnet 5.5 at the user's request: no Critical, High or Medium findings; Lows L-A (model-no. case across products) to L-E recorded. 52 QA tests added. 1476 unit + 84 e2e green. Next: T11a.
 - 2026-10-06 — T10b done on Opus (ADR 0044). The auto-review caught a regex with literal line breaks (Critical); it was fixed. Input `name`s are dropped so a pre-hydration submit can't put spec text in the URL. 200 variants stay responsive. 1429 unit + 80 e2e green. Next: QA gate B.
 - 2026-10-06 — T10a done on Opus (ADR 0043). The auto-review found two Highs, both fixed: every save after the first did nothing (the in-flight flag stayed set through the redirect), and a stale tab could overwrite newer data. The second fix: status now changes only through publish/unpublish, and saves are checked against `updatedAt`. Six Medium fixes followed. 1364 unit + 74 e2e green. Next: T10b.
 - 2026-10-06 — T9 done on Opus (ADR 0042): products list, new draft, shared move guard, e2e for products. Next: T10.
