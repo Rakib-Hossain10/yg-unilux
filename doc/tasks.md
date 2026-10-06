@@ -4,9 +4,14 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, merge commit `5fff0bb`, 2026-10-06), with CI green on every job.
-- **Next: Phase 2 (Admin core). Plan first, in plan mode**, then build one task per commit. Scope is in the "Phase 2 — Admin core" section below: shadcn admin layout, dashboard, categories tree, areas, products CRUD + Cloudinary, datasheets (R2), settings, auditLog + tag revalidation, tests. Exit: a full product built by hand with images and an attached datasheet.
-- **GitHub:** handled with `gh` (push, PR, CI, merge). Always ask the user before merging into `main`.
+- **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, `5fff0bb`, 2026-10-06).
+- **Phase 2 is PLANNED and APPROVED. Read `doc/phase-2-plan.md` first** — it holds the architecture, 18 ordered tasks (T1–T18, one commit each), owners, models, tests, QA gates A–E, risks and ADR list. The user's decisions are in it: direct browser uploads with server-side verification (amends ADR 0009), and the ADR 0019 product defaults.
+- **Next: T1 — shadcn init and token mapping** (`admin-panel-builder`, Sonnet). Create `.claude/reviews/.disabled` first and **remove it when T1 is done**. Do not start before reading the plan's "Architecture" section.
+- **Model guidance:** Opus 5.5 for T2, T4, T6a, T7, T8, T11a, T12, T14, T17 and every `qa-security-reviewer` run; Sonnet 5.5 for the UI tasks. Switch with `/model`.
+- **GitHub:** use `gh` (push, PR, CI, merge); always ask the user before merging into `main`.
+- **Before T11/T12 the user must apply the R2 CORS rule** (exact JSON in the plan, "Things the user must do"). Remind them when T11a starts.
+- **Verified 2026-10-06:** `npm run check:services` passes for MongoDB (non-SRV `mongodb://` string in `.env.local`, database `yg_unilux_db`), Cloudinary (upload + delete + Admin API) and R2 (write + delete). The `mongodb+srv://` form fails on the user's machine because a VPN DNS proxy (`127.0.0.1`) drops SRV lookups, so keep the non-SRV string.
+- **Admin account:** the user still needs to run `npm run seed:admin -- --email <email> --name "<name>"` in PowerShell against `yg_unilux_db` before they can sign in at `/login`.
 - **QA after:** each Phase 2 feature plus the Phase 2 exit (`qa-security-reviewer`). Every changed file also gets the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
@@ -15,7 +20,6 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - a database name in `MONGODB_URI` (`…mongodb.net/yg_unilux?…`).
 - **User should try once:**
   - `npm run seed:admin -- --email <admin email> --name "<name>"` from **PowerShell** (hidden prompt; Git Bash needs `winpty`). QA could not test a real Windows console.
-  - From this machine Atlas currently times out (`querySrv ETIMEOUT`): check the Atlas IP access list / network.
 - **Local dev:** use `http://localhost`, not `127.0.0.1`, because the `__Host-` device cookie needs it. `npm run test:e2e` needs port 3000 free (it never reuses a running server) and runs on a seeded in-memory MongoDB (ADR 0029).
 - **Open QA Lows from task 5:**
   - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, never through server actions (`/login` already does). The change-password UI sends `revokeOtherSessions: true`.
@@ -109,7 +113,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview — **met locally on `next start` (2026-10-04); preview pending the Vercel account**
 - [x] Phase 1 wrap-up: task-12 Lows (ADR 0030), task-5 L1 (ADR 0031), "Keep me signed in" (ADR 0032), task-5 L2 (ADR 0033); CI green; PR #9 merged to `main` 2026-10-06
 
-## Phase 2 — Admin core
+## Phase 2 — Admin core — plan: `doc/phase-2-plan.md` (T1–T18)
 - [ ] shadcn init; admin layout with `requireAdmin()` everywhere
 - [ ] Dashboard counts
 - [ ] Categories tree editor
@@ -190,6 +194,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — Phase 2 planned in plan mode and approved (`doc/phase-2-plan.md`, T1–T18, QA gates A–E). Services verified with `npm run check:services` (committed). User decisions: direct uploads with server verification; ADR 0019 defaults. Next: T1 (shadcn init) in a fresh session.
 - 2026-10-06 — CI green and PR #9 merged to `main` (`5fff0bb`) with the user's approval. Phase 1 is done. `phase-2` branched off. Next: plan Phase 2 in plan mode.
 - 2026-10-06 — The next CI run failed differently: on a cold binary cache, parallel Vitest workers raced on mongodb-memory-server's download lockfile. Fixed with a Vitest `globalSetup` (`test/global-setup.ts`) that downloads the binary once before the workers start. GitHub is now handled through `gh` (PR #9 "Phase 1"). Ask the user before merging to `main`.
 - 2026-10-06 — CI failed on `scripts/sync-indexes.test.ts`, because `node_modules/.cache` is missing on a fresh runner. Fixed by creating the folder with `mkdir -p` and guarding the cleanup. Next: CI green, then PR and merge.
