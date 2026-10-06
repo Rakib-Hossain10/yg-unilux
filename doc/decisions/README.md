@@ -33,3 +33,19 @@ Template:
 | [0015](0015-free-security-tooling.md) | Dependabot, npm audit, gitleaks (CI + pre-commit); CodeQL skipped | Accepted |
 | [0016](0016-cloudinary-url.md) | Single `CLOUDINARY_URL`; next/image allowed only for our cloud | Accepted |
 | [0017](0017-better-auth.md) | Better Auth (not Auth.js); one shared `mongodb` driver copy | Accepted |
+| [0018](0018-database-connection.md) | One MongoClient for Mongoose + Better Auth; strict Mongoose; explicit indexes; URI names the DB | Accepted |
+| [0019](0019-models.md) | Mongoose models: fixed spec keys, strict schemas, read-only users, whistleblower privacy limits | Accepted |
+| [0020](0020-per-email-rate-limit.md) | Per-email limiter: HMAC keys, atomic fixed window, fail closed; lockout risk + mitigations | Accepted |
+| [0021](0021-email-sender.md) | Resend email sender: lazy client, escaped templates, link validation, leak-free errors | Accepted |
+| [0022](0022-sign-in-limits-network-device.md) | Sign-in limits: per network (HMAC'd IP), per-email slow-down, known-device cookie | Accepted |
+| [0023](0023-auth-implementation.md) | Better Auth implementation: lazy init, disabled paths, no IP on sessions, hashed limiter keys, device epoch | Accepted |
+| [0024](0024-permissions-and-auth-interrupts.md) | `lib/permissions.ts` access rules (fail closed, temp password unlocks nothing); `forbidden()` via `authInterrupts` | Accepted |
+| [0025](0025-seed-admin-cli.md) | `seed:admin` CLI: create / reset admin, password never in argv or files, reset ends sessions + unbans + bumps device epoch | Accepted |
+| [0026](0026-proxy-geo-block-403.md) | Proxy answers CN with its own 403 page (rewrite loses the status); malformed `GEO_BLOCK_ENABLED` fails closed; matcher skips only `_next/static` + favicon | Accepted |
+| [0027](0027-security-headers-csp.md) | Security headers; static CSP with inline scripts allowed (nonces would make every page dynamic; SRI tested and fails on inline flight scripts) | Accepted |
+| [0028](0028-design-shell.md) | Design shell: Cormorant Garamond + Inter via next/font, warm-grey tokens, `(site)` group with SiteShell, shared 404/403/error pages | Accepted |
+| [0029](0029-login-admin-placeholder-e2e.md) | `/login` posts to `/api/auth` (method=post), `/admin` guarded in layout + page, e2e on a seeded in-memory replica set | Accepted |
+| [0030](0030-auth-responses-tokens-aborts.md) | Auth JSON answers carry no session token; client aborts are a quiet 499; e2e server blanks every `.env.example` variable | Accepted |
+| [0031](0031-change-password-per-user-limit.md) | `/change-password` limited to 5 per user per 15 min (HMAC'd user id), checked before the password | Accepted |
+| [0032](0032-keep-me-signed-in.md) | "Keep me signed in" checkbox, off by default, same for every role (unchecked: browser-session cookie, 24 h server cap) | Accepted |
+| [0033](0033-blocking-audit-allowlist.md) | Full-tree `npm audit` is blocking via `scripts/audit.mjs` with a dated allowlist (only GHSA-vfj7-8cjw-p6xm, review by 2027-01-05) | Accepted |

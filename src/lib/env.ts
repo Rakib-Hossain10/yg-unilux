@@ -61,6 +61,30 @@ const rule = <T>(
 ): Rule<T> => ({ schema, expected, ...options });
 
 const httpUrl = rule(z.url({ protocol: /^https?$/ }), "an http(s) URL");
+
+/*
+ * A bare origin such as "https://www.example.com" or "http://localhost:3000":
+ * no path, query, fragment or credentials. Better Auth treats a URL with a
+ * path as already including its "/api/auth" base path, so a stray path would
+ * silently move every auth route.
+ */
+const originUrl = rule(
+  z.url({ protocol: /^https?$/ }).refine((value) => {
+    // Zod still runs this refinement after z.url() failed, and `new URL()`
+    // would throw a TypeError that quotes the value, so parse safely.
+    const url = URL.parse(value);
+    if (!url) return false;
+    return (
+      url.pathname === "/" &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.username === "" &&
+      url.password === "" &&
+      !value.endsWith("/")
+    );
+  }),
+  'an http(s) origin without a path or trailing slash, e.g. "https://www.example.com"',
+);
 const email = rule(z.email(), "an email address");
 const nonEmpty = rule(z.string().min(1), "a non-empty string");
 const longSecret = rule(
@@ -77,9 +101,15 @@ const emailFrom = rule(
   'an email address or "Name <address>"',
 );
 
+/*
+ * The URI must name its database (".../yg_unilux?..."). Atlas's "Connect"
+ * dialog omits it, and the driver then silently uses a database called
+ * "test", so Preview and Production on one cluster could share data.
+ * Shape: scheme, hosts (no "/"), "/", a non-empty database name, optional query.
+ */
 const mongoUri = rule(
-  z.string().regex(/^mongodb(\+srv)?:\/\/\S+$/),
-  "a mongodb:// or mongodb+srv:// URI",
+  z.string().regex(/^mongodb(\+srv)?:\/\/[^/\s]+\/[^/?\s]+(\?\S*)?$/),
+  "a mongodb:// or mongodb+srv:// URI that names the database, e.g. …mongodb.net/yg_unilux?retryWrites=true",
 );
 
 /** Canonical base64 that decodes to exactly 32 bytes (AES-256 key, ADR 0005). */
@@ -117,6 +147,14 @@ const booleanFlag = rule(
   '"true" or "false"',
   { trimsInput: true },
 );
+
+/* Better Auth's own env variables that would override our explicit config. */
+const BETTER_AUTH_OVERRIDES = {
+  BETTER_AUTH_SECRET: "use AUTH_SECRET",
+  BETTER_AUTH_SECRETS: "use AUTH_SECRET",
+  BETTER_AUTH_URL: "use AUTH_URL",
+  BETTER_AUTH_TRUSTED_ORIGINS: "only AUTH_URL is trusted",
+} as const;
 
 type Spec = Record<string, { rule: Rule<unknown>; optional?: boolean }>;
 type Parsed<S extends Spec> = {
@@ -170,13 +208,68 @@ export const env = {
     return { uri: v.MONGODB_URI };
   },
 
+  /**
+   * Better Auth's secret and base URL (ADR 0017). AUTH_URL is required: when
+   * Better Auth's `baseURL` is unset it falls back to BETTER_AUTH_URL-style
+   * variables and then to the request's own origin (better-auth 1.7.7,
+   * dist/utils/url.mjs getBaseURL), so reset-email links could follow a
+   * forged Host header. Passing it explicitly closes that and keeps all env
+   * reading here.
+   */
   auth() {
     const v = read("authentication", {
       AUTH_SECRET: { rule: longSecret },
-      // Optional: Auth.js infers the URL from the request host on Vercel.
-      AUTH_URL: { rule: httpUrl, optional: true },
+      AUTH_URL: { rule: originUrl },
     });
+    // Better Auth turns telemetry on when BETTER_AUTH_TELEMETRY is truthy,
+    // whatever our `telemetry: { enabled: false }` says
+    // (@better-auth/telemetry/dist/index.mjs:361; truthy = set, not "0" and
+    // not "false", core/dist/env/env-impl.mjs:49). Refuse to start instead.
+    const telemetry = process.env.BETTER_AUTH_TELEMETRY;
+    if (
+      telemetry !== undefined &&
+      telemetry !== "" &&
+      telemetry !== "0" &&
+      telemetry.toLowerCase() !== "false"
+    ) {
+      throw new EnvError("authentication", [
+        {
+          kind: "invalid",
+          variable: "BETTER_AUTH_TELEMETRY",
+          expected:
+            'unset (or "0"/"false"): it would switch on Better Auth telemetry',
+        },
+      ]);
+    }
+    // Better Auth also reads its own variables behind our back: secrets
+    // (dist/context/create-context.mjs:70-71), the URL (dist/utils/url.mjs:71)
+    // and extra trusted origins (dist/context/helpers.mjs:83). All config goes
+    // through this file, so refuse to start if any is set. Only the name is
+    // reported, never the value.
+    for (const variable of Object.keys(
+      BETTER_AUTH_OVERRIDES,
+    ) as (keyof typeof BETTER_AUTH_OVERRIDES)[]) {
+      const value = process.env[variable];
+      if (value !== undefined && value !== "") {
+        throw new EnvError("authentication", [
+          {
+            kind: "invalid",
+            variable,
+            expected: `unset: Better Auth reads it directly, bypassing src/lib/env.ts (${BETTER_AUTH_OVERRIDES[variable]})`,
+          },
+        ]);
+      }
+    }
     return { secret: v.AUTH_SECRET, url: v.AUTH_URL };
+  },
+
+  /**
+   * AUTH_SECRET alone, for code that derives subkeys from it (rate-limit
+   * keys, device tokens) and has no use for the URL.
+   */
+  authSecret(): string {
+    return read("authentication", { AUTH_SECRET: { rule: longSecret } })
+      .AUTH_SECRET;
   },
 
   /** Public product images (ADR 0009). One variable: CLOUDINARY_URL. */
@@ -231,6 +324,38 @@ export const env = {
   cronSecret(): string {
     return read("cron authentication", { CRON_SECRET: { rule: longSecret } })
       .CRON_SECRET;
+  },
+
+  /**
+   * Dedicated key for scrambling client IPs in the sign-in rate limit
+   * (ADR 0022). Separate from AUTH_SECRET so the session-signing secret never
+   * touches IP data; rotating it only resets 15-minute counters.
+   */
+  ipHashSecret(): string {
+    const feature = "sign-in rate limiting by network";
+    const secret = read(feature, {
+      IP_HASH_SECRET: { rule: longSecret },
+    }).IP_HASH_SECRET;
+    // Reusing AUTH_SECRET would defeat the point of a dedicated key. Only the
+    // variable name goes into the error, never either value.
+    if (secret === process.env.AUTH_SECRET) {
+      throw new EnvError(feature, [
+        {
+          kind: "invalid",
+          variable: "IP_HASH_SECRET",
+          expected: "a secret different from AUTH_SECRET",
+        },
+      ]);
+    }
+    return secret;
+  },
+
+  /**
+   * True in production builds (Vercel Production and Preview both run with
+   * NODE_ENV=production). Not a secret and not validated: Next.js sets it.
+   */
+  isProduction(): boolean {
+    return process.env.NODE_ENV === "production";
   },
 
   siteUrl(): URL {

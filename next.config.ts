@@ -4,6 +4,10 @@ import {
   CLOUDINARY_URL_FORMAT,
   parseCloudinaryUrl,
 } from "./src/lib/cloudinary-url";
+import {
+  WHISTLEBLOWER_HEADERS,
+  securityHeaders,
+} from "./src/lib/security-headers";
 
 /**
  * next/image may optimise remote images only from our own Cloudinary cloud
@@ -48,6 +52,30 @@ const nextConfig: NextConfig = {
   agentRules: false,
   // Do not advertise the framework in an X-Powered-By header.
   poweredByHeader: false,
+  experimental: {
+    // Enables forbidden()/unauthorized() from next/navigation, so a signed-in
+    // non-admin gets a real 403 from requireAdmin() (ADR 0024).
+    authInterrupts: true,
+  },
+  // Security headers on every response (ADR 0027). The proxy's own CN 403
+  // page sets its own (src/lib/geo.ts), because these don't reach it.
+  async headers() {
+    const isDev = process.env.NODE_ENV === "development";
+    return [
+      {
+        source: "/:path*",
+        // Inline scripts must stay allowed: the App Router streams its page
+        // data in inline <script> tags whose content (and hash) differs per
+        // page, and nonces would force every page to render per request,
+        // losing the catalog cache (ADR 0008). Tested in task 9: SRI covers
+        // only external files and hydration fails without this.
+        headers: securityHeaders({ isDev, allowInlineScripts: true }),
+      },
+      // Later entries override earlier ones with the same header key.
+      { source: "/whistleblower/:path*", headers: WHISTLEBLOWER_HEADERS },
+      { source: "/whistleblower", headers: WHISTLEBLOWER_HEADERS },
+    ];
+  },
 };
 
 export default nextConfig;

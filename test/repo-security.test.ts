@@ -30,6 +30,7 @@ const ENV_KEYS = [
   "GEO_BLOCK_ENABLED",
   "WHISTLEBLOWER_ENC_KEY",
   "CRON_SECRET",
+  "IP_HASH_SECRET",
   "SITE_URL",
 ];
 
@@ -131,7 +132,14 @@ describe("CI workflow", () => {
 
   it("installs with scripts blocked and runs the high-severity audit", () => {
     expect(ci).not.toMatch(/run: npm (ci|install)(?! --ignore-scripts)/);
-    expect(ci).toMatch(/npm audit --audit-level=high/);
+    // Blocking on production dependencies: the step has no continue-on-error.
+    expect(ci).toMatch(
+      /run: npm audit --omit=dev --audit-level=high\r?\n(?!\s*continue-on-error)/,
+    );
+    // The full-tree audit is blocking too, through the allowlisting script
+    // (scripts/audit.mjs); the old report-only step must not come back.
+    expect(ci).toMatch(/run: npm run audit\r?\n(?!\s*continue-on-error)/);
+    expect(ci).not.toMatch(/run: npm audit --audit-level=high\r?\n/);
   });
 
   it("verifies the pinned gitleaks archive checksum, fail-closed", () => {

@@ -1,0 +1,61 @@
+// Site footer: wordmark, link columns and the copyright line. A Server
+// Component; the link lists come from nav-links.ts, shared with the header.
+
+import Link from "next/link";
+
+import { FOOTER_NAV } from "./nav-links";
+
+/*
+ * Contrast on ink: grey-300 links 11.97:1, grey-400 text 7.32:1. grey-500
+ * (4.17:1) is too faint for text here (QA H2, task 11).
+ */
+export function SiteFooter() {
+  // Rendered at build time for static pages, so the year updates with the
+  // next deploy; good enough for a copyright line.
+  const year = new Date().getFullYear();
+
+  return (
+    <footer className="mt-auto bg-ink text-grey-300">
+      <div className="mx-auto grid max-w-(--container-site) gap-12 px-4 py-16 md:grid-cols-[2fr_repeat(3,1fr)] md:px-8">
+        <div>
+          <p className="font-display text-2xl tracking-[0.12em] text-paper">
+            YG UniLUX
+          </p>
+          <p className="mt-3 max-w-xs text-sm leading-relaxed text-grey-400">
+            Commercial lighting, designed and made for residential, retail,
+            hospitality, office, healthcare, education and exhibition spaces.
+          </p>
+        </div>
+
+        {FOOTER_NAV.map((column) => (
+          <nav key={column.title} aria-label={column.title}>
+            <h2 className="mb-4 text-xs tracking-[0.16em] text-grey-400 uppercase">
+              {column.title}
+            </h2>
+            <ul className="space-y-2.5 text-sm">
+              {column.links.map((link) => (
+                <li key={link.href}>
+                  {/* No prefetch: footer links are rarely used, and
+                      prefetching every one costs a request each. */}
+                  <Link
+                    href={link.href}
+                    prefetch={false}
+                    className="transition-colors duration-(--duration-quick) hover:text-paper"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ))}
+      </div>
+
+      <div className="border-t border-grey-800">
+        <p className="mx-auto max-w-(--container-site) px-4 py-6 text-xs text-grey-400 md:px-8">
+          © {year} YG UniLUX. All rights reserved.
+        </p>
+      </div>
+    </footer>
+  );
+}

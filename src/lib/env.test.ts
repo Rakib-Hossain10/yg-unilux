@@ -18,6 +18,7 @@ const ALL_KEYS = [
   "GEO_BLOCK_ENABLED",
   "WHISTLEBLOWER_ENC_KEY",
   "CRON_SECRET",
+  "IP_HASH_SECRET",
   "SITE_URL",
 ] as const;
 
@@ -78,6 +79,15 @@ describe("valid values", () => {
     });
   });
 
+  it.each([
+    "mongodb+srv://user:pw@cluster0.example.mongodb.net/yg_unilux?retryWrites=true&w=majority",
+    "mongodb://h1.example.net:27017,h2.example.net:27017/yg?replicaSet=rs0",
+    "mongodb://127.0.0.1:27017/yg_dev",
+  ])("accepts a MONGODB_URI that names its database: %s", (uri) => {
+    vi.stubEnv("MONGODB_URI", uri);
+    expect(env.mongo()).toEqual({ uri });
+  });
+
   it("returns the r2 config", () => {
     vi.stubEnv("R2_ACCOUNT_ID", "0123456789abcdef0123456789abcdef");
     vi.stubEnv("R2_ACCESS_KEY_ID", "access-key-id");
@@ -107,20 +117,59 @@ describe("valid values", () => {
     expect(decoded.equals(key)).toBe(true);
   });
 
-  it("allows AUTH_URL to be unset (Auth.js infers it on Vercel)", () => {
+  it("returns IP_HASH_SECRET and reports it by name when missing", () => {
+    expect(captureEnvError(() => env.ipHashSecret()).variables).toEqual([
+      "IP_HASH_SECRET",
+    ]);
+    vi.stubEnv("IP_HASH_SECRET", "i".repeat(32));
+    expect(env.ipHashSecret()).toBe("i".repeat(32));
+  });
+
+  it("rejects an IP_HASH_SECRET equal to AUTH_SECRET without echoing it", () => {
+    const shared = "Sup3rS3cretSharedBetweenBothVars!!";
+    vi.stubEnv("IP_HASH_SECRET", shared);
+    vi.stubEnv("AUTH_SECRET", shared);
+    const error = captureEnvError(() => env.ipHashSecret());
+    expect(error.variables).toEqual(["IP_HASH_SECRET"]);
+    expect(error.message).toMatch(/different from AUTH_SECRET/);
+    expect(error.message).not.toContain("Sup3rS3cret");
+
+    vi.stubEnv("AUTH_SECRET", `${shared}-other`);
+    expect(env.ipHashSecret()).toBe(shared);
+  });
+
+  it("requires AUTH_URL (Better Auth would otherwise trust the request's Host)", () => {
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));
-    expect(env.auth()).toEqual({ secret: "a".repeat(32), url: undefined });
+    expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    expect(env.auth()).toEqual({
+      secret: "a".repeat(32),
+      url: "http://localhost:3000",
+    });
   });
 });
 
 describe("bad formats", () => {
   it.each([
     ["MONGODB_URI", "postgres://localhost/db", () => env.mongo()],
+    // No database name: the driver would silently use "test" (see db.ts).
+    [
+      "MONGODB_URI",
+      "mongodb+srv://u:p@cluster0.example.mongodb.net/?retryWrites=true",
+      () => env.mongo(),
+    ],
+    [
+      "MONGODB_URI",
+      "mongodb+srv://u:p@cluster0.example.mongodb.net",
+      () => env.mongo(),
+    ],
+    ["MONGODB_URI", "mongodb://127.0.0.1:27017/", () => env.mongo()],
     ["AUTH_SECRET", "too-short", () => env.auth()],
     ["SITE_URL", "not a url", () => env.siteUrl()],
     ["SITE_URL", "ftp://example.com", () => env.siteUrl()],
     ["COMPANY_EMAIL", "not-an-email", () => env.companyEmail()],
     ["CRON_SECRET", "short", () => env.cronSecret()],
+    ["IP_HASH_SECRET", "x".repeat(31), () => env.ipHashSecret()],
     ["WHISTLEBLOWER_ENC_KEY", "not base64 !!", () => env.whistleblowerKey()],
     [
       "WHISTLEBLOWER_ENC_KEY",
@@ -135,10 +184,68 @@ describe("bad formats", () => {
     expect(error.message).toMatch(/invalid/i);
   });
 
+  it.each(["1", "true", "TRUE", "yes", " 0"])(
+    "refuses to start when BETTER_AUTH_TELEMETRY is %j (it overrides telemetry: false)",
+    (value) => {
+      vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+      vi.stubEnv("AUTH_URL", "https://example.com");
+      vi.stubEnv("BETTER_AUTH_TELEMETRY", value);
+      const error = captureEnvError(() => env.auth());
+      expect(error.variables).toEqual(["BETTER_AUTH_TELEMETRY"]);
+      expect(error.message).toMatch(/telemetry/);
+    },
+  );
+
+  it.each([undefined, "", "0", "false", "FALSE"])(
+    "starts when BETTER_AUTH_TELEMETRY is %j",
+    (value) => {
+      vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+      vi.stubEnv("AUTH_URL", "https://example.com");
+      vi.stubEnv("BETTER_AUTH_TELEMETRY", value);
+      expect(env.auth().url).toBe("https://example.com");
+    },
+  );
+
+  it.each([
+    "BETTER_AUTH_SECRET",
+    "BETTER_AUTH_SECRETS",
+    "BETTER_AUTH_URL",
+    "BETTER_AUTH_TRUSTED_ORIGINS",
+  ])(
+    "refuses to start when %s is set (Better Auth would read it directly), naming it but not its value",
+    (variable) => {
+      vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+      vi.stubEnv("AUTH_URL", "https://example.com");
+      vi.stubEnv(variable, "Zq9Leak7Canary3Value");
+      const error = captureEnvError(() => env.auth());
+      expect(error.variables).toEqual([variable]);
+      expect(error.message).toContain(variable);
+      expect(error.message).not.toContain("Zq9Leak7Canary3Value");
+      vi.stubEnv(variable, "");
+      expect(env.auth().url).toBe("https://example.com");
+    },
+  );
+
   it("rejects AUTH_URL when set but not a URL", () => {
     vi.stubEnv("AUTH_SECRET", "a".repeat(32));
     vi.stubEnv("AUTH_URL", "localhost:3000");
     expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+  });
+
+  it.each([
+    "https://www.example.com/",
+    "https://www.example.com/api/auth",
+    "https://www.example.com?x=1",
+    "https://www.example.com#top",
+    "https://user:pass@www.example.com",
+    "ftp://www.example.com",
+  ])("rejects AUTH_URL %j: it must be a bare http(s) origin", (value) => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    vi.stubEnv("AUTH_URL", value);
+    const error = captureEnvError(() => env.auth());
+    expect(error.variables).toEqual(["AUTH_URL"]);
+    expect(error.message).toMatch(/origin/);
+    expect(error.message).not.toContain("pass");
   });
 });
 
@@ -146,6 +253,7 @@ describe("surrounding whitespace", () => {
   it.each([
     ["AUTH_SECRET", ` ${"a".repeat(32)}`, () => env.auth()],
     ["CRON_SECRET", `${"c".repeat(32)}\n`, () => env.cronSecret()],
+    ["IP_HASH_SECRET", ` ${"i".repeat(32)}`, () => env.ipHashSecret()],
     ["RESEND_API_KEY", "re_live_key ", () => env.email()],
     ["R2_SECRET_ACCESS_KEY", "\tsecret", () => env.r2()],
     ["SITE_URL", "https://example.com ", () => env.siteUrl()],
@@ -165,9 +273,10 @@ describe("surrounding whitespace", () => {
   });
 
   it("reports a whitespace-only optional value instead of ignoring it", () => {
-    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
-    vi.stubEnv("AUTH_URL", "  ");
-    expect(captureEnvError(() => env.auth()).variables).toEqual(["AUTH_URL"]);
+    vi.stubEnv("GEO_BLOCK_ENABLED", "  ");
+    const error = captureEnvError(() => env.geoBlockEnabled());
+    expect(error.variables).toEqual(["GEO_BLOCK_ENABLED"]);
+    expect(error.message).toMatch(/only whitespace/);
   });
 });
 
@@ -238,6 +347,7 @@ describe("secrecy", () => {
     ],
     ["AUTH_SECRET", "Sup3rS3cret", () => env.auth()],
     ["CRON_SECRET", "Sup3rS3cret", () => env.cronSecret()],
+    ["IP_HASH_SECRET", "Sup3rS3cret", () => env.ipHashSecret()],
     [
       "WHISTLEBLOWER_ENC_KEY",
       "Sup3rS3cretKeyMaterial==",
@@ -262,5 +372,17 @@ describe("secrecy", () => {
     expect(serialised).not.toContain(value);
     expect(serialised).not.toContain("Sup3rS3cret");
     expect(error.cause).toBeUndefined();
+  });
+});
+
+describe("isProduction", () => {
+  it.each([
+    ["production", true],
+    ["development", false],
+    ["test", false],
+    [undefined, false],
+  ])("NODE_ENV=%s gives %s", (value, expected) => {
+    vi.stubEnv("NODE_ENV", value);
+    expect(env.isProduction()).toBe(expected);
   });
 });

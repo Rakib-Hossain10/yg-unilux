@@ -20,6 +20,7 @@ const ALL_KEYS = [
   "GEO_BLOCK_ENABLED",
   "WHISTLEBLOWER_ENC_KEY",
   "CRON_SECRET",
+  "IP_HASH_SECRET",
   "SITE_URL",
 ] as const;
 
@@ -38,10 +39,10 @@ beforeEach(() => {
 });
 
 describe("types", () => {
-  it("marks optional variables as possibly undefined", () => {
+  it("types required variables as defined and optional ones as possibly undefined", () => {
     expectTypeOf(env.auth).returns.toEqualTypeOf<{
       secret: string;
-      url: string | undefined;
+      url: string;
     }>();
     expectTypeOf(env.whistleblowerKey).returns.toEqualTypeOf<Buffer>();
     expectTypeOf(env.geoBlockEnabled).returns.toEqualTypeOf<boolean>();
@@ -55,6 +56,7 @@ describe("whitespace", () => {
     ["RESEND_API_KEY", () => env.email()],
     ["AUTH_SECRET", () => env.auth()],
     ["CRON_SECRET", () => env.cronSecret()],
+    ["IP_HASH_SECRET", () => env.ipHashSecret()],
   ])("rejects a whitespace-only %s", (key, read) => {
     vi.stubEnv(key, " ".repeat(40));
     expect(envErrorOf(read).variables).toContain(key);

@@ -1,5 +1,5 @@
 # 0003 — Geo-block toggled by env var only
-- Status: Accepted
+- Status: Accepted (403 mechanism refined by 0026)
 - Date: 2026-09-30
 
 ## Context
