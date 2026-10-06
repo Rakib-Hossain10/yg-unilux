@@ -19,8 +19,14 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - T6 (areas, ADR 0039): schemas + service + UI; 1141 tests green. Built with Sonnet 5.5 subagents because the user asked for it.
 
   The review hook is on.
-- **Next: QA gate A** (`qa-security-reviewer`, Opus) covering T1–T6; consider a Playwright flow for categories and areas (create → move → delete blocked → delete). Then **T7**: product Zod schemas (`backend-architect`).
-  - T11b must add the areas `bwImage` uploader and tighten the field to the publicId regex.
+- **QA gate A: PASS** (T1–T6, 2026-10-06). Added `e2e/admin-catalog.qa.spec.ts` (19), `test/admin-write-path.qa.test.ts` (30), `e2e/fixtures/database.ts`. 1171 unit + 61 e2e green, build OK.
+- **Next: T7** — product Zod schemas (`src/lib/schemas/product.ts`, `backend-architect`). Then T8 (service), T9, T10 → QA gate B.
+- **Open items from gate A:**
+  - **P-1 (before the Phase 2 merge):** `npm audit --audit-level=high` fails on dev-only braces (GHSA-vfj7-8cjw-p6xm via eslint-config-next → fast-glob → micromatch); `--omit=dev` is clean, no non-forced fix. Add an `overrides` entry once patched, or write a deferral ADR (ADR 0015 style) and adjust CI.
+  - L-1: not-found `[id]` admin pages answer 200 because of `[id]/loading.tsx` (accept in an ADR note or drop the loading file).
+  - L-2 (T11b): tighten `bwImage` (schema + `publicIdField`) to the publicId regex before anything public renders it.
+  - L-3: add the planned ESLint rule (no `"use client"` import of `server-only`/`src/lib/admin/*`); a static test covers it now.
+  - L-4: stale `?notice=` stays after later moves. L-5: add a `useRef` in-flight guard to `category-tree.tsx` and `area-list.tsx` moves. Do both in the next UI task (T9).
 
 - **Admin guards (ADR 0036):**
   - The layout's `requireAdmin()` gives the real 403; `loading.tsx` doesn't wrap the layout.
@@ -63,7 +69,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T6 done, next QA gate A then T7 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T6 done, gate A passed, next T7 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -223,6 +229,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — QA gate A PASS (T1–T6); e2e flows for categories and areas added; audit gate P-1 and Lows L1–L5 recorded in Resume here. Next: T7.
 - 2026-10-06 — T6 done on Sonnet 5.5 subagents at the user's request (ADR 0039). 1141 tests green. Next: QA gate A, then T7.
 - 2026-10-06 — T3 committed (ADR 0036). Found that Next puts static admin metadata into a customer's 403 payload, so admin metadata stays static. 933 unit and 42 e2e tests green. The user ends the session here; the next session starts at T4.
 - 2026-10-06 — T2 committed (ADR 0035; ADR 0008 status points to it). The auto-review raised a Medium: `"max"` could serve newly restricted columns stale. Fixed: `settings:columns` always uses `{ expire: 0 }`. 899 tests green. Next: T3.

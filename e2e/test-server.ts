@@ -11,13 +11,14 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import process from "node:process";
 
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
 
 const PORT = "3000";
 
@@ -76,6 +77,9 @@ async function main(): Promise<void> {
   const replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   const uri = replSet.getUri("yg_e2e");
   await seed(uri);
+  // Specs that need data no admin screen can make yet (a product using a
+  // category or area) read the throwaway database's URI from here.
+  writeFileSync(E2E_MONGODB_URI_FILE, uri, "utf8");
 
   const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
   const child: ChildProcess = spawn(
