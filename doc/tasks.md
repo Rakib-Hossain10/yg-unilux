@@ -196,6 +196,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — The next CI run failed differently: on a cold binary cache, parallel Vitest workers raced on mongodb-memory-server's download lockfile. Fixed with a Vitest `globalSetup` (`test/global-setup.ts`) that downloads the binary once before the workers start. GitHub is now handled through `gh` (PR #9 "Phase 1"). Ask the user before merging to `main`.
 - 2026-10-06 — CI failed on `scripts/sync-indexes.test.ts`, because `node_modules/.cache` is missing on a fresh runner. Fixed by creating the folder with `mkdir -p` and guarding the cleanup. Next: CI green, then PR and merge.
 - 2026-10-05 — Wrap-up step 3 committed, ADR 0033: the full-tree audit is blocking through `scripts/audit.mjs` with one dated allowance. QA on the wrap-up diff: PASS (L1 session-cap gap after change-password recorded in ADR 0032; L2 audit-script fail-open cases fixed). Next: push, CI, PR, merge.
 - 2026-10-05 — Wrap-up step 2b committed, ADR 0032: a "Keep me signed in" checkbox, off by default, the same for admin and customers. 786 unit and 36 e2e tests green. Next: task-5 L2 (blocking audit script).

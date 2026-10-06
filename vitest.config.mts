@@ -13,6 +13,8 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Fetches the MongoDB binary once before workers start (cold-cache race).
+    globalSetup: ["./test/global-setup.ts"],
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts", "test/**/*.test.ts"],
     exclude: ["node_modules/**", "e2e/**", ".next/**"],
     restoreMocks: true,
