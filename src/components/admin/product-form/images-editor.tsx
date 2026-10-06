@@ -107,7 +107,7 @@ export function ImagesEditor({
   /** The product's updatedAt as the page loaded it (optimistic concurrency). */
   version: string;
   stored: StoredImage[];
-  /** For previews; from the server, never a NEXT_PUBLIC_ variable. */
+  /** For previews; from the server, never a public env variable. */
   cloudName: string | null;
   /** A published product must keep at least one image. */
   published: boolean;

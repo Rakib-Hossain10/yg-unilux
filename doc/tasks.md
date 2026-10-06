@@ -32,15 +32,15 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **QA gate B: PASS** (T7–T10b, 2026-10-06; run on Sonnet 5.5 at the user's request). No Critical, High or Medium findings. Added `test/admin-products.qa.test.ts` (48) and `e2e/admin-products-gate-b.qa.spec.ts` (4). 1476 unit + 84 e2e green, build OK, audit ok. Firefox and WebKit are not installed, so focus after a move is checked in Chromium only.
 - T11a done (ADR 0045, note on 0027): `src/lib/{cloudinary,cloudinary-ids}.ts`, `src/lib/admin/{uploads,product-images}.ts`, `setAreaImage` in `areas.ts`, `/admin/:path*` CSP. 1605 unit green, build OK. Gate A L-2 and gate B L-C are closed: publicId shape is enforced in Zod and Mongoose, and a variant image must be one of the product's own images.
 - T11b done (ADR 0046): product images editor (own section + Save, XHR upload with progress, alt text, kind, reorder), variant image select over saved images, area black-and-white uploader, 4 actions with customer/visitor tests; gate A I-1 closed. 1670 unit + 84 e2e green, build OK. Built on Opus (the user wants good-looking UI; a Sonnet run was stopped).
-- **Next: T12.** Storage lib + xlsx signature check + datasheet service (`backend-architect`, Opus). See the plan's T12 row and ADR 0045 point 6. T13 (datasheets UI, `admin-panel-builder`, **Opus**) follows, then **QA gate C** (T11–T13).
+- T12 done (ADR 0047, built on Sonnet 5.5 at the user's request): `src/lib/{storage,xlsx-signature}.ts`, `src/lib/schemas/datasheet.ts`, `src/lib/admin/datasheets.ts` (`listDatasheets`, `presignDatasheetUpload`, `finalizeDatasheet`, `renameDatasheet`, `deleteDatasheet`), `datasheet.rename` audit action, gate B I-2 re-check in `setStatus` (publish returns `fieldErrors.datasheetId`/`mainCategory`). 1736 unit green; fixed the T11b `NEXT_PUBLIC_` comment test failure.
+- **Next: T13** (datasheets UI, `admin-panel-builder`, Opus per plan): list with in-use count, uploader (presign → PUT with exactly the returned headers → finalize), picker in the product form (map publish `fieldErrors.datasheetId`), actions with `requireAdmin()` first and tags passed to `revalidateCatalogInAction` on ok AND error branches; customer + visitor tests. Then **QA gate C** (T11–T13).
 - **T18 must-do (from T11b):** add a Cloudinary fake switch to `e2e/test-server.ts` and upload e2e tests: images editor (upload, alt, reorder, save, `PRODUCT_CHANGED`, variant-in-use refusal) and area uploader (set, replace, remove, plus axe on `/admin/areas/[id]`). The area uploader has not been seen in a browser yet, and real uploads have not been tried against Cloudinary: do a manual smoke once with the real credentials.
 - **Low follow-ups from T11b:**
   - Backend: add `cloudinaryCloudName(): string | null` to `src/lib/cloudinary.ts` and delete `src/app/admin/cloudinary-cloud-name.ts`. Optionally return the new `updatedAt` from `saveProductImages`.
   - `applyServerErrors` is duplicated in `area-form.tsx` and `category-form.tsx`: make one shared helper.
   - `saveProductImagesAction` repeats the tail of `statusResult`.
   - Nice to have: a thumbnail column in the products list (`previewUrl`).
-- **User must do before T12 runs against the real bucket:** apply the R2 CORS rule (plan, "Things the user must do"). Reminded 2026-10-06.
-- **T12 must-do:** set `forcePathStyle: true` on the S3 client used for presigned PUTs (the CSP allows only `<account>.r2.cloudflarestorage.com`).
+- **User must do before T13 runs against the real bucket:** apply the R2 CORS rule (plan, "Things the user must do"). Reminded 2026-10-06.
 - **T17 must-do:** the orphan report also covers Cloudinary:
   - `yg/products/*` and `yg/areas/*` assets that nothing references;
   - images of deleted products;

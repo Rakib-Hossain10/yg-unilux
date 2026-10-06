@@ -811,6 +811,35 @@ export async function updateProduct(
   );
 }
 
+/*
+ * Problems for a stored mainCategory or datasheetId whose target is gone.
+ * Same shape as publishCheck problems, so the refusal reads the same.
+ */
+async function danglingReferences(
+  doc: Pick<Product, "mainCategory" | "datasheetId">,
+): Promise<PublishProblem[]> {
+  const [category, datasheet] = await Promise.all([
+    CategoryModel.exists({ _id: doc.mainCategory }),
+    doc.datasheetId === null
+      ? Promise.resolve(true)
+      : DatasheetModel.exists({ _id: doc.datasheetId }),
+  ]);
+  const problems: PublishProblem[] = [];
+  if (!category) {
+    problems.push({
+      field: "mainCategory",
+      message: "The main category no longer exists. Choose another.",
+    });
+  }
+  if (!datasheet) {
+    problems.push({
+      field: "datasheetId",
+      message: "The attached datasheet no longer exists. Detach or replace it.",
+    });
+  }
+  return problems;
+}
+
 /* Shared body of publishProduct / unpublishProduct. */
 async function setStatus(
   actorId: string,
@@ -830,12 +859,18 @@ async function setStatus(
   const doc = await ProductModel.findById(selfId, {
     status: 1,
     mainCategory: 1,
+    datasheetId: 1,
     "variants.modelNo": 1,
     images: 1,
     updatedAt: 1,
   }).lean<Pick<
     Product,
-    "status" | "mainCategory" | "variants" | "images" | "updatedAt"
+    | "status"
+    | "mainCategory"
+    | "datasheetId"
+    | "variants"
+    | "images"
+    | "updatedAt"
   > | null>();
   if (!doc) return formError(NOT_FOUND);
   if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
@@ -850,6 +885,10 @@ async function setStatus(
       images: doc.images,
     });
     if (problems.length > 0) return publishRefusal(problems);
+    // Gate B I-2: the stored ids can outlive what they point at (a category
+    // or datasheet deleted since the last save), so re-check they exist.
+    const dangling = await danglingReferences(doc);
+    if (dangling.length > 0) return publishRefusal(dangling);
   }
 
   const result = await ProductModel.updateOne(

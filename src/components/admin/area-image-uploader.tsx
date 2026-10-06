@@ -45,7 +45,7 @@ export function AreaImageUploader({
   areaId: string;
   /** The stored public id, or null. Updates after each save (refresh). */
   bwImage: string | null;
-  /** For the preview; from the server, never a NEXT_PUBLIC_ variable. */
+  /** For the preview; from the server, never a public env variable. */
   cloudName: string | null;
 }) {
   const [pending, startTransition] = useTransition();

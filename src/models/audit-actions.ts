@@ -26,6 +26,7 @@ export const ADMIN_AUDIT_ACTIONS = [
   "area.reorder",
   "datasheet.upload",
   "datasheet.replace",
+  "datasheet.rename",
   "datasheet.delete",
   "settings.columns.update",
   "settings.whatsapp.update",

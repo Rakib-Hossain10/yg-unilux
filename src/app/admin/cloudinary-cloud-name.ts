@@ -1,5 +1,5 @@
 // The Cloudinary cloud name for admin image previews, read on the server and
-// passed to client components as a prop (never a NEXT_PUBLIC_ variable). The
+// passed to client components as a prop (never a public env variable). The
 // cloud name is public: it is part of every res.cloudinary.com image URL.
 
 import "server-only";

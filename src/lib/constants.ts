@@ -74,3 +74,11 @@ export const MAX_EXTRA_SPEC_VALUE_LENGTH = 1000;
 export const MAX_PUBLIC_FILES = 20;
 export const MAX_PUBLIC_FILE_LABEL_LENGTH = 200;
 export const MAX_PUBLIC_FILE_URL_LENGTH = 2048;
+
+/*
+ * Datasheet (.xlsx) checks. A real workbook has a few dozen zip entries; the
+ * cap stops a crafted archive with a huge central directory. The two XML
+ * parts we read are tiny, so their declared size is capped too.
+ */
+export const MAX_XLSX_ENTRIES = 2000;
+export const MAX_XLSX_PART_BYTES = 1024 * 1024;

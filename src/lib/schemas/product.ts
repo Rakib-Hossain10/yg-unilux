@@ -302,7 +302,7 @@ export type ProductImagesInput = z.output<typeof productImagesInputSchema>;
 
 /** One reason a product cannot be published yet. */
 export interface PublishProblem {
-  field: "variants" | "mainCategory" | "images";
+  field: "variants" | "mainCategory" | "images" | "datasheetId";
   message: string;
 }
 

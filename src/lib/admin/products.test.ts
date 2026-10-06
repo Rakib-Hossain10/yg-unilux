@@ -764,6 +764,36 @@ describe("publishProduct / unpublishProduct", () => {
   });
 });
 
+describe("publishProduct re-checks stored references (gate B I-2)", () => {
+  async function ready(over: Record<string, unknown> = {}) {
+    const id = await draft();
+    expectOk(await updateProduct(ADMIN, id, form(over)));
+    await addImage(id);
+    return id;
+  }
+
+  it("refuses when the main category was deleted since the last save", async () => {
+    const id = await ready();
+    await CategoryModel.deleteOne({ _id: spot });
+    const result = await publishProduct(ADMIN, id);
+    expect(fieldErrorsOf(result).mainCategory?.[0]).toContain("no longer");
+    expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
+  });
+
+  it("refuses when the attached datasheet was deleted", async () => {
+    const id = await ready({ datasheetId: datasheet });
+    await DatasheetModel.deleteOne({ _id: datasheet });
+    const result = await publishProduct(ADMIN, id);
+    expect(fieldErrorsOf(result).datasheetId?.[0]).toContain("no longer");
+    expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
+  });
+
+  it("publishes with an existing datasheet attached", async () => {
+    const id = await ready({ datasheetId: datasheet });
+    expect((await publishProduct(ADMIN, id)).ok).toBe(true);
+  });
+});
+
 describe("deleteProduct", () => {
   it("deletes the document, audits ids and counts only, returns tags", async () => {
     const id = await draft("Secret name");
