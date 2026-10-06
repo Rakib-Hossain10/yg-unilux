@@ -1,7 +1,7 @@
 // Static admin-guard checks (CLAUDE.md rule 3, ADR 0024, 0029): every admin
 // page.tsx and layout.tsx starts with `await requireAdmin();` as statement one.
-// Their generateMetadata/generateViewport must start with it too. Later tasks
-// add their Server Action checks below, reusing the helpers.
+// Their generateMetadata/generateViewport must start with it too, and so must
+// every exported Server Action in an admin actions.ts (ADR 0035).
 
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -95,10 +95,28 @@ function defaultExportBody(code: string): string | null {
 function asyncFunctionBody(code: string, header: RegExp): string | null {
   const match = header.exec(code);
   if (!match) return null;
+  return bodyAfterParams(code, match.index + match[0].length - 1);
+}
+
+/*
+ * The body of a function whose parameter list opens at `paren`: skips the
+ * parameters by matching parentheses, then finds the body.
+ */
+function bodyAfterParams(code: string, paren: number): string | null {
+  return paramsAndBody(code, paren)?.body ?? null;
+}
+
+/* The parameter list (without its parentheses) and the body. */
+function paramsAndBody(
+  code: string,
+  paren: number,
+): { params: string; body: string | null } | null {
   let depth = 0;
-  for (let i = match.index + match[0].length - 1; i < code.length; i++) {
+  for (let i = paren; i < code.length; i++) {
     if (code[i] === "(") depth++;
-    else if (code[i] === ")" && --depth === 0) return functionBody(code, i);
+    else if (code[i] === ")" && --depth === 0) {
+      return { params: code.slice(paren + 1, i), body: functionBody(code, i) };
+    }
   }
   return null;
 }
@@ -379,5 +397,243 @@ export default async function Page() { await requireAdmin(); }`,
     ],
   ])("rejects: %s", (_name, source) => {
     expect(guardProblem(source)).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server Actions (T5 on; ADR 0035)
+// ---------------------------------------------------------------------------
+
+/*
+ * Admin Server Actions live only in `actions.ts` files under src/app/admin.
+ * Each such file is a "use server" module whose every runtime export is an
+ * `export async function` starting with `await requireAdmin();`. An action
+ * is a public POST endpoint: hiding the button that calls it guards nothing.
+ */
+const ACTION_FILE = /^actions\.ts$/;
+
+/* A "use server" directive at the top of a file or inside a function. */
+const USE_SERVER = /["']use server["']/;
+
+/** Why an actions.ts source fails the rules (empty when it passes). */
+function actionProblems(source: string): string[] {
+  const problems: string[] = [];
+  const withStrings = stripComments(source);
+  if (!/^\s*["']use server["']/.test(withStrings)) {
+    problems.push('does not start with the "use server" directive');
+  }
+  if (
+    !/import\s*\{[^}]*\brequireAdmin\b[^}]*\}\s*from\s*["']@\/lib\/permissions["']/.test(
+      withStrings,
+    )
+  ) {
+    problems.push("does not import requireAdmin from @/lib/permissions");
+  }
+
+  const code = stripCommentsAndStrings(source);
+  // Catching the guard's redirect/403 would let the action run (ADR 0024).
+  if (/\btry\s*\{/.test(code)) problems.push("uses try (wraps the guard)");
+  if (/\.catch\s*\(/.test(code)) problems.push("uses .catch (wraps the guard)");
+
+  // Every runtime export must be an async function the loop below checks.
+  for (const match of code.matchAll(/\bexport\b\s*(\S+(?:\s+\S+)?)/g)) {
+    const rest = match[1] ?? "";
+    if (/^(type|interface)\b/.test(rest) || /^async\s+function$/.test(rest)) {
+      continue;
+    }
+    problems.push(`has a non-function export: \`export ${rest}\``);
+  }
+
+  /*
+   * Only the plain `name(` form is parsed. Any other shape (a type parameter
+   * such as `name<T>(`) is counted but not matched, so it fails here instead
+   * of slipping past the guard check below.
+   */
+  const declared = code.match(/\bexport\s+async\s+function\b/g)?.length ?? 0;
+  const actions = [...code.matchAll(/export\s+async\s+function\s+(\w+)\s*\(/g)];
+  if (actions.length === 0) problems.push("exports no action");
+  if (declared !== actions.length) {
+    problems.push("has an action this check cannot parse (write `name(`)");
+  }
+  for (const match of actions) {
+    const parts = paramsAndBody(code, match.index + match[0].length - 1);
+    // A default value runs when the action is called, before the guard.
+    if (parts && /=(?!>)/.test(parts.params)) {
+      problems.push(`${match[1]} has a default parameter value`);
+    }
+    if (!parts?.body || !GUARD_FIRST.test(parts.body)) {
+      problems.push(
+        `${match[1]} does not start with \`await requireAdmin();\``,
+      );
+    }
+  }
+  return problems;
+}
+
+describe("admin Server Actions call requireAdmin() first", () => {
+  const files = adminFiles((base) => ACTION_FILE.test(base));
+
+  it("finds the categories actions", () => {
+    expect(files).toContain("src/app/admin/categories/actions.ts");
+  });
+
+  it.each(files)("%s", (file) => {
+    expect(actionProblems(readSource(file))).toEqual([]);
+  });
+
+  /*
+   * An inline "use server" function in a page or component, or a
+   * differently named file, would be an action this suite never checks.
+   */
+  it("has no Server Action outside an actions.ts file", () => {
+    const dirs = [ADMIN_DIR, path.join(root, "src", "components", "admin")];
+    const offenders = dirs.flatMap((dir) =>
+      readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isFile() &&
+            /\.(ts|tsx|js|jsx)$/.test(entry.name) &&
+            // actions.ts is checked above, but only under src/app/admin.
+            !(
+              ACTION_FILE.test(entry.name) &&
+              entry.parentPath.startsWith(ADMIN_DIR)
+            ) &&
+            !entry.name.endsWith(".test.ts"),
+        )
+        .map((entry) => path.join(entry.parentPath, entry.name))
+        .filter((file) =>
+          USE_SERVER.test(stripComments(readFileSync(file, "utf8"))),
+        )
+        .map((file) => path.relative(root, file).replaceAll("\\", "/")),
+    );
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("the Server Action check itself", () => {
+  const ok = `"use server";
+// header
+import { redirect } from "next/navigation";
+import { requireAdmin } from "@/lib/permissions";
+export type Result = { ok: boolean };
+function helper(x: unknown) { return x; }
+export async function saveAction(id: unknown, values: unknown): Promise<Result> {
+  const viewer = await requireAdmin();
+  const result = await save(viewer.user.id, { id, values });
+  if (!result.ok) return helper(result);
+  redirect("/admin");
+}
+export async function moveAction(id: unknown) {
+  await requireAdmin();
+  return { ok: true };
+}`;
+
+  it("accepts actions that each start with the guard", () => {
+    expect(actionProblems(ok)).toEqual([]);
+  });
+
+  it("accepts a function-typed parameter (=> is not a default value)", () => {
+    const source = `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a(pick: (id: string) => boolean) {
+  await requireAdmin();
+}`;
+    expect(actionProblems(source)).toEqual([]);
+  });
+
+  it.each([
+    ["no directive", ok.replace('"use server";', "")],
+    [
+      "directive after code",
+      `import { requireAdmin } from "@/lib/permissions";
+"use server";
+export async function a() { await requireAdmin(); }`,
+    ],
+    [
+      "requireAdmin from elsewhere",
+      ok.replace('"@/lib/permissions"', '"./fake"'),
+    ],
+    [
+      "one action without the guard",
+      ok.replace(
+        "  await requireAdmin();\n  return { ok: true };",
+        "  return { ok: true };",
+      ),
+    ],
+    [
+      "guard after the service call",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a(id: unknown) {
+  await remove(id);
+  await requireAdmin();
+}`,
+    ],
+    [
+      "guard inside try",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a() {
+  try { await requireAdmin(); } catch {}
+}`,
+    ],
+    [
+      ".catch on the guard",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a() {
+  await requireAdmin().catch(() => null);
+}`,
+    ],
+    [
+      "arrow export",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export const a = async () => { await save(); };`,
+    ],
+    [
+      "re-export",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export { deleteEverything } from "./danger";
+export async function a() { await requireAdmin(); }`,
+    ],
+    [
+      "default export",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export default async function a() { await save(); }`,
+    ],
+    [
+      "commented-out guard",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a() {
+  // await requireAdmin();
+  await save();
+}`,
+    ],
+    [
+      "generic action without the guard",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a() { await requireAdmin(); }
+export async function purge<T>(ids: T) { await remove(ids); }`,
+    ],
+    [
+      "default parameter that runs before the guard",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";
+export async function a(id = purgeDrafts()) {
+  await requireAdmin();
+}`,
+    ],
+    [
+      "no actions at all",
+      `"use server";
+import { requireAdmin } from "@/lib/permissions";`,
+    ],
+  ])("rejects: %s", (_name, source) => {
+    expect(actionProblems(source)).not.toEqual([]);
   });
 });

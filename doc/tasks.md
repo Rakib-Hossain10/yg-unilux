@@ -14,15 +14,13 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
   - T3 (admin shell + dashboard, ADR 0036).
   - T4 (category schemas + service, ADR 0037): `src/lib/schemas/{common,category}.ts`, `src/lib/admin/{write-result,categories}.ts`; 991 tests green.
+  - T5 (categories UI, ADR 0038): `/admin/categories` (tree, new, edit, move, delete), reusable `callAction`/`ActionResult` pattern, action guard rules in `test/admin-guards.test.ts`; 1062 tests green, build OK.
 
   The review hook is on.
-- **Next: T5: categories UI** (`admin-panel-builder`, model `opus`):
-  - pages and Server Actions under `src/app/admin/categories` using the T4 service (ADR 0037);
-  - actions: `requireAdmin()` first → service with `viewer.user.id` → `revalidateCatalogInAction(result.tags)` on both ok and audit-failed branches → `redirect` outside `try`;
-  - parent picker offers main categories only (`""` = none); show `errors.formErrors` above the form; move up/down and delete buttons;
-  - add the Server Action `describe` block to `test/admin-guards.test.ts` plus customer/visitor behavioural tests (QA L2, task 6).
+- **Next: T6a/T6b: areas** (schemas + service, then UI; `backend-architect` then `admin-panel-builder`, both model `opus`):
+  - reuse `src/lib/admin/write-result.ts`, `src/lib/schemas/common.ts`, and for the UI the ADR 0038 pattern (`callAction`, `ActionResult`, `actions.ts` guard rules);
+  - **QA gate A** (`qa-security-reviewer`, Opus) runs after T6 and covers T1–T6. Consider adding a Playwright flow for categories (create → move → delete blocked → delete).
 
-  After T5: T6a/T6b (areas, reuse `write-result.ts` and `schemas/common.ts`). **QA gate A** (`qa-security-reviewer`, Opus) runs after T6 and covers T1–T6.
 - **Admin guards (ADR 0036):**
   - The layout's `requireAdmin()` gives the real 403; `loading.tsx` doesn't wrap the layout.
   - Pages still guard first, because client navigation skips the layout.
@@ -64,7 +62,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T4 done, next T5 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T5 done, next T6 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.

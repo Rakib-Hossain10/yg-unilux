@@ -53,3 +53,4 @@ Template:
 | [0035](0035-admin-write-path.md) | Admin write path: schemas → services (return tags) → thin actions; one audit vocabulary (schema enum + Zod); meta = ids/field names/counts; typed tags, `settings:columns` expired at once; non-atomic audit | Accepted |
 | [0036](0036-admin-shell.md) | Admin shell: layout guard gives the real 403 (loading.tsx doesn't wrap it), page guard for client nav; static-only admin metadata; static guard test; `<details>` mobile nav | Accepted |
 | [0037](0037-category-service.md) | Category service: shared result module, tags per write, no-op writes, renumbering move, generic depth, slug rules | Accepted |
+| [0038](0038-admin-action-ui-pattern.md) | Admin action/form UI pattern: callAction + ActionResult, notices, aria-disabled edges, actions.ts guard rules | Accepted |
