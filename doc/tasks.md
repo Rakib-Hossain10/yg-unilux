@@ -21,7 +21,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   The review hook is on.
 - **QA gate A: PASS** (T1–T6, 2026-10-06). Added `e2e/admin-catalog.qa.spec.ts` (19), `test/admin-write-path.qa.test.ts` (30), `e2e/fixtures/database.ts`. 1171 unit + 61 e2e green, build OK.
 - T7 done (product schema, ADR 0040), 1209 tests green.
-- **Next: T8** — product service (`src/lib/admin/products.ts`, `backend-architect`). It must: run `publishCheck` before publishing; allow `trackSize` only in Magnetic Track; verify category/area/datasheet ids exist; turn a duplicate `modelNo` index error into a field error. Then T9, T10 → QA gate B.
+- T8 done (product service, ADR 0041), 1248 tests green.
+- **Next: T9** — products list + "new draft" UI (`admin-panel-builder`). Also fix gate A's L-4 (stale notice) and L-5 (move in-flight guard) in category-tree/area-list. Forms must map Zod errors under `variants` and the service's `variants.N.modelNo`. Then T10a/b → QA gate B.
 - **Open items from gate A:**
   - **P-1 (before the Phase 2 merge):** `npm audit --audit-level=high` fails on dev-only braces (GHSA-vfj7-8cjw-p6xm via eslint-config-next → fast-glob → micromatch); `--omit=dev` is clean, no non-forced fix. Add an `overrides` entry once patched, or write a deferral ADR (ADR 0015 style) and adjust CI.
   - L-1: not-found `[id]` admin pages answer 200 because of `[id]/loading.tsx` (accept in an ADR note or drop the loading file).
@@ -70,7 +71,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T6 done, T7 done, next T8 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T6 done, T8 done, next T9 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -154,6 +155,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T4/T5: categories schemas, service and tree editor UI — ADR 0037, 0038
 - [x] T6: areas module (service + UI) — ADR 0039
 - [x] T7: product Zod schema + `publishCheck` — ADR 0040
+- [x] T8: product service — ADR 0041
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
@@ -231,6 +233,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T8 done (ADR 0041): product service with publish gate, trackSize rule, modelNo field errors. Next: T9.
 - 2026-10-06 — T7 done (ADR 0040). Auto-review caught a server-only import in the schema; constants moved to `product-constants.ts`. Next: T8.
 - 2026-10-06 — QA gate A PASS (T1–T6); e2e flows for categories and areas added; audit gate P-1 and Lows L1–L5 recorded in Resume here. Next: T7.
 - 2026-10-06 — T6 done on Sonnet 5.5 subagents at the user's request (ADR 0039). 1141 tests green. Next: QA gate A, then T7.
