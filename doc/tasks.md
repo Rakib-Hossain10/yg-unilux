@@ -4,15 +4,9 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-1`. **Tasks 1–12 and wrap-up steps 1, 2, 2b and 3 are committed**, but only tasks 1–5 have been pushed. The Phase 1 exit criteria pass locally (QA PASS, 2026-10-04): the seeded admin signs in; `/admin` gives non-admins a real 403 on the server; a fake CN header gets 403. "On preview" waits for the client's Vercel account.
-- **Next: Phase 1 wrap-up, before the merge to `main`.** Do these in order, one commit each:
-  1. ~~Task-12 QA Lows~~ — done (ADR 0030): session tokens removed from every `/api/auth` JSON body, client aborts answered with a quiet 499, the e2e server blanks every `.env.example` variable, sign-out stays on the page if it fails, the login comment is fixed, and a signal crash exits 1.
-  2. ~~Task-5 QA L1~~ — done (ADR 0031): `/change-password` allows 5 attempts per user per 15 minutes, counted in the before-hook before the password check (HMAC'd user id, generic 429, audit `user-pw-change`).
-  2b. ~~"Keep me signed in"~~ — done (ADR 0032): the checkbox on `/login` is off by default for every role. Unchecked gives a browser-session cookie with a hard 24 h server cap; checked gives 7 days.
-  3. ~~Task-5 QA L2~~ — done (ADR 0033): `npm run audit` is blocking in CI and allows only GHSA-vfj7-8cjw-p6xm, with a review date of **2027-01-05**.
-  4. **Next →** run lint, typecheck, `npm test`, `npm run build`, `npm run test:e2e`, the audit and gitleaks.
-  5. Push `phase-1`, check CI is green on GitHub, open a PR to `main`, merge, and tick Phase 1.
-  6. Then **Phase 2 (Admin core)**: plan first (plan mode), on a `phase-2` branch.
+- **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, merge commit `5fff0bb`, 2026-10-06), with CI green on every job.
+- **Next: Phase 2 (Admin core). Plan first, in plan mode**, then build one task per commit. Scope is in the "Phase 2 — Admin core" section below: shadcn admin layout, dashboard, categories tree, areas, products CRUD + Cloudinary, datasheets (R2), settings, auditLog + tag revalidation, tests. Exit: a full product built by hand with images and an attached datasheet.
+- **GitHub:** handled with `gh` (push, PR, CI, merge). Always ask the user before merging into `main`.
 - **QA after:** each Phase 2 feature plus the Phase 2 exit (`qa-security-reviewer`). Every changed file also gets the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
@@ -38,7 +32,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 1 — Foundations — in progress (tasks 1–12 done; exit met locally; wrap-up + merge pending)
+**Current focus:** Phase 2 — Admin core — planning (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -84,7 +78,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] `CLOUDINARY_URL` replaces the three Cloudinary variables; next/image limited to our cloud — ADR 0016 (branch `chore/cloudinary-url`)
 - [x] Direct `mongodb` dependency: needed by Better Auth's adapter; pinned to Mongoose's range `~7.6` so npm dedupes to one copy (test + Dependabot ignore) — ADR 0017
 
-## Phase 1 — Foundations
+## Phase 1 — Foundations ✅ (merged 2026-10-06, PR #9)
 - [x] Task 1: `lib/db.ts`, one shared `MongoClient` for Mongoose and Better Auth, strict Mongoose, `MONGODB_URI` must name the database — ADR 0018
 - [x] Task 2: 11 Mongoose models + read-only `users` + `loginAttempts` (TTL), `spec-columns.ts`, `npm run db:indexes` — ADR 0019 (8 open questions listed there)
 - [ ] Task 5 must also apply ADR 0022's 'Required in task 5' list (issue a device token on password reset, token epoch, path passed to clearSignIn, wider guard, Better Auth limiter storage, reset hardening)
@@ -113,7 +107,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Task 12: `/login` (posts to `/api/auth`, method=post), `/admin` placeholder guarded in layout + page, sign-out; e2e on a seeded in-memory replica set (admin login, customer real 403, visitor/forged cookie → /login, CN 403, HK/MO/TW 200); QA PASS — ADR 0029
 - [x] Tests: permissions matrix, rate limiter, proxy country matrix, env validation (773 unit + 34 e2e)
 - **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview — **met locally on `next start` (2026-10-04); preview pending the Vercel account**
-- [ ] Phase 1 wrap-up: ~~task-12 Lows~~ (done, ADR 0030), ~~task-5 L1~~ (done, ADR 0031), ~~"Keep me signed in"~~ (done, ADR 0032), ~~task-5 L2~~ (done, ADR 0033), push, CI green, PR, merge to `main`
+- [x] Phase 1 wrap-up: task-12 Lows (ADR 0030), task-5 L1 (ADR 0031), "Keep me signed in" (ADR 0032), task-5 L2 (ADR 0033); CI green; PR #9 merged to `main` 2026-10-06
 
 ## Phase 2 — Admin core
 - [ ] shadcn init; admin layout with `requireAdmin()` everywhere
@@ -196,6 +190,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — CI green and PR #9 merged to `main` (`5fff0bb`) with the user's approval. Phase 1 is done. `phase-2` branched off. Next: plan Phase 2 in plan mode.
 - 2026-10-06 — The next CI run failed differently: on a cold binary cache, parallel Vitest workers raced on mongodb-memory-server's download lockfile. Fixed with a Vitest `globalSetup` (`test/global-setup.ts`) that downloads the binary once before the workers start. GitHub is now handled through `gh` (PR #9 "Phase 1"). Ask the user before merging to `main`.
 - 2026-10-06 — CI failed on `scripts/sync-indexes.test.ts`, because `node_modules/.cache` is missing on a fresh runner. Fixed by creating the folder with `mkdir -p` and guarding the cleanup. Next: CI green, then PR and merge.
 - 2026-10-05 — Wrap-up step 3 committed, ADR 0033: the full-tree audit is blocking through `scripts/audit.mjs` with one dated allowance. QA on the wrap-up diff: PASS (L1 session-cap gap after change-password recorded in ADR 0032; L2 audit-script fail-open cases fixed). Next: push, CI, PR, merge.
