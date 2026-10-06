@@ -7,18 +7,21 @@ import type { Types } from "mongoose";
 
 import { mongoose } from "@/lib/db";
 
+import {
+  PRODUCT_STATUSES,
+  TRACK_SIZES,
+  type ProductStatus,
+  type TrackSize,
+} from "./product-constants";
 import { defineModel, publicIdField, shortText, slugField } from "./shared";
 import { SPEC_KEYS, type SpecKey, type SpecValues } from "./spec-columns";
 
 const { Schema } = mongoose;
 const { ObjectId } = Schema.Types;
 
-export const PRODUCT_STATUSES = ["draft", "published"] as const;
-export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
-
-/** Magnetic Track sizes in mm; a listing filter for that category only. */
-export const TRACK_SIZES = [5, 10, 20] as const;
-export type TrackSize = (typeof TRACK_SIZES)[number];
+// Re-exported so existing imports from "@/models/product" keep working.
+export { PRODUCT_STATUSES, TRACK_SIZES };
+export type { ProductStatus, TrackSize };
 
 export const PRODUCT_IMAGE_KINDS = [
   "gallery",

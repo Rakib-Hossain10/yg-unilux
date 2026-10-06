@@ -37,3 +37,31 @@ export const CLOUDINARY_PRODUCT_FOLDER = "yg/products";
  */
 export const R2_INCOMING_PREFIX = "incoming/";
 export const R2_DATASHEETS_PREFIX = "datasheets/";
+
+/*
+ * Product form caps. String lengths mirror the maxlength values in
+ * src/models/product.ts (a longer value would be rejected by Mongoose anyway);
+ * the array caps are ours, so one request cannot carry an unbounded document.
+ */
+export const MAX_PRODUCT_NAME_LENGTH = 200;
+export const MAX_PRODUCT_FAMILY_LENGTH = 100;
+export const MAX_PRODUCT_TYPE_LENGTH = 100;
+export const MAX_PRODUCT_MODEL_CODE_LENGTH = 64;
+export const MAX_PRODUCT_DESCRIPTION_LENGTH = 5000;
+export const MAX_MODEL_NO_LENGTH = 64;
+export const MAX_VARIANT_LABEL_LENGTH = 100;
+export const MAX_PUBLIC_ID_LENGTH = 255;
+export const MAX_SPEC_VALUE_LENGTH = 500;
+export const MAX_SPEC_OPTIONS = 20;
+export const MAX_FILTER_VALUES = 50;
+export const MAX_FILTER_NUMBER = 1_000_000;
+export const MAX_EXTRA_CATEGORIES = 20;
+export const MAX_PRODUCT_AREAS = 20;
+export const MAX_VARIANTS = 200;
+export const MAX_EXTRA_SPECS = 100;
+export const MAX_EXTRA_SPEC_GROUP_LENGTH = 100;
+export const MAX_EXTRA_SPEC_LABEL_LENGTH = 100;
+export const MAX_EXTRA_SPEC_VALUE_LENGTH = 1000;
+export const MAX_PUBLIC_FILES = 20;
+export const MAX_PUBLIC_FILE_LABEL_LENGTH = 200;
+export const MAX_PUBLIC_FILE_URL_LENGTH = 2048;
