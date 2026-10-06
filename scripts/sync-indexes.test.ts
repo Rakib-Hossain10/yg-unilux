@@ -3,7 +3,7 @@
 // throwaway folder with its own fake .env.local, so the real one is never read.
 
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -73,15 +73,23 @@ function runNode(args: string[], cwd: string): Promise<RunResult> {
   });
 }
 
-let server: MongoMemoryServer;
-let workDir: string;
-let emptyDir: string;
+let server: MongoMemoryServer | undefined;
+// "" until beforeAll creates them.
+let workDir = "";
+let emptyDir = "";
+
+function serverUri(dbName?: string): string {
+  if (!server) throw new Error("MongoMemoryServer did not start");
+  return server.getUri(dbName);
+}
 
 beforeAll(async () => {
   server = await MongoMemoryServer.create();
   // Inside the repo (so node_modules and tsconfig.json are found) but
   // gitignored, and away from the real .env.local at the repo root.
+  // node_modules/.cache does not exist on a fresh CI checkout.
   const cacheDir = path.join(REPO_ROOT, "node_modules", ".cache");
+  await mkdir(cacheDir, { recursive: true });
   workDir = await mkdtemp(path.join(cacheDir, "sync-indexes-"));
   emptyDir = await mkdtemp(path.join(cacheDir, "sync-indexes-empty-"));
   await writeFile(
@@ -90,10 +98,12 @@ beforeAll(async () => {
   );
 }, SERVER_START_TIMEOUT_MS);
 
+// Guarded: if beforeAll failed part-way, report that error, not a new one.
 afterAll(async () => {
-  await rm(workDir, { recursive: true, force: true });
-  await rm(emptyDir, { recursive: true, force: true });
-  await server.stop();
+  for (const dir of [workDir, emptyDir]) {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }
+  await server?.stop();
 });
 
 describe("npm run db:indexes", () => {
@@ -119,7 +129,7 @@ describe("npm run db:indexes", () => {
       expect(result.stdout).toContain("Done: 15 of 15 collections ok.");
 
       // The indexes really exist in the in-memory database.
-      const client = await MongoClient.connect(server.getUri());
+      const client = await MongoClient.connect(serverUri());
       try {
         const indexes = await client
           .db(DB_NAME)
