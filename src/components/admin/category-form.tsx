@@ -221,6 +221,8 @@ export function CategoryForm({
               <FieldLabel htmlFor={nameId}>Name</FieldLabel>
               <Input
                 {...field}
+                // No name: a submit before hydration would put it in the URL.
+                name={undefined}
                 id={nameId}
                 autoComplete="off"
                 required
@@ -243,6 +245,7 @@ export function CategoryForm({
               <FieldLabel htmlFor={slugId}>Slug</FieldLabel>
               <Input
                 {...field}
+                name={undefined}
                 id={slugId}
                 autoComplete="off"
                 spellCheck={false}
@@ -321,6 +324,7 @@ export function CategoryForm({
               </FieldLabel>
               <Textarea
                 {...field}
+                name={undefined}
                 id={descriptionId}
                 rows={4}
                 maxLength={MAX_CATEGORY_DESCRIPTION_LENGTH}

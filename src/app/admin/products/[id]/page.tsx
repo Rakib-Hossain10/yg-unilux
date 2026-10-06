@@ -1,5 +1,5 @@
-// Edit page for one product (T10a): status and publishing, basics, categories,
-// areas, filters, delete. An unknown or malformed id is a 404. requireAdmin()
+// Edit page for one product (T10a/b, T11b): status and publishing, the
+// details form, the images editor (saved on its own) and delete. An unknown or malformed id is a 404. requireAdmin()
 // first (rule 3); no loading.tsx here, so not-found can answer before streaming.
 
 import type { Metadata } from "next";
@@ -10,6 +10,7 @@ import {
   categoryOptions,
   magneticTrackIds,
 } from "@/components/admin/product-category-options";
+import { ImagesEditor } from "@/components/admin/product-form/images-editor";
 import { ProductEditForm } from "@/components/admin/product-form/product-edit-form";
 import { PRODUCTS_PATH } from "@/components/admin/product-paths";
 import { NOTICE_PARAM, readNotice } from "@/components/admin/save-notice";
@@ -19,6 +20,8 @@ import { listCategoryTree } from "@/lib/admin/categories";
 import { getProductForEdit } from "@/lib/admin/products";
 import { requireAdmin } from "@/lib/permissions";
 import { publishCheck } from "@/lib/schemas/product";
+
+import { adminCloudName } from "../../cloudinary-cloud-name";
 
 // Static only (ADR 0036): never the product's name.
 export const metadata: Metadata = { title: "Edit product" };
@@ -77,7 +80,21 @@ export default async function EditProductPage({
         areas={areas.map((area) => ({ id: area.id, label: area.name }))}
         magneticTrackIds={magneticTrackIds(tree)}
         publishProblems={problems}
-      />
+        savedImages={product.images}
+      >
+        {/*
+         * Rendered after the details form, before Delete, with its own Save:
+         * image changes are saved independently, and the details form's Save
+         * stays the first "Save" on the page.
+         */}
+        <ImagesEditor
+          productId={product.id}
+          version={product.updatedAt}
+          stored={product.images}
+          cloudName={adminCloudName()}
+          published={status === "published"}
+        />
+      </ProductEditForm>
     </div>
   );
 }

@@ -17,9 +17,18 @@ export type { ServiceErrors };
  * Unless it is false, the form must not offer to submit the same values
  * again, or a create could make a second copy. Cache tags stay on the server.
  */
-export type ActionResult =
-  | { ok: true }
-  | { ok: false; errors: ServiceErrors; saved: boolean | "unknown" };
+export interface ActionFailure {
+  ok: false;
+  errors: ServiceErrors;
+  saved: boolean | "unknown";
+}
+export type ActionResult = { ok: true } | ActionFailure;
+
+/**
+ * An action that hands data back on success, e.g. a signed upload. Failures
+ * have the same shape as ActionResult's.
+ */
+export type ActionData<T> = { ok: true; data: T } | ActionFailure;
 
 /** Shown when the action threw instead of answering. */
 export const ACTION_FAILED_MESSAGE =
@@ -34,9 +43,9 @@ export const ACTION_FAILED_MESSAGE =
  * `undefined` is kept for an action that ends without a value, so callers
  * treat "no result" as "nothing to show" rather than crashing.
  */
-export async function callAction(
-  action: () => Promise<ActionResult>,
-): Promise<ActionResult | undefined> {
+export async function callAction<R extends ActionResult | ActionData<unknown>>(
+  action: () => Promise<R>,
+): Promise<R | ActionFailure | undefined> {
   try {
     return await action();
   } catch (error) {

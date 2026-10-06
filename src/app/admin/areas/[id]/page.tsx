@@ -1,14 +1,18 @@
-// Edit page for one area. An unknown or malformed id shows the segment's
+// Edit page for one area: the name/slug form and the black-and-white image
+// uploader (saved on its own). An unknown or malformed id shows the segment's
 // not-found page. requireAdmin() first (rule 3).
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AreaForm } from "@/components/admin/area-form";
+import { AreaImageUploader } from "@/components/admin/area-image-uploader";
 import { AREAS_PATH } from "@/components/admin/area-paths";
 import { BackLink } from "@/components/admin/back-link";
 import { getAreaForEdit } from "@/lib/admin/areas";
 import { requireAdmin } from "@/lib/permissions";
+
+import { adminCloudName } from "../../cloudinary-cloud-name";
 
 // Static only (ADR 0036): never the area's name.
 export const metadata: Metadata = { title: "Edit area" };
@@ -29,6 +33,11 @@ export default async function EditAreaPage({
         <h1 className="text-2xl font-semibold">Edit {area.name}</h1>
       </div>
       <AreaForm area={area} />
+      <AreaImageUploader
+        areaId={area.id}
+        bwImage={area.bwImage}
+        cloudName={adminCloudName()}
+      />
     </div>
   );
 }

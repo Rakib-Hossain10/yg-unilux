@@ -1,13 +1,19 @@
 "use server";
 
 // Server Actions for the products module: create a draft (T9), save the edit
-// form, publish, unpublish and delete (T10). requireAdmin() first → the T8
-// service with the admin's id → revalidate the returned tags → redirect last.
+// form, publish, unpublish and delete (T10), sign and save images (T11b).
+// requireAdmin() first → the service with the admin's id → revalidate the
+// returned tags → redirect last.
 
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 
-import type { ActionResult } from "@/components/admin/action-result";
+import type {
+  ActionData,
+  ActionFailure,
+  ActionResult,
+} from "@/components/admin/action-result";
+import type { SignedImageUpload } from "@/components/admin/image-upload";
 import {
   PRODUCTS_PATH,
   productEditPath,
@@ -20,6 +26,8 @@ import {
   unpublishProduct,
   updateProduct,
 } from "@/lib/admin/products";
+import { saveProductImages } from "@/lib/admin/product-images";
+import { signCloudinaryUpload } from "@/lib/admin/uploads";
 import type { ServiceResult } from "@/lib/admin/write-result";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
@@ -38,7 +46,9 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
  * `saved` tells the form the write happened (audit failure) so it does not
  * offer to create the same draft again.
  */
-function failure(result: ServiceResult<unknown> & { ok: false }): ActionResult {
+function failure(
+  result: ServiceResult<unknown> & { ok: false },
+): ActionFailure {
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
@@ -145,4 +155,45 @@ export async function deleteProductAction(id: unknown): Promise<ActionResult> {
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
   redirect(withNotice(PRODUCTS_PATH, "deleted"));
+}
+
+/**
+ * Signs one direct browser upload of a product image (ADR 0045). The server
+ * picks the public id under this product's own folder; the browser then posts
+ * the file with `fields` straight to Cloudinary. Nothing is written, so the
+ * returned tags are empty; they still go through the shared helper.
+ */
+export async function signProductImageUpload(
+  productId: unknown,
+): Promise<ActionData<SignedImageUpload>> {
+  const viewer = await requireAdmin();
+  const result = await signCloudinaryUpload(viewer.user.id, {
+    target: "product",
+    id: productId,
+  });
+  revalidateCatalogInAction(result.tags);
+  if (!result.ok) return failure(result);
+  return { ok: true, data: result.data };
+}
+
+/**
+ * Saves the images editor's FULL ordered list (`{productId, images}`), after
+ * the service verified every new upload. `expectedUpdatedAt` is the version
+ * the page holds; a product changed since is refused (ADR 0043). The editor
+ * stays on the page: a write re-renders it with refresh(), so the page
+ * carries the new images and updatedAt.
+ */
+export async function saveProductImagesAction(
+  input: unknown,
+  expectedUpdatedAt: unknown,
+): Promise<ActionResult> {
+  const viewer = await requireAdmin();
+  const result = await saveProductImages(viewer.user.id, input, {
+    expectedUpdatedAt,
+  });
+  revalidateCatalogInAction(result.tags);
+  // Tags mean something was written, even when the audit step then failed.
+  if (result.tags.length > 0) refresh();
+  if (!result.ok) return failure(result);
+  return { ok: true };
 }

@@ -406,6 +406,7 @@ describe("ProductEditForm", () => {
           values,
           updatedAt: "2026-10-06T12:00:00.000Z",
         },
+        savedImages: [],
         categories: [
           { id: MAIN, label: "Spot Lights" },
           { id: TRACK, label: "Magnetic Track" },
@@ -811,6 +812,7 @@ describe("section (b) markup", () => {
           values,
           updatedAt: "2026-10-06T12:00:00.000Z",
         },
+        savedImages: [],
         categories: [{ id: MAIN, label: "Spot Lights" }],
         areas: [{ id: AREA, label: "Office" }],
         magneticTrackIds: [],

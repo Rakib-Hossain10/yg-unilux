@@ -192,6 +192,8 @@ export function ProductNewForm({
               <FieldLabel htmlFor={nameId}>Name</FieldLabel>
               <Input
                 {...field}
+                // No name: a submit before hydration would put it in the URL.
+                name={undefined}
                 id={nameId}
                 autoComplete="off"
                 required

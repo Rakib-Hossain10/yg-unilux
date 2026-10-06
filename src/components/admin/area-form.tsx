@@ -1,8 +1,8 @@
 "use client";
 
-// The create/edit form for one area: name, slug and the black-and-white
-// image's Cloudinary public id (a plain text field until the uploader lands).
-// React Hook Form checks it with the same Zod schema the server re-parses.
+// The create/edit form for one area: name and slug. The black-and-white image
+// has its own uploader on the edit page (area-image-uploader.tsx); this form
+// sends the stored image id back unchanged. Same Zod schema as the server.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CircleAlert } from "lucide-react";
@@ -23,7 +23,6 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   areaInputSchema,
-  MAX_AREA_BW_IMAGE_LENGTH,
   MAX_AREA_NAME_LENGTH,
   type AreaFormValues,
   type AreaInput,
@@ -41,7 +40,8 @@ export interface EditedArea {
   bwImage: string | null;
 }
 
-const FIELDS = ["name", "slug", "bwImage"] as const;
+/* Fields with an input; a `bwImage` error goes to the list above the form. */
+const FIELDS = ["name", "slug"] as const;
 type FieldName = (typeof FIELDS)[number];
 
 const isFieldName = (key: string): key is FieldName =>
@@ -105,7 +105,12 @@ export function AreaForm({ area }: { area?: EditedArea }) {
     if (inFlight.current) return;
     inFlight.current = true;
     setFormErrors([]);
-    const values = form.getValues();
+    /*
+     * The image is not edited here: send the stored id as the page has it
+     * now (the uploader refreshes the page after a change), so the save
+     * keeps it. The service refuses any other id (BW_IMAGE_USE_UPLOADER).
+     */
+    const values = { ...form.getValues(), bwImage: area?.bwImage ?? "" };
     startTransition(async () => {
       const result = await callAction(() =>
         editing ? updateAreaAction(area.id, values) : createAreaAction(values),
@@ -121,7 +126,6 @@ export function AreaForm({ area }: { area?: EditedArea }) {
 
   const nameId = "area-name";
   const slugId = "area-slug";
-  const imageId = "area-bw-image";
 
   return (
     <form
@@ -161,6 +165,8 @@ export function AreaForm({ area }: { area?: EditedArea }) {
               <FieldLabel htmlFor={nameId}>Name</FieldLabel>
               <Input
                 {...field}
+                // No name: a submit before hydration would put it in the URL.
+                name={undefined}
                 id={nameId}
                 autoComplete="off"
                 required
@@ -183,6 +189,7 @@ export function AreaForm({ area }: { area?: EditedArea }) {
               <FieldLabel htmlFor={slugId}>Slug</FieldLabel>
               <Input
                 {...field}
+                name={undefined}
                 id={slugId}
                 autoComplete="off"
                 spellCheck={false}
@@ -196,33 +203,6 @@ export function AreaForm({ area }: { area?: EditedArea }) {
                   : "Part of the web address, e.g. residential. Leave blank to make one from the name."}
               </FieldDescription>
               <FieldError id={`${slugId}-error`} errors={[fieldState.error]} />
-            </Field>
-          )}
-        />
-
-        <Controller
-          name="bwImage"
-          control={form.control}
-          render={({ field, fieldState }) => (
-            <Field data-invalid={fieldState.invalid}>
-              <FieldLabel htmlFor={imageId}>
-                Black-and-white image (optional)
-              </FieldLabel>
-              <Input
-                {...field}
-                value={field.value ?? ""}
-                id={imageId}
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={MAX_AREA_BW_IMAGE_LENGTH}
-                aria-invalid={fieldState.invalid}
-                aria-describedby={`${imageId}-help${fieldState.invalid ? ` ${imageId}-error` : ""}`}
-              />
-              <FieldDescription id={`${imageId}-help`}>
-                The image&apos;s Cloudinary public id. An upload button comes
-                later.
-              </FieldDescription>
-              <FieldError id={`${imageId}-error`} errors={[fieldState.error]} />
             </Field>
           )}
         />

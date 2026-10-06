@@ -61,3 +61,4 @@ Template:
 | [0043](0043-product-edit-form.md) | Product edit form: status only via publish/unpublish, optimistic concurrency on `updatedAt`, published stays publishable, round-trip of unedited fields, route groups for a real 404 | Accepted |
 | [0044](0044-product-form-rows-and-specs.md) | Product form (b): specs one option per line, UI spec groups, one generic row-list editor, errors placed only on unchanged rows, no input `name`s | Accepted |
 | [0045](0045-direct-uploads.md) | Direct uploads, server verifies (amends 0009): server-chosen ids, signed `overwrite=false`, post-upload `api.resource` check, removed images kept for the orphan report; admin-only `connect-src` (note on 0027) | Accepted |
+| [0046](0046-images-editor-ui.md) | Images editor UI: own section and Save (not in a form), sequential XHR upload with `public_id` echo check, previews from `res.cloudinary.com`, error placement, variant image select, area uploader | Accepted |

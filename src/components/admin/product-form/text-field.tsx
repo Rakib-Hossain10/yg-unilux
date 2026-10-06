@@ -28,7 +28,7 @@ export type TextFieldName =
   | "description"
   | `filters.${FilterKey}`
   | `specs.${SpecKey}`
-  | `variants.${number}.${"modelNo" | "label" | "imagePublicId"}`
+  | `variants.${number}.${"modelNo" | "label"}`
   | `variants.${number}.specs.${SpecKey}`
   | `extraSpecs.${number}.${"group" | "label" | "value"}`
   | `publicFiles.${number}.${"label" | "url"}`;

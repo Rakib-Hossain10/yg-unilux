@@ -1,20 +1,26 @@
 // Section (b) of the product edit form, "Variants": one row per model no.
-// (e.g. a lens and a reflector version) with its label, image public id and
-// the specs that differ from the product's. Removing a row asks first.
+// (e.g. a lens and a reflector version) with its label, its image (one of the
+// product's saved images) and the specs that differ. Removing a row asks first.
 
 import { X } from "lucide-react";
-import { memo, useCallback, useState } from "react";
-import { useFormContext, useWatch } from "react-hook-form";
+import { memo, use, useCallback, useState } from "react";
+import { Controller, useFormContext, useWatch } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@/components/ui/field";
 import {
   MAX_MODEL_NO_LENGTH,
-  MAX_PUBLIC_ID_LENGTH,
   MAX_VARIANT_LABEL_LENGTH,
   MAX_VARIANTS,
 } from "@/lib/constants";
 import { SPEC_KEYS, type SpecKey } from "@/models/spec-columns";
+
+import { NATIVE_SELECT_CLASS } from "../native-select";
 
 import type { ProductEditValues, SpecOverrideTexts } from "./form-values";
 import { useFocusAfterRender } from "./row-controls";
@@ -23,17 +29,17 @@ import {
   type RemoveConfirm,
   type RowInputsProps,
 } from "./row-list-section";
+import { imageSelectOptions, SavedImagesContext } from "./saved-images";
 import { isRestrictedByDefault, SPEC_HEADER } from "./spec-groups";
 import { RestrictedBadge, SPEC_TEXT_MAX_LENGTH } from "./specs-section";
-import { fieldId, TextField } from "./text-field";
+import { describedBy, fieldId, TextField } from "./text-field";
 
 /*
  * A native <select>, not the Radix one: inside a form Radix renders a hidden
  * native select with every option anyway, and with up to 200 rows a plain
  * element is the lighter choice. Styled with the Input tokens.
  */
-const SELECT_CLASS =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-background px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm";
+const SELECT_CLASS = NATIVE_SELECT_CLASS;
 
 /**
  * The spec values that differ for this variant: one input per added key, a
@@ -138,6 +144,59 @@ function SpecDifferences({ index, rowName }: RowInputsProps) {
   );
 }
 
+/*
+ * The variant's own image: one of the product's SAVED images, or none. A
+ * just-uploaded image appears here once the images section is saved.
+ */
+function VariantImageSelect({ index }: { index: number }) {
+  const { control } = useFormContext<ProductEditValues>();
+  const saved = use(SavedImagesContext);
+  const name = `variants.${index}.imagePublicId` as const;
+  const id = fieldId(name);
+  return (
+    <Controller
+      name={name}
+      control={control}
+      render={({ field, fieldState }) => {
+        const value = field.value ?? "";
+        const options = imageSelectOptions(saved, value);
+        const help = saved.length === 0;
+        return (
+          <Field data-invalid={fieldState.invalid}>
+            <FieldLabel htmlFor={id}>Image (optional)</FieldLabel>
+            <select
+              id={id}
+              ref={field.ref}
+              value={value}
+              onChange={field.onChange}
+              onBlur={field.onBlur}
+              className={SELECT_CLASS}
+              aria-invalid={fieldState.invalid}
+              aria-describedby={describedBy(id, {
+                help,
+                invalid: fieldState.invalid,
+              })}
+            >
+              <option value="">None</option>
+              {options.map((option) => (
+                <option key={option.publicId} value={option.publicId}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {help ? (
+              <FieldDescription id={`${id}-help`}>
+                Save images in the Images section first.
+              </FieldDescription>
+            ) : null}
+            <FieldError id={`${id}-error`} errors={[fieldState.error]} />
+          </Field>
+        );
+      }}
+    />
+  );
+}
+
 /* The inputs of one variant row. */
 const VariantInputs = memo(function VariantInputs({
   index,
@@ -158,12 +217,7 @@ const VariantInputs = memo(function VariantInputs({
           label="Label (optional)"
           maxLength={MAX_VARIANT_LABEL_LENGTH}
         />
-        <TextField
-          name={`variants.${index}.imagePublicId`}
-          label="Image public id (optional)"
-          spellCheck={false}
-          maxLength={MAX_PUBLIC_ID_LENGTH}
-        />
+        <VariantImageSelect index={index} />
       </div>
       <SpecDifferences index={index} rowName={rowName} />
     </div>

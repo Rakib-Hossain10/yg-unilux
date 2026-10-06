@@ -31,18 +31,15 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - T10b done (ADR 0044): specs editor, variants, extra specs, public files. 1429 unit + 80 e2e green.
 - **QA gate B: PASS** (T7–T10b, 2026-10-06; run on Sonnet 5.5 at the user's request). No Critical, High or Medium findings. Added `test/admin-products.qa.test.ts` (48) and `e2e/admin-products-gate-b.qa.spec.ts` (4). 1476 unit + 84 e2e green, build OK, audit ok. Firefox and WebKit are not installed, so focus after a move is checked in Chromium only.
 - T11a done (ADR 0045, note on 0027): `src/lib/{cloudinary,cloudinary-ids}.ts`, `src/lib/admin/{uploads,product-images}.ts`, `setAreaImage` in `areas.ts`, `/admin/:path*` CSP. 1605 unit green, build OK. Gate A L-2 and gate B L-C are closed: publicId shape is enforced in Zod and Mongoose, and a variant image must be one of the product's own images.
-- **Next: T11b.** Images editor UI plus the area `bwImage` uploader (`admin-panel-builder`, **Opus**, per the user rule). The actions call these services, `requireAdmin()` first, then revalidate:
-  - `signCloudinaryUpload(actorId, {target: "product"|"area", id})` returns `{uploadUrl, cloudName, publicId, fields}`. The browser POSTs a FormData of every `fields` entry plus `file` to `uploadUrl`; sign once per file. Tags `[]`.
-  - `saveProductImages(actorId, {productId, images:[{publicId, alt, kind}]}, {expectedUpdatedAt})` takes the full ordered list on every add, remove or reorder.
-    - Error keys: `images.N.publicId`, `images.N.alt`, `images.N.kind` and `images`, plus form-level `PRODUCT_CHANGED` and not found.
-    - Reload `updatedAt` after a save.
-  - `setAreaImage(actorId, {areaId, publicId|null})`, error key `publicId`.
-    - Area form: the `bwImage` text field may only keep or clear (`BW_IMAGE_USE_UPLOADER`, `BW_IMAGE_AFTER_CREATE`). Replace it with the uploader on the edit page only.
-  - The variants editor offers a select over the product's saved `images` instead of free text (error key `variants.N.imagePublicId`).
-  - Client checks: at most 10 MB (`MAX_IMAGE_BYTES`), jpg/png/webp/avif.
-  - Customer + visitor action tests.
-  - Gate A I-1: drop input `name`s on the area form while touching it.
-- **User must do before T11b/T12 run against the real bucket:** apply the R2 CORS rule (plan, "Things the user must do"). Reminded 2026-10-06.
+- T11b done (ADR 0046): product images editor (own section + Save, XHR upload with progress, alt text, kind, reorder), variant image select over saved images, area black-and-white uploader, 4 actions with customer/visitor tests; gate A I-1 closed. 1670 unit + 84 e2e green, build OK. Built on Opus (the user wants good-looking UI; a Sonnet run was stopped).
+- **Next: T12.** Storage lib + xlsx signature check + datasheet service (`backend-architect`, Opus). See the plan's T12 row and ADR 0045 point 6. T13 (datasheets UI, `admin-panel-builder`, **Opus**) follows, then **QA gate C** (T11–T13).
+- **T18 must-do (from T11b):** add a Cloudinary fake switch to `e2e/test-server.ts` and upload e2e tests: images editor (upload, alt, reorder, save, `PRODUCT_CHANGED`, variant-in-use refusal) and area uploader (set, replace, remove, plus axe on `/admin/areas/[id]`). The area uploader has not been seen in a browser yet, and real uploads have not been tried against Cloudinary: do a manual smoke once with the real credentials.
+- **Low follow-ups from T11b:**
+  - Backend: add `cloudinaryCloudName(): string | null` to `src/lib/cloudinary.ts` and delete `src/app/admin/cloudinary-cloud-name.ts`. Optionally return the new `updatedAt` from `saveProductImages`.
+  - `applyServerErrors` is duplicated in `area-form.tsx` and `category-form.tsx`: make one shared helper.
+  - `saveProductImagesAction` repeats the tail of `statusResult`.
+  - Nice to have: a thumbnail column in the products list (`previewUrl`).
+- **User must do before T12 runs against the real bucket:** apply the R2 CORS rule (plan, "Things the user must do"). Reminded 2026-10-06.
 - **T12 must-do:** set `forcePathStyle: true` on the S3 client used for presigned PUTs (the CSP allows only `<account>.r2.cloudflarestorage.com`).
 - **T17 must-do:** the orphan report also covers Cloudinary:
   - `yg/products/*` and `yg/areas/*` assets that nothing references;
@@ -112,7 +109,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T11a done, QA gate B PASS, next T11b (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T11b done, QA gate B PASS, next T12 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -278,6 +275,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T11b done (ADR 0046): images editor, variant image select, area uploader. The first run on Sonnet was stopped because the user wants a very good-looking UI; Opus built it. 1670 unit + 84 e2e green, build OK. Next: T12.
 - 2026-10-06 — T11a done on Opus (ADR 0045, note on 0027): Cloudinary sign/verify, `saveProductImages`, `setAreaImage`, admin-only CSP; gate A L-2 and gate B L-C closed. User reminded about the R2 CORS rule. 1605 unit green, build OK. Next: T11b.
 - 2026-10-06 — QA gate B PASS (T7–T10b) on Sonnet 5.5 at the user's request: no Critical, High or Medium findings; Lows L-A (model-no. case across products) to L-E recorded. 52 QA tests added. 1476 unit + 84 e2e green. Next: T11a.
 - 2026-10-06 — T10b done on Opus (ADR 0044). The auto-review caught a regex with literal line breaks (Critical); it was fixed. Input `name`s are dropped so a pre-hydration submit can't put spec text in the URL. 200 variants stay responsive. 1429 unit + 80 e2e green. Next: QA gate B.

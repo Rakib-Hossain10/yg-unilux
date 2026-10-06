@@ -13,6 +13,7 @@ import {
   useState,
   useTransition,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   FormProvider,
@@ -44,6 +45,8 @@ import {
   splitMessages,
 } from "./field-errors";
 import { FiltersSection } from "./filters-section";
+import { SavedImagesContext, savedImageOptions } from "./saved-images";
+import type { StoredImage } from "./images-state";
 import {
   allowsTrackSize,
   sameParsedInput,
@@ -79,6 +82,8 @@ export function ProductEditForm({
   areas,
   magneticTrackIds,
   publishProblems,
+  savedImages,
+  children,
 }: {
   product: EditedProduct;
   /** Every category, main ones each followed by "Main › Sub" entries. */
@@ -88,7 +93,15 @@ export function ProductEditForm({
   magneticTrackIds: string[];
   /** publishCheck() on the saved product, for the status card. */
   publishProblems: string[];
+  /** The product's SAVED images, offered in each variant's image select. */
+  savedImages: StoredImage[];
+  /** Shown between the form and Delete (the images editor). */
+  children?: ReactNode;
 }) {
+  const imageOptions = useMemo(
+    () => savedImageOptions(savedImages),
+    [savedImages],
+  );
   const initial = useMemo(() => toFormState(product.values), [product.values]);
   const magnetic = useMemo(() => new Set(magneticTrackIds), [magneticTrackIds]);
   const resolver = useMemo(() => productEditResolver(magnetic), [magnetic]);
@@ -265,7 +278,9 @@ export function ProductEditForm({
           />
           <FiltersSection />
           <SpecsSection />
-          <VariantsEditor />
+          <SavedImagesContext value={imageOptions}>
+            <VariantsEditor />
+          </SavedImagesContext>
           <ExtraSpecsSection />
           <PublicFilesSection />
 
@@ -283,6 +298,8 @@ export function ProductEditForm({
           </div>
         </form>
       </FormProvider>
+
+      {children}
 
       <DeleteProduct productId={product.id} name={product.values.name} />
     </div>
