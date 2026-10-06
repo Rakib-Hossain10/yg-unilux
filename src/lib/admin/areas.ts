@@ -1,10 +1,11 @@
 // Admin services for the application areas: list, read one for the edit form,
-// create, edit, move up/down and delete. Each write re-parses with Zod,
-// records an audit entry and returns the cache tags it touched (ADR 0035).
+// create, edit, set its b/w image, move up/down and delete. Each write
+// re-parses with Zod, records an audit entry and returns its tags (ADR 0035).
 
 import "server-only";
 
 import type { Types } from "mongoose";
+import { z } from "zod";
 
 import { connectDb, mongoose } from "@/lib/db";
 import { CATALOG_TAGS, type CatalogTag } from "@/lib/revalidate";
@@ -14,10 +15,12 @@ import {
   moveAreaSchema,
   type AreaInput,
 } from "@/lib/schemas/area";
+import { objectIdSchema, optionalPublicIdSchema } from "@/lib/schemas/common";
 import { uniqueSlug, UniqueSlugError } from "@/lib/slug";
 import { AreaModel, ProductModel } from "@/models";
 import type { Area } from "@/models/area";
 
+import { verifyUploadedImage } from "./uploads";
 import {
   assertActorId,
   auditAndFinish,
@@ -42,6 +45,14 @@ const EDIT_TAGS: CatalogTag[] = [CATALOG_TAGS.areas, CATALOG_TAGS.products];
 
 const NOT_FOUND = "This area no longer exists. Reload the page.";
 const SLUG_TAKEN = "Another area already uses this slug.";
+/*
+ * A new b/w image is set only through setAreaImage(), which verifies the
+ * upload. The form may keep or clear the stored one.
+ */
+export const BW_IMAGE_USE_UPLOADER =
+  "Use the image uploader to change this image.";
+export const BW_IMAGE_AFTER_CREATE =
+  "Save the area first, then upload its image.";
 
 /** One row of the admin list. */
 export interface AreaListItem {
@@ -174,6 +185,10 @@ export async function createArea(
   const parsed = areaInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const values = parsed.data;
+  // The upload folder is named after the area id, which doesn't exist yet.
+  if (values.bwImage !== null) {
+    return fieldError("bwImage", BW_IMAGE_AFTER_CREATE);
+  }
 
   const slug = await resolveSlug(values);
   if (!slug.ok) return slug.result;
@@ -184,7 +199,6 @@ export async function createArea(
       name: values.name,
       slug: slug.value,
       order: await nextOrder(),
-      ...(values.bwImage === null ? {} : { bwImage: values.bwImage }),
     });
     id = created._id;
   } catch (error) {
@@ -232,7 +246,7 @@ export async function updateArea(
   const slug = values.slug === "" ? current.slug : values.slug;
 
   // Only the changed fields: their names go into the audit entry.
-  const set: Partial<Pick<Area, "name" | "slug" | "bwImage">> = {};
+  const set: Partial<Pick<Area, "name" | "slug">> = {};
   const fields: string[] = [];
   if (values.name !== current.name) {
     set.name = values.name;
@@ -244,10 +258,11 @@ export async function updateArea(
   }
   const bwImage = current.bwImage ?? null;
   const unsetBwImage = values.bwImage === null && bwImage !== null;
+  // Keep or clear only; a different id must go through setAreaImage().
   if (values.bwImage !== null && values.bwImage !== bwImage) {
-    set.bwImage = values.bwImage;
+    return fieldError("bwImage", BW_IMAGE_USE_UPLOADER);
   }
-  if (unsetBwImage || set.bwImage !== undefined) fields.push("bwImage");
+  if (unsetBwImage) fields.push("bwImage");
 
   if (fields.length === 0) return unchanged({ id: parsedId.data });
 
@@ -280,6 +295,68 @@ export async function updateArea(
     },
     { id: parsedId.data },
     EDIT_TAGS,
+  );
+}
+
+/** Set (a verified new upload) or clear (null / "") an area's b/w image. */
+export const setAreaImageSchema = z.strictObject({
+  areaId: objectIdSchema,
+  publicId: optionalPublicIdSchema.nullable().transform((id) => id ?? null),
+});
+
+/**
+ * Sets or clears an area's black-and-white image. A new id must be an upload
+ * in this area's own folder (`yg/areas/<areaId>/<uuid>`) that passes
+ * verification (exists, size, format); a rejected upload is deleted from
+ * Cloudinary and nothing is saved. The replaced image is not deleted (see
+ * saveProductImages: the T17 orphan report lists it).
+ */
+export async function setAreaImage(
+  actorId: string,
+  input: unknown,
+): Promise<ServiceResult<{ id: string; bwImage: string | null }>> {
+  assertActorId(actorId);
+  const parsed = setAreaImageSchema.safeParse(input);
+  if (!parsed.success) return invalidInput(parsed.error);
+  const { areaId, publicId } = parsed.data;
+  const selfId = new ObjectId(areaId);
+
+  await connectDb();
+  const current = await AreaModel.findById(selfId, {
+    bwImage: 1,
+  }).lean<Pick<Area, "bwImage"> | null>();
+  if (!current) return formError(NOT_FOUND);
+  if ((current.bwImage ?? null) === publicId) {
+    return unchanged({ id: areaId, bwImage: publicId });
+  }
+
+  if (publicId !== null) {
+    const check = await verifyUploadedImage({
+      target: "area",
+      id: areaId,
+      publicId,
+    });
+    if (!check.ok) return fieldError("publicId", check.message);
+  }
+
+  const result = await AreaModel.updateOne(
+    { _id: selfId },
+    publicId === null
+      ? { $unset: { bwImage: 1 } }
+      : { $set: { bwImage: publicId } },
+    { runValidators: true },
+  );
+  if (result.matchedCount === 0) return formError(NOT_FOUND);
+
+  return auditAndFinish(
+    {
+      actorId,
+      action: "area.update",
+      target: { type: "area", id: areaId },
+      meta: { fields: ["bwImage"], cleared: publicId === null },
+    },
+    { id: areaId, bwImage: publicId },
+    LIST_TAGS,
   );
 }
 

@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MAX_SLUG_LENGTH } from "@/lib/slug";
+import { testPublicId } from "../../../test/helpers/public-ids";
 
 import {
   areaIdSchema,
@@ -14,6 +15,7 @@ import {
 } from "./area";
 
 const ID = "64b7f0c2a1b2c3d4e5f60718";
+const BW = testPublicId(0, ID, "area");
 
 describe("areaInputSchema", () => {
   it("parses a full form and trims every field", () => {
@@ -21,12 +23,12 @@ describe("areaInputSchema", () => {
       areaInputSchema.parse({
         name: "  Retail ",
         slug: " Retail-Spaces ",
-        bwImage: " areas/retail-bw ",
+        bwImage: ` ${BW} `,
       }),
     ).toEqual({
       name: "Retail",
       slug: "retail-spaces",
-      bwImage: "areas/retail-bw",
+      bwImage: BW,
     });
   });
 
@@ -51,6 +53,26 @@ describe("areaInputSchema", () => {
     [
       "a too long bwImage",
       { name: "A", bwImage: "i".repeat(MAX_AREA_BW_IMAGE_LENGTH + 1) },
+      "bwImage",
+    ],
+    [
+      "a free-text bwImage (gate A L-2)",
+      { name: "A", bwImage: "areas/retail-bw" },
+      "bwImage",
+    ],
+    [
+      "an uppercase bwImage",
+      { name: "A", bwImage: BW.toUpperCase() },
+      "bwImage",
+    ],
+    [
+      "a bwImage with an extra segment",
+      { name: "A", bwImage: `${BW}/x` },
+      "bwImage",
+    ],
+    [
+      "a path-traversal bwImage",
+      { name: "A", bwImage: `yg/areas/${ID}/../x` },
       "bwImage",
     ],
     ["a non-string name", { name: 7 }, "name"],

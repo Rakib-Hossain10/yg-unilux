@@ -13,6 +13,7 @@ import {
 } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
+import { testPublicId } from "../../../test/helpers/public-ids";
 
 import {
   createDraft,
@@ -23,6 +24,7 @@ import {
   PRODUCTS_PAGE_SIZE,
   PRODUCT_CHANGED,
   publishProduct,
+  VARIANT_IMAGE_NOT_OWN,
   unpublishProduct,
   updateProduct,
 } from "./products";
@@ -112,10 +114,19 @@ function form(over: Record<string, unknown> = {}) {
   };
 }
 
-async function addImage(id: string) {
+/* The first image addImage() stores on product `id`. */
+function imageOf(id: string, n = 0): string {
+  return testPublicId(n, id);
+}
+
+async function addImage(id: string, n = 0) {
   await ProductModel.updateOne(
     { _id: id },
-    { $push: { images: { publicId: "p/a", order: 0, kind: "gallery" } } },
+    {
+      $push: {
+        images: { publicId: imageOf(id, n), order: n, kind: "gallery" },
+      },
+    },
   );
 }
 
@@ -223,7 +234,7 @@ describe("getProductForEdit", () => {
         datasheetId: null,
         status: "draft",
       },
-      images: [{ publicId: "p/a", order: 0, kind: "gallery" }],
+      images: [{ publicId: imageOf(id), order: 0, kind: "gallery" }],
     });
     expect(await getProductForEdit(new ObjectId().toHexString())).toBeNull();
     expect(await getProductForEdit("nope")).toBeNull();
@@ -943,10 +954,106 @@ describe("listProducts", () => {
       variantCount: 1,
       firstModelNo: "A1",
       imageCount: 1,
-      thumbPublicId: "p/a",
+      thumbPublicId: imageOf(id),
       updatedAt: expect.any(String),
     });
     expect(JSON.stringify(page)).not.toContain("Secret driver");
     expect(JSON.stringify(page)).not.toContain("B-77");
   });
 });
+
+describe("variant images (gate B L-C)", () => {
+  it("saves a variant image that is one of the product's own images", async () => {
+    const id = await draft();
+    await addImage(id);
+    expectOk(
+      await updateProduct(
+        ADMIN,
+        id,
+        form({
+          variants: [{ modelNo: "AR-013A1", imagePublicId: imageOf(id) }],
+        }),
+      ),
+    );
+    const row = await ProductModel.findById(id).lean();
+    expect(row?.variants[0]?.imagePublicId).toBe(imageOf(id));
+  });
+
+  it("refuses a variant image the product doesn't have, writing nothing", async () => {
+    const id = await draft();
+    const other = await draft("Other");
+    await addImage(id, 0);
+    await addImage(other, 0);
+    const before = await ProductModel.findById(id).lean();
+    for (const imagePublicId of [
+      imageOf(id, 1), // right folder, never saved on the product
+      imageOf(other, 0), // another product's saved image
+    ]) {
+      const result = await updateProduct(
+        ADMIN,
+        id,
+        form({
+          variants: [
+            { modelNo: "AR-013A1" },
+            { modelNo: "AR-013A2", imagePublicId },
+          ],
+        }),
+      );
+      expect(fieldErrorsOf(result)).toEqual({
+        "variants.1.imagePublicId": [VARIANT_IMAGE_NOT_OWN],
+      });
+    }
+    expect(await ProductModel.findById(id).lean()).toEqual(before);
+  });
+
+  it("refuses a variant image in a shape that isn't ours (schema)", async () => {
+    const id = await draft();
+    const result = await updateProduct(
+      ADMIN,
+      id,
+      form({ variants: [{ modelNo: "AR-013A1", imagePublicId: "p/a" }] }),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses the save when the image is removed between the read and the write", async () => {
+    const id = await draft();
+    await addImage(id);
+    rivalBeforeWrite(() =>
+      ProductModel.collection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { images: [] } },
+      ),
+    );
+    const result = await updateProduct(
+      ADMIN,
+      id,
+      form({ variants: [{ modelNo: "AR-013A1", imagePublicId: imageOf(id) }] }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      errors: { formErrors: [PRODUCT_CHANGED], fieldErrors: {} },
+      tags: [],
+    });
+    // The draft had no variants; the refused save added none.
+    expect((await ProductModel.findById(id).lean())?.variants).toEqual([]);
+  });
+});
+
+/*
+ * Runs `rival` once, just before the service's updateOne, to simulate another
+ * tab writing between the service's read and its write.
+ */
+function rivalBeforeWrite(rival: () => Promise<unknown>) {
+  const original = ProductModel.updateOne.bind(ProductModel);
+  let done = false;
+  vi.spyOn(ProductModel, "updateOne").mockImplementation(((
+    ...args: Parameters<typeof ProductModel.updateOne>
+  ) => {
+    if (done) return original(...args);
+    done = true;
+    return rival().then(() => original(...args)) as unknown as ReturnType<
+      typeof ProductModel.updateOne
+    >;
+  }) as typeof ProductModel.updateOne);
+}

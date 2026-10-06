@@ -17,10 +17,16 @@ import {
   MAX_VARIANTS,
 } from "@/lib/constants";
 import { SPEC_KEYS } from "@/models/spec-columns";
+import { testPublicId } from "../../../test/helpers/public-ids";
 
-import { productInputSchema, publishCheck } from "./product";
+import {
+  productImagesInputSchema,
+  productInputSchema,
+  publishCheck,
+} from "./product";
 
 const CAT = "64b7f0c2a1b2c3d4e5f60718";
+const IMG = testPublicId(0, CAT);
 const CAT2 = "64b7f0c2a1b2c3d4e5f60719";
 const base = { name: "Arc", mainCategory: CAT };
 
@@ -76,7 +82,7 @@ describe("productInputSchema", () => {
           modelNo: " AR-013A1 ",
           label: "Lens",
           specs: { beamAngle: ["20°"] },
-          imagePublicId: "yg/products/x/y",
+          imagePublicId: IMG,
         },
         { modelNo: "AR-013A2" },
       ],
@@ -97,7 +103,7 @@ describe("productInputSchema", () => {
       modelNo: "AR-013A1",
       label: "Lens",
       specs: { beamAngle: ["20°"] },
-      imagePublicId: "yg/products/x/y",
+      imagePublicId: IMG,
     });
     expect(parsed.variants[1]).toEqual({
       modelNo: "AR-013A2",
@@ -380,5 +386,95 @@ describe("client safety", () => {
     expect(specifiers).not.toContain("@/models/product");
     expect(specifiers).not.toContain("server-only");
     expect(specifiers.every((s) => !s?.startsWith("@/lib/db"))).toBe(true);
+  });
+});
+
+describe("variant imagePublicId (gate B L-C)", () => {
+  it.each([
+    ["free text", "products/ar-013a3"],
+    ["a folder without owner and uuid", "yg/products/x/y"],
+    ["uppercase", IMG.toUpperCase()],
+    ["path traversal", `yg/products/${CAT}/../${CAT2}`],
+    ["an extra segment", `${IMG}/x`],
+    ["a URL", `https://res.cloudinary.com/demo/image/upload/${IMG}`],
+  ])("refuses %s", (_label, imagePublicId) => {
+    expect(
+      paths({ ...base, variants: [{ modelNo: "A-1", imagePublicId }] }),
+    ).toEqual(["variants.0.imagePublicId"]);
+  });
+
+  it("accepts our id shape and turns blank into null", () => {
+    const parsed = productInputSchema.parse({
+      ...base,
+      variants: [
+        { modelNo: "A-1", imagePublicId: ` ${IMG} ` },
+        { modelNo: "A-2", imagePublicId: "" },
+      ],
+    });
+    expect(parsed.variants.map((v) => v.imagePublicId)).toEqual([IMG, null]);
+  });
+});
+
+describe("productImagesInputSchema", () => {
+  const image = { publicId: IMG, alt: "Front view", kind: "gallery" };
+
+  it("parses the ordered list and trims alt text", () => {
+    expect(
+      productImagesInputSchema.parse({
+        productId: CAT,
+        images: [{ ...image, alt: " Front view " }],
+      }),
+    ).toEqual({ productId: CAT, images: [image] });
+  });
+
+  it("accepts an empty list (remove every image of a draft)", () => {
+    expect(
+      productImagesInputSchema.parse({ productId: CAT, images: [] }).images,
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["a missing alt", { ...image, alt: " " }, "images.0.alt"],
+    ["an unknown kind", { ...image, kind: "hero" }, "images.0.kind"],
+    ["a free-text id", { ...image, publicId: "x" }, "images.0.publicId"],
+    ["an order key", { ...image, order: 3 }, "images.0"],
+  ])("refuses %s", (_label, bad, path) => {
+    const result = productImagesInputSchema.safeParse({
+      productId: CAT,
+      images: [bad],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join("."))).toContain(path);
+  });
+
+  it("refuses the same image twice and more than the cap", () => {
+    expect(
+      productImagesInputSchema.safeParse({
+        productId: CAT,
+        images: [image, image],
+      }).success,
+    ).toBe(false);
+    const many = Array.from({ length: 31 }, (_, n) => ({
+      ...image,
+      publicId: testPublicId(n, CAT),
+    }));
+    expect(
+      productImagesInputSchema.safeParse({ productId: CAT, images: many })
+        .success,
+    ).toBe(false);
+  });
+
+  it("refuses a bad product id and unknown top-level keys", () => {
+    expect(
+      productImagesInputSchema.safeParse({ productId: "x", images: [] })
+        .success,
+    ).toBe(false);
+    expect(
+      productImagesInputSchema.safeParse({
+        productId: CAT,
+        images: [],
+        status: "published",
+      }).success,
+    ).toBe(false);
   });
 });

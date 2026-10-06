@@ -8,8 +8,10 @@ import type { Types } from "mongoose";
 import { mongoose } from "@/lib/db";
 
 import {
+  PRODUCT_IMAGE_KINDS,
   PRODUCT_STATUSES,
   TRACK_SIZES,
+  type ProductImageKind,
   type ProductStatus,
   type TrackSize,
 } from "./product-constants";
@@ -20,15 +22,8 @@ const { Schema } = mongoose;
 const { ObjectId } = Schema.Types;
 
 // Re-exported so existing imports from "@/models/product" keep working.
-export { PRODUCT_STATUSES, TRACK_SIZES };
-export type { ProductStatus, TrackSize };
-
-export const PRODUCT_IMAGE_KINDS = [
-  "gallery",
-  "dimension",
-  "installation",
-] as const;
-export type ProductImageKind = (typeof PRODUCT_IMAGE_KINDS)[number];
+export { PRODUCT_IMAGE_KINDS, PRODUCT_STATUSES, TRACK_SIZES };
+export type { ProductImageKind, ProductStatus, TrackSize };
 
 /** A public product photo or drawing stored in Cloudinary. */
 export interface ProductImage {

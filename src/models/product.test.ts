@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { mongoose } from "@/lib/db";
 import { setupMemoryDb } from "../../test/helpers/memory-db";
+import { testPublicId } from "../../test/helpers/public-ids";
 
 import { ProductModel } from "./product";
 
@@ -77,9 +78,20 @@ describe("product validation", () => {
   it("only allows the gallery, dimension and installation image kinds", async () => {
     expect(
       await invalidPaths(
-        productInput({ images: [{ publicId: "yg/arc-1", kind: "hero" }] }),
+        productInput({ images: [{ publicId: testPublicId(0), kind: "hero" }] }),
       ),
     ).toEqual(["images.0.kind"]);
+  });
+
+  it("only stores Cloudinary ids in our server-chosen shape", async () => {
+    expect(
+      await invalidPaths(
+        productInput({
+          images: [{ publicId: "yg/arc-1", kind: "gallery" }],
+          variants: [{ modelNo: "A-1", imagePublicId: "x/../y" }],
+        }),
+      ),
+    ).toEqual(["images.0.publicId", "variants.0.imagePublicId"]);
   });
 
   it("requires a model no. on every variant", async () => {

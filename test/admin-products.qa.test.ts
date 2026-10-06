@@ -22,6 +22,7 @@ import {
   updateProduct,
 } from "@/lib/admin/products";
 import { setupMemoryDb } from "./helpers/memory-db";
+import { testPublicId } from "./helpers/public-ids";
 
 setupMemoryDb("yg_admin_products_qa_test");
 
@@ -57,7 +58,7 @@ beforeEach(async () => {
     description: "Old description",
     variants: [{ modelNo: "AR-013A1" }],
     images: [
-      { publicId: "yg/products/a", alt: "a", order: 0, kind: "gallery" },
+      { publicId: testPublicId(0), alt: "a", order: 0, kind: "gallery" },
     ],
   });
   productId = product._id.toHexString();

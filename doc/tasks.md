@@ -30,11 +30,31 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - Route groups `admin/(dashboard)` and `products/(list)` give a real 404.
 - T10b done (ADR 0044): specs editor, variants, extra specs, public files. 1429 unit + 80 e2e green.
 - **QA gate B: PASS** (T7–T10b, 2026-10-06; run on Sonnet 5.5 at the user's request). No Critical, High or Medium findings. Added `test/admin-products.qa.test.ts` (48) and `e2e/admin-products-gate-b.qa.spec.ts` (4). 1476 unit + 84 e2e green, build OK, audit ok. Firefox and WebKit are not installed, so focus after a move is checked in Chromium only.
-- **Next: T11a.** Cloudinary lib, sign/verify services, CSP and `next.config` change (`backend-architect`, Opus unless the user says otherwise). See the plan's T11a row, and fold in gate B L-C. **Remind the user to apply the R2 CORS rule before T11/T12.**
+- T11a done (ADR 0045, note on 0027): `src/lib/{cloudinary,cloudinary-ids}.ts`, `src/lib/admin/{uploads,product-images}.ts`, `setAreaImage` in `areas.ts`, `/admin/:path*` CSP. 1605 unit green, build OK. Gate A L-2 and gate B L-C are closed: publicId shape is enforced in Zod and Mongoose, and a variant image must be one of the product's own images.
+- **Next: T11b.** Images editor UI plus the area `bwImage` uploader (`admin-panel-builder`, **Opus**, per the user rule). The actions call these services, `requireAdmin()` first, then revalidate:
+  - `signCloudinaryUpload(actorId, {target: "product"|"area", id})` returns `{uploadUrl, cloudName, publicId, fields}`. The browser POSTs a FormData of every `fields` entry plus `file` to `uploadUrl`; sign once per file. Tags `[]`.
+  - `saveProductImages(actorId, {productId, images:[{publicId, alt, kind}]}, {expectedUpdatedAt})` takes the full ordered list on every add, remove or reorder.
+    - Error keys: `images.N.publicId`, `images.N.alt`, `images.N.kind` and `images`, plus form-level `PRODUCT_CHANGED` and not found.
+    - Reload `updatedAt` after a save.
+  - `setAreaImage(actorId, {areaId, publicId|null})`, error key `publicId`.
+    - Area form: the `bwImage` text field may only keep or clear (`BW_IMAGE_USE_UPLOADER`, `BW_IMAGE_AFTER_CREATE`). Replace it with the uploader on the edit page only.
+  - The variants editor offers a select over the product's saved `images` instead of free text (error key `variants.N.imagePublicId`).
+  - Client checks: at most 10 MB (`MAX_IMAGE_BYTES`), jpg/png/webp/avif.
+  - Customer + visitor action tests.
+  - Gate A I-1: drop input `name`s on the area form while touching it.
+- **User must do before T11b/T12 run against the real bucket:** apply the R2 CORS rule (plan, "Things the user must do"). Reminded 2026-10-06.
+- **T12 must-do:** set `forcePathStyle: true` on the S3 client used for presigned PUTs (the CSP allows only `<account>.r2.cloudflarestorage.com`).
+- **T17 must-do:** the orphan report also covers Cloudinary:
+  - `yg/products/*` and `yg/areas/*` assets that nothing references;
+  - images of deleted products;
+  - signed but never-saved uploads.
+
+  Removed images are never deleted at save time (ADR 0045).
+- **Follow-up (low):** `scripts/check-services.ts` configures Cloudinary inline; it could reuse `src/lib/cloudinary.ts`.
 - **Open items from gate B:**
   - **L-A:** model numbers are case-insensitive within a product but case-sensitive across products (`takenModelNos`, unique index), so `ZZ-9` and `zz-9` can coexist. Fix with a collation on the index or normalised case, before Phase 3 import (upsert by model no.). The `it.fails` test in `admin-products.qa.test.ts` turns into a plain `it` once fixed.
   - **L-B:** same as gate A L-1, below.
-  - **L-C (T11b):** `variants.imagePublicId` must match the publicId regex and be one of the product's own `images`; same task as gate A L-2 (`bwImage`).
+  - ~~L-C~~: fixed in T11a.
   - **L-D:** same as gate A L-3, below.
   - **L-E (Phase 4):** changing a published product's slug leaves no redirect.
   - **I-1:** area, category and new-draft forms still give inputs a `name` (low value, admin-only, no-store). Drop it when those forms are next touched.
@@ -48,7 +68,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Open items from gate A:**
   - **P-1:** covered. `scripts/audit.mjs` allows GHSA-vfj7-8cjw-p6xm until 2027-01-05 (ADR 0033), and gate B ran it: "audit: ok". Before the merge, check that CI uses the script; add an `overrides` entry once a patch exists.
   - L-1: categories and areas `[id]` pages still answer 200 on not-found because of their `[id]/loading.tsx`. Products is fixed (ADR 0043); apply the same fix, or accept it in an ADR note.
-  - L-2 (T11b): tighten `bwImage` (schema + `publicIdField`) to the publicId regex before anything public renders it.
+  - ~~L-2~~: fixed in T11a.
   - L-3: add the planned ESLint rule (no `"use client"` import of `server-only`/`src/lib/admin/*`); a static test covers it now.
   - L-4 and L-5: fixed in T9.
 
@@ -66,7 +86,6 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Model guidance (user rule, 2026-10-06; overrides the plan's model column):** every subagent runs on **Opus**. UI work always goes to the frontend subagents (`admin-panel-builder`, `site-frontend`, `motion-engineer`) with `model: "opus"`. Never build UI in the main session.
 - **shadcn adds:** every later `npx shadcn add` gets the ADR 0034 strip pass (header line, no animation, no `dark:`, tokens instead of raw colours). `design-shell.qa.test.ts` enforces it. Admin forms will probably need `field`, `alert`, `pagination` and `empty`.
 - **GitHub:** use `gh` (push, PR, CI, merge); always ask the user before merging into `main`.
-- **Before T11/T12 the user must apply the R2 CORS rule** (exact JSON in the plan, "Things the user must do"). Remind them when T11a starts.
 - **Verified 2026-10-06:** `npm run check:services` passes for MongoDB (non-SRV `mongodb://` string in `.env.local`, database `yg_unilux_db`), Cloudinary (upload + delete + Admin API) and R2 (write + delete). The `mongodb+srv://` form fails on the user's machine because a VPN DNS proxy (`127.0.0.1`) drops SRV lookups, so keep the non-SRV string.
 - **Admin account:** the user still needs to run `npm run seed:admin -- --email <email> --name "<name>"` in PowerShell against `yg_unilux_db` before they can sign in at `/login`.
 - **QA after:** each Phase 2 feature plus the Phase 2 exit (`qa-security-reviewer`). Every changed file also gets the automatic per-file review.
@@ -93,7 +112,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T10 done, QA gate B PASS, next T11a (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T11a done, QA gate B PASS, next T11b (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -259,6 +278,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T11a done on Opus (ADR 0045, note on 0027): Cloudinary sign/verify, `saveProductImages`, `setAreaImage`, admin-only CSP; gate A L-2 and gate B L-C closed. User reminded about the R2 CORS rule. 1605 unit green, build OK. Next: T11b.
 - 2026-10-06 — QA gate B PASS (T7–T10b) on Sonnet 5.5 at the user's request: no Critical, High or Medium findings; Lows L-A (model-no. case across products) to L-E recorded. 52 QA tests added. 1476 unit + 84 e2e green. Next: T11a.
 - 2026-10-06 — T10b done on Opus (ADR 0044). The auto-review caught a regex with literal line breaks (Critical); it was fixed. Input `name`s are dropped so a pre-hydration submit can't put spec text in the URL. 200 variants stay responsive. 1429 unit + 80 e2e green. Next: QA gate B.
 - 2026-10-06 — T10a done on Opus (ADR 0043). The auto-review found two Highs, both fixed: every save after the first did nothing (the in-flight flag stayed set through the redirect), and a stale tab could overwrite newer data. The second fix: status now changes only through publish/unpublish, and saves are checked against `updatedAt`. Six Medium fixes followed. 1364 unit + 74 e2e green. Next: T10b.

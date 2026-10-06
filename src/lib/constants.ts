@@ -29,6 +29,15 @@ export type AllowedImageFormat = (typeof ALLOWED_IMAGE_FORMATS)[number];
 /** Cloudinary folder for product images: `yg/products/<productId>/<uuid>`. */
 export const CLOUDINARY_PRODUCT_FOLDER = "yg/products";
 
+/** Cloudinary folder for area images: `yg/areas/<areaId>/<uuid>`. */
+export const CLOUDINARY_AREA_FOLDER = "yg/areas";
+
+/** Most images one product may have (gallery, dimension and installation). */
+export const MAX_PRODUCT_IMAGES = 30;
+
+/** Longest image alt text; matches the model's `shortText` cap. */
+export const MAX_IMAGE_ALT_LENGTH = 200;
+
 /*
  * R2 key prefixes in the private bucket (ADR 0009). The browser uploads a
  * datasheet to `incoming/` with a presigned PUT; the server verifies it and

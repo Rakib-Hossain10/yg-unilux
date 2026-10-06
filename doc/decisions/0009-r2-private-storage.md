@@ -15,3 +15,6 @@ Datasheets and whistleblower attachments must never be behind a public URL. Opti
 ## Consequences
 - Env: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
 - Clean separation: nothing private ever lives in Cloudinary.
+
+## Note (2026-10-06)
+Amended by [0045](0045-direct-uploads.md): uploads go from the browser straight to Cloudinary / R2, and the server verifies every file afterwards.

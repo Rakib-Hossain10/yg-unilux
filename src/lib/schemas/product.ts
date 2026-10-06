@@ -12,29 +12,36 @@ import {
   MAX_EXTRA_SPECS,
   MAX_FILTER_NUMBER,
   MAX_FILTER_VALUES,
+  MAX_IMAGE_ALT_LENGTH,
   MAX_MODEL_NO_LENGTH,
   MAX_PRODUCT_AREAS,
   MAX_PRODUCT_DESCRIPTION_LENGTH,
   MAX_PRODUCT_FAMILY_LENGTH,
+  MAX_PRODUCT_IMAGES,
   MAX_PRODUCT_MODEL_CODE_LENGTH,
   MAX_PRODUCT_NAME_LENGTH,
   MAX_PRODUCT_TYPE_LENGTH,
   MAX_PUBLIC_FILE_LABEL_LENGTH,
   MAX_PUBLIC_FILE_URL_LENGTH,
   MAX_PUBLIC_FILES,
-  MAX_PUBLIC_ID_LENGTH,
   MAX_SPEC_OPTIONS,
   MAX_SPEC_VALUE_LENGTH,
   MAX_VARIANT_LABEL_LENGTH,
   MAX_VARIANTS,
 } from "@/lib/constants";
-import { PRODUCT_STATUSES, TRACK_SIZES } from "@/models/product-constants";
+import {
+  PRODUCT_IMAGE_KINDS,
+  PRODUCT_STATUSES,
+  TRACK_SIZES,
+} from "@/models/product-constants";
 import { SPEC_KEYS, type SpecKey } from "@/models/spec-columns";
 
 import {
   objectIdSchema,
+  optionalPublicIdSchema,
   optionalSlugSchema,
   optionalTextSchema,
+  publicIdSchema,
 } from "./common";
 
 /** A required, trimmed single-line text with a cap. */
@@ -126,8 +133,12 @@ export const variantInputSchema = z.strictObject({
   label: optionalTextSchema(MAX_VARIANT_LABEL_LENGTH),
   /** Only the values that differ from the product-level specs. */
   specs: specsInputSchema.optional().transform((specs) => specs ?? {}),
-  /** Cloudinary public id of this variant's own image; null = none. */
-  imagePublicId: optionalTextSchema(MAX_PUBLIC_ID_LENGTH),
+  /**
+   * Cloudinary public id of this variant's own image; null = none. Must be in
+   * our id shape here; the service also requires it to be one of the
+   * product's own saved `images` (gate B L-C).
+   */
+  imagePublicId: optionalPublicIdSchema,
 });
 
 /** Extra info outside the sheet. Always public. */
@@ -262,6 +273,32 @@ export type PublicFileInput = z.output<typeof publicFileInputSchema>;
 
 /** One product id, e.g. from a delete or publish button. */
 export const productIdSchema = objectIdSchema;
+
+/** One image in the images editor: which upload, its alt text and its kind. */
+export const productImageInputSchema = z.strictObject({
+  publicId: publicIdSchema,
+  alt: requiredText("alt text", MAX_IMAGE_ALT_LENGTH),
+  kind: z.enum(PRODUCT_IMAGE_KINDS),
+});
+
+/**
+ * The images editor's save: the FULL ordered list (position = display
+ * order). Sending the whole list makes add, remove and reorder one idempotent
+ * call. Which ids are allowed and whether new uploads pass verification are
+ * checked by saveProductImages().
+ */
+export const productImagesInputSchema = z.strictObject({
+  productId: objectIdSchema,
+  images: z
+    .array(productImageInputSchema)
+    .max(MAX_PRODUCT_IMAGES, `At most ${MAX_PRODUCT_IMAGES} images`)
+    .refine(
+      (images) => new Set(images.map((i) => i.publicId)).size === images.length,
+      { message: "The same image is in the list twice" },
+    ),
+});
+export type ProductImageInput = z.output<typeof productImageInputSchema>;
+export type ProductImagesInput = z.output<typeof productImagesInputSchema>;
 
 /** One reason a product cannot be published yet. */
 export interface PublishProblem {

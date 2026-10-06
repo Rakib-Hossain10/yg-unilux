@@ -26,6 +26,7 @@ import {
   type ProductFormValues,
 } from "@/lib/schemas/product";
 import { MAX_VARIANTS } from "@/lib/constants";
+import { testPublicId } from "../../../../test/helpers/public-ids";
 import { DEFAULT_RESTRICTED_SPEC_KEYS, SPEC_KEYS } from "@/models/spec-columns";
 
 import { magneticTrackIds } from "../product-category-options";
@@ -500,7 +501,7 @@ const full: ProductFormValues = {
       modelNo: "AR-013A1",
       label: "Lens",
       specs: { beamAngle: ["24°", "36°"] },
-      imagePublicId: "products/ar-013a1",
+      imagePublicId: testPublicId(1),
     },
     { modelNo: "AR-013A2", label: "", specs: {}, imagePublicId: "" },
   ],

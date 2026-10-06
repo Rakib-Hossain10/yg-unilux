@@ -60,3 +60,4 @@ Template:
 | [0042](0042-products-list-ui.md) | Products list UI: GET filters, draft redirect to edit page, shared `useSerialAction` move guard, notice cleared after settle | Accepted |
 | [0043](0043-product-edit-form.md) | Product edit form: status only via publish/unpublish, optimistic concurrency on `updatedAt`, published stays publishable, round-trip of unedited fields, route groups for a real 404 | Accepted |
 | [0044](0044-product-form-rows-and-specs.md) | Product form (b): specs one option per line, UI spec groups, one generic row-list editor, errors placed only on unchanged rows, no input `name`s | Accepted |
+| [0045](0045-direct-uploads.md) | Direct uploads, server verifies (amends 0009): server-chosen ids, signed `overwrite=false`, post-upload `api.resource` check, removed images kept for the orphan report; admin-only `connect-src` (note on 0027) | Accepted |

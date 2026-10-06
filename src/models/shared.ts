@@ -4,6 +4,7 @@
 
 import type { Model, Schema } from "mongoose";
 
+import { PUBLIC_ID_PATTERN } from "@/lib/cloudinary-ids";
 import { mongoose } from "@/lib/db";
 import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";
 
@@ -33,11 +34,16 @@ export const slugField = {
   match: SLUG_PATTERN,
 } as const;
 
-/** A Cloudinary public id (public product, area, leader images only). */
+/**
+ * A Cloudinary public id (public product, area, leader images only), in the
+ * server-chosen shape `yg/<folder>/<ownerId>/<uuid>` (src/lib/cloudinary-ids.ts),
+ * so no free text or foreign id can be stored as an image.
+ */
 export const publicIdField = {
   type: String,
   trim: true,
   maxlength: 255,
+  match: PUBLIC_ID_PATTERN,
 } as const;
 
 /** A short single-line text such as a name, title or label. */

@@ -4,6 +4,8 @@
 
 import { z } from "zod";
 
+import { PUBLIC_ID_PATTERN } from "@/lib/cloudinary-ids";
+import { MAX_PUBLIC_ID_LENGTH } from "@/lib/constants";
 import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";
 
 /** A MongoDB ObjectId as 24 hex characters, normalised to lowercase. */
@@ -34,6 +36,31 @@ export const optionalSlugSchema = z
   })
   .optional()
   .transform((slug) => slug ?? "");
+
+const PUBLIC_ID_MESSAGE = "Not an image uploaded through this site";
+
+/**
+ * A Cloudinary public id in our server-chosen shape
+ * (`yg/<folder>/<ownerId>/<uuid>`, see src/lib/cloudinary-ids.ts). Only the
+ * shape is checked here; which owner it belongs to and whether the upload
+ * passed verification are service checks.
+ */
+export const publicIdSchema = z
+  .string()
+  .trim()
+  .max(MAX_PUBLIC_ID_LENGTH, PUBLIC_ID_MESSAGE)
+  .regex(PUBLIC_ID_PATTERN, PUBLIC_ID_MESSAGE);
+
+/** An optional public id: "" (or missing) means "no image" and becomes null. */
+export const optionalPublicIdSchema = z
+  .string()
+  .trim()
+  .max(MAX_PUBLIC_ID_LENGTH, PUBLIC_ID_MESSAGE)
+  .refine((id) => id === "" || PUBLIC_ID_PATTERN.test(id), {
+    message: PUBLIC_ID_MESSAGE,
+  })
+  .optional()
+  .transform((id) => (id === undefined || id === "" ? null : id));
 
 /**
  * Optional free text such as a description. Trimmed; "" (or missing) means

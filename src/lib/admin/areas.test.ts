@@ -1,6 +1,7 @@
 // Tests for the area services (src/lib/admin/areas.ts) on an in-memory
-// MongoDB: slugs, edit diffs, move up/down, the in-use delete block, audit
-// entries and the returned cache tags.
+// MongoDB: slugs, edit diffs, the b/w image (verified uploads only), move
+// up/down, the in-use delete block, audit entries and the returned tags.
+// Cloudinary is mocked; nothing leaves the machine.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,16 +9,27 @@ import { mongoose } from "@/lib/db";
 import { AreaModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
+import { testPublicId } from "../../../test/helpers/public-ids";
 
 import {
+  BW_IMAGE_AFTER_CREATE,
+  BW_IMAGE_USE_UPLOADER,
   createArea,
   deleteArea,
   getAreaForEdit,
   listAreas,
   moveArea,
+  setAreaImage,
   updateArea,
 } from "./areas";
+import { IMAGE_REJECTED } from "./uploads";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
+
+const cloudinaryMock = vi.hoisted(() => ({
+  inspectImage: vi.fn(),
+  destroyImage: vi.fn(),
+}));
+vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 
 setupMemoryDb("yg_admin_areas_test");
 
@@ -32,6 +44,14 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   vi.restoreAllMocks();
+  cloudinaryMock.inspectImage.mockReset().mockResolvedValue({
+    ok: true,
+    bytes: 1000,
+    format: "jpg",
+    width: 10,
+    height: 10,
+  });
+  cloudinaryMock.destroyImage.mockReset().mockResolvedValue(true);
   await Promise.all([
     AreaModel.deleteMany({}),
     ProductModel.deleteMany({}),
@@ -50,6 +70,18 @@ async function create(name: string, slug = "") {
   return expectOk(await createArea(ADMIN, { name, slug })).id;
 }
 
+/* A b/w image id in this area's own folder. */
+function bw(areaId: string, n = 0): string {
+  return testPublicId(n, areaId, "area");
+}
+
+/* Stores a b/w image directly, as a verified upload would have. */
+async function storeBw(areaId: string, n = 0): Promise<string> {
+  const publicId = bw(areaId, n);
+  await AreaModel.updateOne({ _id: areaId }, { $set: { bwImage: publicId } });
+  return publicId;
+}
+
 async function names(): Promise<string[]> {
   return (await listAreas()).map((area) => area.name);
 }
@@ -61,10 +93,7 @@ async function auditActions(): Promise<string[]> {
 
 describe("createArea", () => {
   it("creates an area with a slug from the name, audits it and returns the areas tag", async () => {
-    const result = await createArea(ADMIN, {
-      name: "Retail",
-      bwImage: "areas/retail-bw",
-    });
+    const result = await createArea(ADMIN, { name: "Retail", bwImage: "" });
 
     expect(result).toEqual({
       ok: true,
@@ -75,9 +104,9 @@ describe("createArea", () => {
     expect(await AreaModel.findById(id).lean()).toMatchObject({
       name: "Retail",
       slug: "retail",
-      bwImage: "areas/retail-bw",
       order: 0,
     });
+    expect(await AreaModel.findById(id).lean()).not.toHaveProperty("bwImage");
 
     const [entry, ...rest] = await AuditLogModel.find({}).lean();
     expect(rest).toHaveLength(0);
@@ -169,14 +198,13 @@ describe("createArea", () => {
 
 describe("getAreaForEdit and listAreas", () => {
   it("returns the form values, or null for a bad or unknown id", async () => {
-    const id = expectOk(
-      await createArea(ADMIN, { name: "Retail", bwImage: "a/b" }),
-    ).id;
+    const id = await create("Retail");
+    const publicId = await storeBw(id);
     expect(await getAreaForEdit(id)).toEqual({
       id,
       name: "Retail",
       slug: "retail",
-      bwImage: "a/b",
+      bwImage: publicId,
     });
     expect(await getAreaForEdit(new ObjectId().toHexString())).toBeNull();
     expect(await getAreaForEdit("nope")).toBeNull();
@@ -196,10 +224,11 @@ describe("getAreaForEdit and listAreas", () => {
 describe("updateArea", () => {
   it("saves changed fields, audits their names and returns areas + products tags", async () => {
     const id = await create("Retail");
+    const publicId = await storeBw(id);
     const result = await updateArea(ADMIN, id, {
       name: "Retail Spaces",
       slug: "",
-      bwImage: "areas/new",
+      bwImage: publicId,
     });
 
     expect(result).toEqual({
@@ -210,19 +239,41 @@ describe("updateArea", () => {
     expect(await AreaModel.findById(id).lean()).toMatchObject({
       name: "Retail Spaces",
       slug: "retail",
-      bwImage: "areas/new",
+      bwImage: publicId,
     });
     const entry = await AuditLogModel.findOne({ action: "area.update" }).lean();
-    expect(entry?.meta).toEqual({ fields: ["name", "bwImage"] });
+    expect(entry?.meta).toEqual({ fields: ["name"] });
   });
 
   it("removes bwImage when the form sends it blank", async () => {
-    const id = expectOk(
-      await createArea(ADMIN, { name: "Retail", bwImage: "a/b" }),
-    ).id;
+    const id = await create("Retail");
+    await storeBw(id);
     expectOk(await updateArea(ADMIN, id, { name: "Retail", bwImage: "" }));
     const row = await AreaModel.findById(id).lean();
     expect(row).not.toHaveProperty("bwImage");
+    const entry = await AuditLogModel.findOne({ action: "area.update" }).lean();
+    expect(entry?.meta).toEqual({ fields: ["bwImage"] });
+  });
+
+  it("never sets a new bwImage through the form, only keeps or clears it", async () => {
+    const id = await create("Retail");
+    const stored = await storeBw(id, 0);
+    for (const bwImage of [bw(id, 1), testPublicId(0)]) {
+      const result = await updateArea(ADMIN, id, { name: "Shops", bwImage });
+      expect(result).toEqual({
+        ok: false,
+        errors: {
+          formErrors: [],
+          fieldErrors: { bwImage: [BW_IMAGE_USE_UPLOADER] },
+        },
+        tags: [],
+      });
+    }
+    expect(await AreaModel.findById(id).lean()).toMatchObject({
+      name: "Retail",
+      bwImage: stored,
+    });
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
   });
 
   it("changes nothing, audits nothing and returns no tags when nothing differs", async () => {
@@ -280,6 +331,152 @@ describe("updateArea", () => {
     const bad = await updateArea(ADMIN, id, { name: "" });
     expect(!bad.ok && bad.errors.fieldErrors.name).toBeDefined();
     expect(bad.tags).toEqual([]);
+  });
+});
+
+describe("area b/w image", () => {
+  it("refuses a bwImage on create (the upload folder needs the area id)", async () => {
+    const result = await createArea(ADMIN, {
+      name: "Retail",
+      bwImage: testPublicId(0),
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: {
+        formErrors: [],
+        fieldErrors: { bwImage: [BW_IMAGE_AFTER_CREATE] },
+      },
+      tags: [],
+    });
+    expect(await AreaModel.countDocuments({})).toBe(0);
+  });
+
+  it("refuses a bwImage that is not in our id shape (gate A L-2)", async () => {
+    const id = await create("Retail");
+    const result = await updateArea(ADMIN, id, {
+      name: "Retail",
+      bwImage: "areas/retail-bw",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok ? {} : result.errors.fieldErrors).toHaveProperty(
+      "bwImage",
+    );
+  });
+
+  it("setAreaImage saves a verified upload, audits it and returns the areas tag", async () => {
+    const id = await create("Retail");
+    const publicId = bw(id);
+    const result = await setAreaImage(ADMIN, { areaId: id, publicId });
+    expect(result).toEqual({
+      ok: true,
+      data: { id, bwImage: publicId },
+      tags: ["areas"],
+    });
+    expect(cloudinaryMock.inspectImage).toHaveBeenCalledWith(publicId);
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
+    expect((await AreaModel.findById(id).lean())?.bwImage).toBe(publicId);
+    const entry = await AuditLogModel.findOne({ action: "area.update" }).lean();
+    expect(entry?.meta).toEqual({ fields: ["bwImage"], cleared: false });
+  });
+
+  it("setAreaImage clears the image with null or blank", async () => {
+    const id = await create("Retail");
+    await storeBw(id);
+    for (const publicId of [null, ""]) {
+      await AreaModel.updateOne({ _id: id }, { $set: { bwImage: bw(id) } });
+      expectOk(await setAreaImage(ADMIN, { areaId: id, publicId }));
+      expect(await AreaModel.findById(id).lean()).not.toHaveProperty("bwImage");
+    }
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+  });
+
+  it("setAreaImage with the stored id changes nothing", async () => {
+    const id = await create("Retail");
+    const publicId = await storeBw(id);
+    expect(await setAreaImage(ADMIN, { areaId: id, publicId })).toEqual({
+      ok: true,
+      data: { id, bwImage: publicId },
+      tags: [],
+    });
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["too_large" as const],
+    ["bad_format" as const],
+    ["missing" as const],
+  ])(
+    "setAreaImage deletes and refuses an upload that is %s, saving nothing",
+    async (reason) => {
+      const id = await create("Retail");
+      const before = await storeBw(id, 0);
+      cloudinaryMock.inspectImage.mockResolvedValue({ ok: false, reason });
+      const publicId = bw(id, 1);
+      const result = await setAreaImage(ADMIN, { areaId: id, publicId });
+      expect(result).toEqual({
+        ok: false,
+        errors: {
+          formErrors: [],
+          fieldErrors: { publicId: [IMAGE_REJECTED[reason]] },
+        },
+        tags: [],
+      });
+      expect(cloudinaryMock.destroyImage).toHaveBeenCalledWith(publicId);
+      expect((await AreaModel.findById(id).lean())?.bwImage).toBe(before);
+      expect(await auditActions()).toEqual(["area.create"]);
+    },
+  );
+
+  it("setAreaImage keeps the upload when Cloudinary can't be reached", async () => {
+    const id = await create("Retail");
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: false,
+      reason: "unavailable",
+    });
+    const result = await setAreaImage(ADMIN, { areaId: id, publicId: bw(id) });
+    expect(result.ok).toBe(false);
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
+    expect(await AreaModel.findById(id).lean()).not.toHaveProperty("bwImage");
+  });
+
+  it("setAreaImage refuses another area's or a product's id and never deletes it", async () => {
+    const id = await create("Retail");
+    const other = await create("Office");
+    for (const publicId of [bw(other), testPublicId(0, id, "product")]) {
+      const result = await setAreaImage(ADMIN, { areaId: id, publicId });
+      expect(result).toEqual({
+        ok: false,
+        errors: {
+          formErrors: [],
+          fieldErrors: { publicId: [IMAGE_REJECTED.foreign] },
+        },
+        tags: [],
+      });
+    }
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
+  });
+
+  it("setAreaImage refuses an unknown area and bad input", async () => {
+    const missing = new ObjectId().toHexString();
+    const result = await setAreaImage(ADMIN, {
+      areaId: missing,
+      publicId: bw(missing),
+    });
+    expect(result.ok).toBe(false);
+    expect(
+      (await setAreaImage(ADMIN, { areaId: "x", publicId: null })).ok,
+    ).toBe(false);
+    expect(
+      (
+        await setAreaImage(ADMIN, {
+          areaId: missing,
+          publicId: null,
+          order: 1,
+        })
+      ).ok,
+    ).toBe(false);
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
   });
 });
 

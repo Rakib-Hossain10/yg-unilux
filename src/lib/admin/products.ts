@@ -54,6 +54,11 @@ export const MAX_PRODUCT_SEARCH_LENGTH = 80;
 export const MAGNETIC_TRACK_SLUG = "magnetic-track";
 
 const NOT_FOUND = "This product no longer exists. Reload the page.";
+/** Shown when the product is gone (deleted in another tab). */
+export const PRODUCT_NOT_FOUND = NOT_FOUND;
+/** A variant points at an image the product doesn't have (gate B L-C). */
+export const VARIANT_IMAGE_NOT_OWN =
+  "Choose one of this product's own images, or leave it empty.";
 const MODEL_NO_TAKEN = "This model no. already belongs to another product";
 const SLUG_TAKEN = "Another product already uses this slug.";
 /** A save or status change from a page loaded before the latest write. */
@@ -74,22 +79,25 @@ export interface ProductWriteOptions {
   expectedUpdatedAt?: unknown;
 }
 
-/*
+/**
  * The parsed expected `updatedAt`, null when no check was asked for, or
- * "bad" when the key is present but not an ISO date-time.
+ * "bad" when the key is present but not an ISO date-time. Shared with the
+ * images save (product-images.ts).
  */
-function expectedVersion(options: ProductWriteOptions): Date | null | "bad" {
+export function expectedVersion(
+  options: ProductWriteOptions,
+): Date | null | "bad" {
   if (!("expectedUpdatedAt" in options)) return null;
   const parsed = expectedUpdatedAtSchema.safeParse(options.expectedUpdatedAt);
   return parsed.success ? parsed.data : "bad";
 }
 
-/*
+/**
  * Tags. A draft is invisible to the public, so only the product list tags are
  * expired. Anything that is or was published also expires category and area
  * listings (they show product counts and cards).
  */
-function tagsFor(id: string, public_: boolean): CatalogTag[] {
+export function tagsFor(id: string, public_: boolean): CatalogTag[] {
   return public_
     ? [...productTags(id), CATALOG_TAGS.categories, CATALOG_TAGS.areas]
     : productTags(id);
@@ -675,6 +683,21 @@ export async function updateProduct(
     ...(await checkReferences(values)),
     ...(await takenModelNos(values.variants, selfId)),
   };
+  /*
+   * A variant image must be one of the product's own saved images (gate B
+   * L-C): only those passed upload verification. The write below also
+   * requires them atomically, in case an image is removed meanwhile.
+   */
+  const ownImages = new Set(doc.images.map((image) => image.publicId));
+  const variantImages = new Set<string>();
+  values.variants.forEach((variant, index) => {
+    if (variant.imagePublicId === null) return;
+    if (ownImages.has(variant.imagePublicId)) {
+      variantImages.add(variant.imagePublicId);
+    } else {
+      errors[`variants.${index}.imagePublicId`] = [VARIANT_IMAGE_NOT_OWN];
+    }
+  });
   const slug = values.slug === "" ? stored.slug : values.slug;
   if (slug !== stored.slug && (await slugTaken(slug, selfId))) {
     errors.slug = [SLUG_TAKEN];
@@ -748,8 +771,15 @@ export async function updateProduct(
 
   try {
     const result = await ProductModel.updateOne(
-      // With a version, only while nobody wrote since the read above.
-      expected ? { _id: selfId, updatedAt: expected } : { _id: selfId },
+      {
+        _id: selfId,
+        // With a version, only while nobody wrote since the read above.
+        ...(expected ? { updatedAt: expected } : {}),
+        // Only while every image a variant points at is still saved.
+        ...(variantImages.size > 0
+          ? { "images.publicId": { $all: [...variantImages] } }
+          : {}),
+      },
       {
         ...(Object.keys(set).length > 0 ? { $set: set } : {}),
         ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
@@ -757,7 +787,8 @@ export async function updateProduct(
       { runValidators: true },
     );
     if (result.matchedCount === 0) {
-      // Deleted, or (with a version) written by someone else meanwhile.
+      // Deleted, or written by someone else meanwhile (a newer version, or
+      // a variant's image removed by the images editor).
       const exists = await ProductModel.exists({ _id: selfId });
       return formError(exists ? PRODUCT_CHANGED : NOT_FOUND);
     }
@@ -860,8 +891,9 @@ export function unpublishProduct(
 }
 
 /**
- * Deletes the product document only. Its Cloudinary images are swept later
- * (T11b); the audit entry holds ids and counts, never names.
+ * Deletes the product document only. Its Cloudinary images are left for the
+ * T17 orphan report (images are public, and a delete can't be undone); the
+ * audit entry holds ids and counts, never names.
  */
 export async function deleteProduct(
   actorId: string,

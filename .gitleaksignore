@@ -1,2 +1,5 @@
 # False positive: 'mockToken' example string in a vendored Playwright skill doc.
 .claude/skills/playwright-best-practices/advanced/authentication-flows.md:generic-api-key:54
+# False positive: fixed fake Cloudinary secret used for the T11a signature tests.
+src/lib/cloudinary.test.ts:generic-api-key:13
+src/lib/admin/uploads.test.ts:generic-api-key:34

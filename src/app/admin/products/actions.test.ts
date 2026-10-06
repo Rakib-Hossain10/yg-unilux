@@ -9,6 +9,7 @@ import { mongoose } from "@/lib/db";
 import { AreaModel, CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { setupMemoryDb } from "../../../../test/helpers/memory-db";
+import { testPublicId } from "../../../../test/helpers/public-ids";
 
 import {
   toFormState,
@@ -437,6 +438,21 @@ describe("edit actions as the admin", () => {
   }
 
   it("save persists specs, reordered variants with differences, extra specs and public files", async () => {
+    // A variant image must be one of the product's own saved images.
+    const wideImage = testPublicId(3, productId);
+    await ProductModel.updateOne(
+      { _id: productId },
+      {
+        $push: {
+          images: {
+            publicId: wideImage,
+            alt: "Wide",
+            order: 0,
+            kind: "gallery",
+          },
+        },
+      },
+    );
     const values = await formPayload((state) => {
       state.specs.cct = "2700K\n3000K";
       state.specs.driver = "Lifud";
@@ -448,7 +464,7 @@ describe("edit actions as the admin", () => {
         {
           modelNo: "AR-013A3",
           label: "Wide",
-          imagePublicId: "products/ar-013a3",
+          imagePublicId: wideImage,
           specs: { beamAngle: "60°", lumenOutput: "800 lm" },
         },
         second,
@@ -476,7 +492,7 @@ describe("edit actions as the admin", () => {
       {
         modelNo: "AR-013A3",
         label: "Wide",
-        imagePublicId: "products/ar-013a3",
+        imagePublicId: wideImage,
         specs: { beamAngle: ["60°"], lumenOutput: ["800 lm"] },
       },
       { modelNo: "AR-013A2" },
