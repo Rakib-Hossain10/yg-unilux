@@ -1,6 +1,6 @@
 // Tests for src/models/index.ts: every model compiles, uses its exact
-// collection name, and declares exactly the indexes agreed for Phase 1
-// (ADR 0008). No database needed.
+// collection name, and declares exactly the agreed indexes (ADR 0008,
+// extended per phase). No database needed.
 
 import { describe, expect, it } from "vitest";
 
@@ -44,6 +44,8 @@ const EXPECTED_INDEXES: Record<string, ExpectedIndex[]> = {
     { key: { family: 1 } },
     { key: { status: 1 } },
     { key: { status: 1, mainCategory: 1 } },
+    // Phase 2 (T2): datasheet in-use count and delete block.
+    { key: { datasheetId: 1 } },
   ],
   Category: [
     { key: { parent: 1, slug: 1 }, unique: true },

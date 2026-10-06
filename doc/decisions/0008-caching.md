@@ -1,5 +1,5 @@
 # 0008 — Caching and query performance
-- Status: Accepted (API confirmed from the installed Next.js 16.3.7 docs; the storage choice for Vercel is still open for Phase 4)
+- Status: Accepted (API confirmed from the installed Next.js 16.3.7 docs; the storage choice for Vercel is still open for Phase 4). The `revalidateCatalog(...)` helper is refined by [0035](0035-admin-write-path.md): `revalidateCatalogInAction` / `revalidateCatalogFromRoute`, with `settings:columns` always expired at once.
 - Date: 2026-09-30
 
 ## Context

@@ -204,9 +204,19 @@ describe("audit log", () => {
     expect(
       await invalidPaths(AuditLogModel, { action: "product.update" }),
     ).toEqual(["actor"]);
+    // Not in the vocabulary, so the action fails too; and still no actor.
     expect(
       await invalidPaths(AuditLogModel, { action: "xauth.rate_limited" }),
-    ).toEqual(["actor"]);
+    ).toEqual(["action", "actor"]);
+  });
+
+  it("rejects an action outside the shared vocabulary", async () => {
+    expect(
+      await invalidPaths(AuditLogModel, entry({ action: "product.explode" })),
+    ).toEqual(["action"]);
+    expect(
+      await invalidPaths(AuditLogModel, entry({ action: "admin.cli_create" })),
+    ).toEqual([]);
   });
 });
 

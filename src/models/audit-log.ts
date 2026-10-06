@@ -6,6 +6,7 @@ import type { Types } from "mongoose";
 
 import { mongoose } from "@/lib/db";
 
+import { AUDIT_ACTIONS, type AuditAction } from "./audit-actions";
 import { defineModel } from "./shared";
 
 const { Schema } = mongoose;
@@ -29,8 +30,8 @@ export interface AuditLog {
    * have no signed-in actor and must not record who was targeted.
    */
   actor?: Types.ObjectId;
-  /** What happened, e.g. "product.update". The list is set in Phase 2. */
-  action: string;
+  /** What happened, e.g. "product.update". The list is in ./audit-actions.ts. */
+  action: AuditAction;
   target?: AuditTarget;
   /** Small extra details; never secrets, passwords or restricted spec values. */
   meta?: unknown;
@@ -69,7 +70,9 @@ const auditLogSchema = new Schema<AuditLog>(
         "actor is required",
       ],
     },
-    action: { type: String, required: true, trim: true, maxlength: 100 },
+    // One vocabulary (./audit-actions.ts): an unknown or misspelt action is
+    // rejected here as well as by recordAudit()'s Zod check.
+    action: { type: String, required: true, trim: true, enum: AUDIT_ACTIONS },
     target: targetSchema,
     meta: {
       type: Schema.Types.Mixed,

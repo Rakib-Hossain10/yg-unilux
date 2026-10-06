@@ -1,6 +1,6 @@
 // Tests for src/lib/db-indexes.ts on an in-memory MongoDB: every model's
-// indexes build, the loginAttempts TTL index exists, a re-run changes nothing,
-// and a failure is reported without quoting document values.
+// indexes build, the loginAttempts TTL and products.datasheetId indexes exist,
+// a re-run changes nothing, and a failure is reported without quoting values.
 
 import { describe, expect, it } from "vitest";
 
@@ -46,6 +46,17 @@ describe("syncIndexes", () => {
     expect(indexes).toContainEqual(
       expect.objectContaining({ key: { key: 1 }, unique: true }),
     );
+  });
+
+  it("creates the products.datasheetId index used by the datasheet in-use checks", async () => {
+    await syncIndexes(indexedModels);
+    const indexes = await getDb().collection("products").indexes();
+    const datasheetIndex = indexes.find(
+      (index) => JSON.stringify(index.key) === '{"datasheetId":1}',
+    );
+    expect(datasheetIndex).toBeDefined();
+    // A plain index: many products may share one datasheet or have none.
+    expect(datasheetIndex?.unique).toBeUndefined();
   });
 
   it("is safe to run again (createIndexes only adds missing indexes)", async () => {

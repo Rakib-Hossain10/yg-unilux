@@ -6,6 +6,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import type { SystemAuditAction } from "@/models/audit-actions";
 import { AuditLogModel } from "@/models/audit-log";
 
 import { type Auth, hasRole } from "./auth";
@@ -188,7 +189,7 @@ export async function seedAdmin(
  */
 async function audit(
   userId: string,
-  action: "admin.cli_create" | "admin.cli_reset_password",
+  action: Extract<SystemAuditAction, `admin.cli_${string}`>,
   meta: Record<string, unknown> = {},
 ): Promise<void> {
   await AuditLogModel.create({

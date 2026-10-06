@@ -6,14 +6,25 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 ## ▶ Resume here (next session)
 - **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, `5fff0bb`, 2026-10-06).
 - **Phase 2 is PLANNED and APPROVED. Read `doc/phase-2-plan.md` first** — it holds the architecture, 18 ordered tasks (T1–T18, one commit each), owners, models, tests, QA gates A–E, risks and ADR list. The user's decisions are in it: direct browser uploads with server-side verification (amends ADR 0009), and the ADR 0019 product defaults.
-- **T1 done** (shadcn + token mapping, ADR 0034). The review hook is back on.
-- **Next: T2: shared building blocks** (`backend-architect`, Opus):
-  - `src/lib/{revalidate,audit,slug,constants}.ts`;
-  - the `products.datasheetId` index in `src/models/product.ts` and `db-indexes`;
-  - tests: revalidate (mock `next/cache`), audit (memory DB: oversize meta and unknown action rejected), slug, db-indexes;
-  - draft ADR 0035 "Admin write path".
+- **Done:**
+  - T1 (shadcn + tokens, ADR 0034).
+  - T2 (shared helpers + `products.datasheetId` index, ADR 0035):
+    - `src/lib/revalidate.ts`, `audit.ts`, `slug.ts` and `constants.ts`;
+    - the audit vocabulary in `src/models/audit-actions.ts`.
 
-  Read the plan's "Architecture" section first.
+  The review hook is on.
+- **Next: T3: admin shell + dashboard.**
+  - `backend-architect` (Opus) first: `src/lib/admin/dashboard.ts`, where `getCounts()` runs parallel `countDocuments` with no cache, plus a memory-DB test.
+  - Then `admin-panel-builder` (Opus):
+    - `src/app/admin/{layout,page,loading,error}.tsx`;
+    - `src/components/admin/admin-nav.tsx`: a server component with a skip link, the active link from a tiny client component, and a mobile `<details>` menu;
+    - extend the guard test;
+    - fix the placeholder e2e text.
+- **Write path (ADR 0035), applies from T4 on:**
+  - Services run `connectDb` → Zod → write → `recordAudit` → return `{ok, data|errors, tags}`. When the audit write fails, they still return the tags.
+  - Actions run `requireAdmin()` first → the service → `revalidateCatalogInAction(tags)` → `redirect` outside any `try`.
+  - T14 should tie each `settings.*` audit action to its exact siteContent key.
+- **Exit check:** `npm run db:indexes` builds the new `products.datasheetId` index on the real database.
 - **Model guidance (user rule, 2026-10-06; overrides the plan's model column):** every subagent runs on **Opus**. UI work always goes to the frontend subagents (`admin-panel-builder`, `site-frontend`, `motion-engineer`) with `model: "opus"`. Never build UI in the main session.
 - **shadcn adds:** every later `npx shadcn add` gets the ADR 0034 strip pass (header line, no animation, no `dark:`, tokens instead of raw colours). `design-shell.qa.test.ts` enforces it. Admin forms will probably need `field`, `alert`, `pagination` and `empty`.
 - **GitHub:** use `gh` (push, PR, CI, merge); always ask the user before merging into `main`.
@@ -44,7 +55,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1 done, next T2 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T2 done, next T3 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -130,7 +141,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
-- [ ] auditLog on every write; tag revalidation on every save — ADR 0008
+- [x] T2: shared helpers (revalidate, audit, slug, constants), audit vocabulary as schema enum, `products.datasheetId` index — ADR 0035
+- [ ] auditLog on every write; tag revalidation on every save — ADR 0008, 0035
 - [ ] Tests: Zod schemas, file signature, auth guard on every admin action
 - **Exit:** full product built by hand with images and attached datasheet
 
@@ -203,6 +215,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T2 committed (ADR 0035; ADR 0008 status points to it). The auto-review raised a Medium: `"max"` could serve newly restricted columns stale. Fixed: `settings:columns` always uses `{ expire: 0 }`. 899 tests green. Next: T3.
 - 2026-10-06 — T1 committed (shadcn + token mapping, ADR 0034). The user ruled that UI work always goes to the frontend subagents on Opus. A Sonnet run was stopped and an Opus run reviewed its draft, fixing 11 issues: a dead QA regex, a nearly invisible destructive focus ring, leftover motion, needless `"use client"`, raw black overlays, CRLF. 819 tests and the build are green. Next: T2.
 - 2026-10-06 — Phase 2 planned in plan mode and approved (`doc/phase-2-plan.md`, T1–T18, QA gates A–E). Services verified with `npm run check:services` (committed). User decisions: direct uploads with server verification; ADR 0019 defaults. Next: T1 (shadcn init) in a fresh session.
 - 2026-10-06 — CI green and PR #9 merged to `main` (`5fff0bb`) with the user's approval. Phase 1 is done. `phase-2` branched off. Next: plan Phase 2 in plan mode.

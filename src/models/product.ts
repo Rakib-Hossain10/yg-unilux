@@ -275,5 +275,8 @@ productSchema.index({ family: 1 });
 productSchema.index({ status: 1 });
 // Published products of one main category: the main listing query.
 productSchema.index({ status: 1, mainCategory: 1 });
+// "Which products use this datasheet": the in-use count on the datasheets
+// list and the check that blocks deleting a datasheet still attached.
+productSchema.index({ datasheetId: 1 });
 
 export const ProductModel = defineModel<Product>("Product", productSchema);
