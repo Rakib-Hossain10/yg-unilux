@@ -12,14 +12,22 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - `src/lib/revalidate.ts`, `audit.ts`, `slug.ts` and `constants.ts`;
     - the audit vocabulary in `src/models/audit-actions.ts`.
 
+  - T3 (admin shell + dashboard, ADR 0036).
+
   The review hook is on.
-- **Next: T3: admin shell + dashboard.**
-  - `backend-architect` (Opus) first: `src/lib/admin/dashboard.ts`, where `getCounts()` runs parallel `countDocuments` with no cache, plus a memory-DB test.
-  - Then `admin-panel-builder` (Opus):
-    - `src/app/admin/{layout,page,loading,error}.tsx`;
-    - `src/components/admin/admin-nav.tsx`: a server component with a skip link, the active link from a tiny client component, and a mobile `<details>` menu;
-    - extend the guard test;
-    - fix the placeholder e2e text.
+- **Next: T4: category schemas + service** (`backend-architect`, Opus):
+  - `src/lib/schemas/category.ts` and `src/lib/admin/categories.ts`;
+  - rules: depth ≤ `MAX_CATEGORY_DEPTH`, the parent must be top-level, the slug is unique per parent, move up/down swaps `order`, and delete is blocked while there are children or products (`mainCategory`/`extraCategories`);
+  - every write goes through `recordAudit` and returns tags (ADR 0035);
+  - tests: schemas and services (depth, in-use block, audit, tags) on the memory DB.
+
+  After T4: T5 (categories UI, `admin-panel-builder` on Opus), then T6a/T6b (areas). **QA gate A** (`qa-security-reviewer`, Opus) runs after T6 and covers T1–T6.
+- **Admin guards (ADR 0036):**
+  - The layout's `requireAdmin()` gives the real 403; `loading.tsx` doesn't wrap the layout.
+  - Pages still guard first, because client navigation skips the layout.
+  - Admin metadata is static only.
+  - `test/admin-guards.test.ts` enforces this. T5 adds its Server Action `describe` block: `requireAdmin` first, plus the customer and visitor behavioural tests (QA L2, task 6).
+- **Nav:** the module list lives in `src/components/admin/admin-sections.ts`. Its links 404 until each module exists; don't add placeholder pages.
 - **Write path (ADR 0035), applies from T4 on:**
   - Services run `connectDb` → Zod → write → `recordAudit` → return `{ok, data|errors, tags}`. When the audit write fails, they still return the tags.
   - Actions run `requireAdmin()` first → the service → `revalidateCatalogInAction(tags)` → `redirect` outside any `try`.
@@ -55,7 +63,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T2 done, next T3 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T3 done, next T4 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -134,8 +142,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
 ## Phase 2 — Admin core — plan: `doc/phase-2-plan.md` (T1–T18)
 - [x] T1: shadcn init (radix-nova, 16 ui components), tokens mapped, animation and dark mode stripped, contrast pairs tested — ADR 0034
-- [ ] Admin layout with `requireAdmin()` everywhere
-- [ ] Dashboard counts
+- [x] T3: admin layout with `requireAdmin()` everywhere (static guard test), sidebar + mobile nav, loading/error — ADR 0036
+- [x] T3: dashboard counts (`src/lib/admin/dashboard.ts`, uncached)
 - [ ] Categories tree editor
 - [ ] Areas module
 - [ ] Products CRUD + Cloudinary upload/reorder
@@ -215,6 +223,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T3 committed (ADR 0036). Found that Next puts static admin metadata into a customer's 403 payload, so admin metadata stays static. 933 unit and 42 e2e tests green. The user ends the session here; the next session starts at T4.
 - 2026-10-06 — T2 committed (ADR 0035; ADR 0008 status points to it). The auto-review raised a Medium: `"max"` could serve newly restricted columns stale. Fixed: `settings:columns` always uses `{ expire: 0 }`. 899 tests green. Next: T3.
 - 2026-10-06 — T1 committed (shadcn + token mapping, ADR 0034). The user ruled that UI work always goes to the frontend subagents on Opus. A Sonnet run was stopped and an Opus run reviewed its draft, fixing 11 issues: a dead QA regex, a nearly invisible destructive focus ring, leftover motion, needless `"use client"`, raw black overlays, CRLF. 819 tests and the build are green. Next: T2.
 - 2026-10-06 — Phase 2 planned in plan mode and approved (`doc/phase-2-plan.md`, T1–T18, QA gates A–E). Services verified with `npm run check:services` (committed). User decisions: direct uploads with server verification; ADR 0019 defaults. Next: T1 (shadcn init) in a fresh session.

@@ -51,3 +51,4 @@ Template:
 | [0033](0033-blocking-audit-allowlist.md) | Full-tree `npm audit` is blocking via `scripts/audit.mjs` with a dated allowlist (only GHSA-vfj7-8cjw-p6xm, review by 2027-01-05) | Accepted |
 | [0034](0034-shadcn-tokens.md) | shadcn (radix-nova, `radix-ui`) mapped onto ink/paper/grey tokens; new `--color-danger`; light only; animation classes stripped and enforced by test | Accepted |
 | [0035](0035-admin-write-path.md) | Admin write path: schemas → services (return tags) → thin actions; one audit vocabulary (schema enum + Zod); meta = ids/field names/counts; typed tags, `settings:columns` expired at once; non-atomic audit | Accepted |
+| [0036](0036-admin-shell.md) | Admin shell: layout guard gives the real 403 (loading.tsx doesn't wrap it), page guard for client nav; static-only admin metadata; static guard test; `<details>` mobile nav | Accepted |

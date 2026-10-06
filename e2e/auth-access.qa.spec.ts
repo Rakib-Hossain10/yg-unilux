@@ -56,6 +56,13 @@ test("a customer's RSC request for /admin carries no admin content", async ({
   expect(result.body).not.toContain("Signed in as");
   expect(result.body).not.toContain(E2E_CUSTOMER.email);
   expect(result.body).not.toContain("Sign out");
+  // Neither the admin nav nor a dashboard card (only rendered alongside the
+  // counts) is in the payload. "Dashboard" alone is not checked: Next resolves
+  // the page's static metadata (its <title>) even when the layout's guard
+  // throws forbidden(), and that constant string carries no admin data.
+  expect(result.body).not.toContain("Access requests");
+  expect(result.body).not.toContain("Waiting for a decision");
+  expect(result.body).not.toContain('"aria-label":"Admin"');
 });
 
 test("sign-out deletes the session: the old cookie no longer opens /admin", async ({
