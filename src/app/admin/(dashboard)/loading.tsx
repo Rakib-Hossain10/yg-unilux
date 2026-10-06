@@ -1,6 +1,6 @@
-// Loading state for admin pages: skeletons in the shape of the dashboard.
-// Next wraps the admin pages (not admin/layout.tsx) in Suspense with this, so
-// the layout's requireAdmin() still runs before streaming and a 403 stays 403.
+// Loading state for the dashboard only: skeletons in its shape. In the
+// (dashboard) route group so it no longer wraps every admin page: a page with
+// no loading.tsx above it (product edit) can still answer a real 404 (L-1).
 
 import { Skeleton } from "@/components/ui/skeleton";
 

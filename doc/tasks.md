@@ -23,10 +23,27 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - T7 done (product schema, ADR 0040), 1209 tests green.
 - T8 done (product service, ADR 0041), 1248 tests green.
 - T9 done (products list + new draft UI, ADR 0042; gate A's L-4 and L-5 fixed), 1282 unit + 69 e2e green.
-- **Next: T10a/b** — product edit form at `/admin/products/[id]` (`admin-panel-builder`, model `opus`): (a) basics, categories, areas, filters; (b) specs editor grouped from `SPEC_COLUMNS`, variants (`useFieldArray`), extra specs, public files. Client sends JSON, the server re-parses with `productInputSchema`. Read the `created` notice (T9 redirects there). Map Zod errors under `variants` and the service's `variants.N.modelNo`. Use `updateProduct`/`getProductForEdit`/`publishProduct`/`unpublishProduct`/`deleteProduct` from `src/lib/admin/products.ts`. Optional first step: export the createDraft schema from `schemas/product.ts` and `MAX_PRODUCT_SEARCH_LENGTH` from `constants.ts`. Then **QA gate B** (after T10).
+- T10a done (product edit form section (a), ADR 0043), 1364 unit + 74 e2e green.
+  - Status changes only through publish/unpublish.
+  - Optimistic concurrency on `updatedAt`.
+  - A published product stays publishable.
+  - Route groups `admin/(dashboard)` and `products/(list)` give a real 404.
+- **Next: T10b.** Run it on `admin-panel-builder`, model `opus`, in `src/components/admin/product-form/*`:
+  - Specs editor, grouped from `SPEC_COLUMNS`.
+  - Replace `variants-summary.tsx` with a `useFieldArray` editor (label, modelNo, imagePublicId, per-variant specs).
+  - Extra specs `{group,label,value}`.
+  - Public files: https-only.
+  - Add each new field to `isRenderedField` in `sections.ts`. The mapper already handles `variants.N.*`, `specs.K`, `extraSpecs.N.*` and `publicFiles.N.*`.
+  - Never add a `loading.tsx` above `products/[id]`.
+  - Measure resolver speed with about 200 variants.
+  - Then **QA gate B** (T7–T10) with `qa-security-reviewer` on Opus.
+- **Backend follow-ups from T10a (ADR 0043, not blocking):**
+  - `invalidInput` should key nested Zod issues by the full dotted path.
+  - Add a shared `isMagneticTrackCategory` helper, to remove the duplicate in `product-category-options.ts`.
+  - Export the createDraft schema, and move `MAX_PRODUCT_SEARCH_LENGTH` to `constants.ts`.
 - **Open items from gate A:**
   - **P-1 (before the Phase 2 merge):** `npm audit --audit-level=high` fails on dev-only braces (GHSA-vfj7-8cjw-p6xm via eslint-config-next → fast-glob → micromatch); `--omit=dev` is clean, no non-forced fix. Add an `overrides` entry once patched, or write a deferral ADR (ADR 0015 style) and adjust CI.
-  - L-1: not-found `[id]` admin pages answer 200 because of `[id]/loading.tsx` (accept in an ADR note or drop the loading file).
+  - L-1: categories and areas `[id]` pages still answer 200 on not-found because of their `[id]/loading.tsx`. Products is fixed (ADR 0043); apply the same fix, or accept it in an ADR note.
   - L-2 (T11b): tighten `bwImage` (schema + `publicIdField`) to the publicId regex before anything public renders it.
   - L-3: add the planned ESLint rule (no `"use client"` import of `server-only`/`src/lib/admin/*`); a static test covers it now.
   - L-4 and L-5: fixed in T9.
@@ -72,7 +89,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T6 done, T9 done, next T10 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T9 and T10a done, next T10b, then QA gate B (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -158,6 +175,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T7: product Zod schema + `publishCheck` — ADR 0040
 - [x] T8: product service — ADR 0041
 - [x] T9: products list + new draft, gate A L-4/L-5 fixes — ADR 0042
+- [x] T10a: product edit form section (a), status card, delete, optimistic concurrency — ADR 0043
+- [ ] T10b: specs, variants, extra specs, public files
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
@@ -235,6 +254,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T10a done on Opus (ADR 0043). The auto-review found two Highs, both fixed: every save after the first did nothing (the in-flight flag stayed set through the redirect), and a stale tab could overwrite newer data. The second fix: status now changes only through publish/unpublish, and saves are checked against `updatedAt`. Six Medium fixes followed. 1364 unit + 74 e2e green. Next: T10b.
 - 2026-10-06 — T9 done on Opus (ADR 0042): products list, new draft, shared move guard, e2e for products. Next: T10.
 - 2026-10-06 — T8 done (ADR 0041): product service with publish gate, trackSize rule, modelNo field errors. Next: T9.
 - 2026-10-06 — T7 done (ADR 0040). Auto-review caught a server-only import in the schema; constants moved to `product-constants.ts`. Next: T8.

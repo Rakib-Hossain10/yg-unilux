@@ -20,8 +20,8 @@ import {
 import { getCounts } from "@/lib/admin/dashboard";
 import { requireAdmin } from "@/lib/permissions";
 
-// Absolute: the layout's "%s | Admin | YG UniLUX" template only reaches child
-// segments, and this page shares the layout's segment.
+// Absolute: the full title as it was when this page shared the layout's
+// segment (it now sits in the (dashboard) route group, see loading.tsx).
 export const metadata: Metadata = {
   title: { absolute: "Dashboard | Admin | YG UniLUX" },
 };

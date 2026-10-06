@@ -21,6 +21,7 @@ import {
   listProducts,
   MAGNETIC_TRACK_SLUG,
   PRODUCTS_PAGE_SIZE,
+  PRODUCT_CHANGED,
   publishProduct,
   unpublishProduct,
   updateProduct,
@@ -512,24 +513,8 @@ describe("updateProduct", () => {
     });
   });
 
-  describe("status published", () => {
-    it("is refused with publishCheck field errors when it has no image or variant", async () => {
-      const id = await draft();
-      const result = await updateProduct(ADMIN, id, {
-        name: "Arc",
-        mainCategory: spot,
-        status: "published",
-      });
-      expect(Object.keys(fieldErrorsOf(result)).sort()).toEqual([
-        "images",
-        "status",
-        "variants",
-      ]);
-      expect(result.tags).toEqual([]);
-      expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
-    });
-
-    it("succeeds when ready, expires category and area tags, audits as publish", async () => {
+  describe("status (T10a: only publish/unpublish change it)", () => {
+    it("ignores status in the form, both ways", async () => {
       const id = await draft();
       await addImage(id);
       const result = await updateProduct(
@@ -538,21 +523,169 @@ describe("updateProduct", () => {
         form({ status: "published" }),
       );
       expect(result.ok).toBe(true);
-      expect(result.tags).toEqual([
+      expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
+      // A draft's save expires only the product tags.
+      expect(result.tags).toEqual(["products", `product:${id}`]);
+
+      await publishProduct(ADMIN, id);
+      const live = await updateProduct(
+        ADMIN,
+        id,
+        form({ name: "Arc 2", status: "draft" }),
+      );
+      expect(live.tags).toEqual([
         "products",
         `product:${id}`,
         "categories",
         "areas",
       ]);
-      expect(await actions()).toContain("product.update");
+      const row = await ProductModel.findById(id).lean();
+      expect(row?.status).toBe("published");
+      expect(row?.name).toBe("Arc 2");
+      expect((await actions()).at(-1)).toBe("product.update");
     });
 
-    it("records a status-only change as product.publish", async () => {
+    it("refuses a save that would leave a published product unpublishable", async () => {
       const id = await draft();
-      await addImage(id);
       await updateProduct(ADMIN, id, form());
-      await updateProduct(ADMIN, id, form({ status: "published" }));
-      expect((await actions()).at(-1)).toBe("product.publish");
+      await addImage(id);
+      await publishProduct(ADMIN, id);
+      const result = await updateProduct(ADMIN, id, form({ variants: [] }));
+      expect(Object.keys(fieldErrorsOf(result)).sort()).toEqual([
+        "status",
+        "variants",
+      ]);
+      expect(result.tags).toEqual([]);
+      expect((await ProductModel.findById(id).lean())?.variants).toHaveLength(
+        1,
+      );
+    });
+  });
+
+  describe("expectedUpdatedAt (stale page)", () => {
+    async function versionOf(id: string): Promise<string> {
+      const row = await ProductModel.findById(id).lean();
+      return row?.updatedAt.toISOString() ?? "";
+    }
+    async function touch(id: string) {
+      await ProductModel.updateOne(
+        { _id: id },
+        { $set: { updatedAt: new Date(Date.now() + 5000) } },
+        { timestamps: false },
+      );
+    }
+
+    it("saves while the version matches, refuses once someone wrote since", async () => {
+      const id = await draft();
+      const ok = await updateProduct(ADMIN, id, form(), {
+        expectedUpdatedAt: await versionOf(id),
+      });
+      expect(ok.ok).toBe(true);
+
+      const loaded = await versionOf(id);
+      await touch(id);
+      const before = await ProductModel.findById(id).lean();
+      const stale = await updateProduct(ADMIN, id, form({ name: "Old tab" }), {
+        expectedUpdatedAt: loaded,
+      });
+      expect(stale).toEqual({
+        ok: false,
+        errors: { formErrors: [PRODUCT_CHANGED], fieldErrors: {} },
+        tags: [],
+      });
+      expect(await ProductModel.findById(id).lean()).toEqual(before);
+      expect(await actions()).toEqual(["product.create", "product.update"]);
+    });
+
+    it("refuses a malformed version but allows none", async () => {
+      const id = await draft();
+      for (const bad of [undefined, "", "2026-13-01", { $gt: "" }, 0]) {
+        const result = await updateProduct(ADMIN, id, form(), {
+          expectedUpdatedAt: bad,
+        });
+        expect(!result.ok && result.errors.formErrors).toEqual([
+          PRODUCT_CHANGED,
+        ]);
+      }
+      expect((await updateProduct(ADMIN, id, form())).ok).toBe(true);
+    });
+
+    it("guards publish and unpublish the same way", async () => {
+      const id = await draft();
+      await updateProduct(ADMIN, id, form());
+      await addImage(id);
+      const loaded = await versionOf(id);
+      await touch(id);
+      const stale = await publishProduct(ADMIN, id, {
+        expectedUpdatedAt: loaded,
+      });
+      expect(!stale.ok && stale.errors.formErrors).toEqual([PRODUCT_CHANGED]);
+      expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
+
+      const fresh = await publishProduct(ADMIN, id, {
+        expectedUpdatedAt: await versionOf(id),
+      });
+      expect(fresh.ok).toBe(true);
+      const unpub = await unpublishProduct(ADMIN, id, {
+        expectedUpdatedAt: loaded,
+      });
+      expect(!unpub.ok && unpub.errors.formErrors).toEqual([PRODUCT_CHANGED]);
+      expect((await ProductModel.findById(id).lean())?.status).toBe(
+        "published",
+      );
+    });
+
+    /*
+     * The race the read-time check can't see: the service reads the product
+     * (version still matches), then another write lands before its updateOne.
+     * The filtered updateOne must then match nothing and report the change.
+     */
+    function writeAfterNextRead(id: string) {
+      const original = ProductModel.findById.bind(ProductModel);
+      vi.spyOn(ProductModel, "findById").mockImplementationOnce(((
+        ...args: Parameters<typeof original>
+      ) => {
+        const query = original(...args);
+        const lean = query.lean.bind(query);
+        query.lean = ((...leanArgs: Parameters<typeof lean>) =>
+          lean(...leanArgs).then(async (doc: unknown) => {
+            await touch(id);
+            return doc;
+          })) as unknown as typeof query.lean;
+        return query;
+      }) as typeof ProductModel.findById);
+    }
+
+    it("refuses a save when another write lands between read and write", async () => {
+      const id = await draft();
+      await updateProduct(ADMIN, id, form());
+      const loaded = await versionOf(id);
+      writeAfterNextRead(id);
+      const result = await updateProduct(ADMIN, id, form({ name: "Racer" }), {
+        expectedUpdatedAt: loaded,
+      });
+      expect(result).toEqual({
+        ok: false,
+        errors: { formErrors: [PRODUCT_CHANGED], fieldErrors: {} },
+        tags: [],
+      });
+      expect((await ProductModel.findById(id).lean())?.name).toBe("Arc");
+      expect(await actions()).toEqual(["product.create", "product.update"]);
+    });
+
+    it("refuses a publish when another write lands between read and write", async () => {
+      const id = await draft();
+      await updateProduct(ADMIN, id, form());
+      await addImage(id);
+      const loaded = await versionOf(id);
+      writeAfterNextRead(id);
+      const result = await publishProduct(ADMIN, id, {
+        expectedUpdatedAt: loaded,
+      });
+      expect(!result.ok && result.errors.formErrors).toEqual([PRODUCT_CHANGED]);
+      expect(result.tags).toEqual([]);
+      expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
+      expect((await actions()).at(-1)).toBe("product.update");
     });
   });
 });

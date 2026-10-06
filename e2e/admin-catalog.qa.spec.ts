@@ -1,4 +1,4 @@
-// QA gate A (Phase 2, T1-T6) plus T9: the categories, areas and products admin
+// QA gate A (Phase 2, T1-T6) plus T9/T10a: the categories, areas and products admin
 // modules end to end on the production build. create -> move -> delete
 // blocked -> delete, the guard on every new URL and on a replayed Server
 // Action, CSRF, notice allow-listing, no-store headers, focus and axe.
@@ -707,9 +707,26 @@ test.describe("products", () => {
   const CATEGORY = `QA ProdCat ${RUN}`;
   // Leads with RUN so the file's afterAll (slug ^qa-<RUN>) removes it.
   const PRODUCT = `QA ${RUN} Lamp`;
+  const EXTRA_CATEGORY = `QA ProdExtra ${RUN}`;
+  const AREA = `QA ProdArea ${RUN}`;
 
   test.beforeAll(async () => {
     const now = new Date();
+    await db.collection("categories").insertOne({
+      name: EXTRA_CATEGORY,
+      slug: `qa-prodextra-${RUN}`,
+      parent: null,
+      order: 97,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection("areas").insertOne({
+      name: AREA,
+      slug: `qa-prodarea-${RUN}`,
+      order: 800,
+      createdAt: now,
+      updatedAt: now,
+    });
     await db.collection("categories").insertOne({
       name: CATEGORY,
       slug: `qa-prodcat-${RUN}`,
@@ -830,15 +847,235 @@ test.describe("products", () => {
       "?status=%7B%22%24ne%22%3A%22x%22%7D&category=%7B%22%24ne%22%3Anull%7D",
       `?category=${new ObjectId().toHexString()}&page=-4`,
       "?page=999999&q=" + "a".repeat(500),
-      "?notice=%3Cimg%20src%3Dx%3E",
     ]) {
       const response = await page.goto(`/admin/products${query}`);
       expect(response?.status(), query).toBe(200);
       await expect(
         page.getByRole("heading", { level: 1, name: "Products" }),
       ).toBeVisible();
-      await expect(page.locator('img[src="x"]')).toHaveCount(0);
     }
+    await page.context().close();
+  });
+
+  test("a crafted ?notice= never becomes markup on the list", async ({
+    browser,
+  }) => {
+    const page = await asAdmin(browser);
+    const payload = '<img id="qa-xss" src="x" onerror="window.__qaXss=1">';
+    const response = await page.goto(
+      `/admin/products?notice=${encodeURIComponent(payload)}`,
+    );
+    expect(response?.status()).toBe(200);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Products" }),
+    ).toBeVisible();
+
+    // The raw HTML: the payload may only appear escaped (flight data JSON).
+    const body = (await response?.text()) ?? "";
+    expect(body).not.toContain('<img id="qa-xss"');
+    expect(body).not.toMatch(/<img[^>]*qa-xss/i);
+    // The live DOM: no injected element, no handler ran, no notice shown.
+    const injected = page.locator("#qa-xss");
+    await expect(injected).toHaveCount(0);
+    await expect(page.locator("[onerror]")).toHaveCount(0);
+    expect(await page.evaluate(() => "__qaXss" in window)).toBe(false);
+    await expect(
+      page.getByRole("status").filter({ hasText: "Product" }),
+    ).toHaveCount(0);
+
+    // Control: the same locator does find such an element once one exists,
+    // so the checks above can fail.
+    await page.evaluate(() => {
+      const img = document.createElement("img");
+      img.id = "qa-xss";
+      document.body.append(img);
+    });
+    await expect(injected).toHaveCount(1);
+    await page.context().close();
+  });
+
+  // T10a: the edit page. Runs after "create a draft", which made PRODUCT.
+  test("edit basics, categories, areas and filters; save twice", async ({
+    browser,
+  }) => {
+    const row = await db.collection("products").findOne({ name: PRODUCT });
+    expect(row).not.toBeNull();
+    const id = String(row?._id);
+    // Fields section (a) doesn't edit must survive every save.
+    await db.collection("products").updateOne(
+      { _id: row?._id },
+      {
+        $set: {
+          variants: [{ modelNo: `QA-${RUN}-1`, label: "Lens" }],
+          specs: { cct: ["3000K"] },
+        },
+      },
+    );
+
+    const page = await asAdmin(browser);
+    await page.goto(`/admin/products/${id}?notice=created`);
+    await expect(
+      page.getByRole("heading", { level: 1, name: `Edit ${PRODUCT}` }),
+    ).toBeVisible();
+    await expect(page.getByText("Draft created.")).toBeVisible();
+
+    await page.getByLabel("Family (optional)").fill("QA Family");
+    await page.getByLabel("Product no. (optional)").fill("76");
+    await page.getByRole("checkbox", { name: EXTRA_CATEGORY }).click();
+    await page.getByRole("checkbox", { name: AREA }).click();
+    await page.getByLabel("CCT (K)", { exact: true }).fill("3000, 4000");
+
+    // Bad text is caught on the client, with focus on the field.
+    await page.getByLabel("CRI", { exact: true }).fill("80, high");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText('"high" is not a number')).toBeVisible();
+    await expect(page.getByLabel("CRI", { exact: true })).toBeFocused();
+    await page.getByLabel("CRI", { exact: true }).fill("90");
+
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.waitForURL(
+      new RegExp(`/admin/products/${id}\\?notice=updated$`),
+    );
+    await expect(page.getByText("Product saved.")).toBeVisible();
+    await expect(page.getByLabel("Family (optional)")).toHaveValue("QA Family");
+
+    // A second save from the same mounted form must also go through.
+    await page.getByLabel("Wattage (W)", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect
+      .poll(
+        async () =>
+          (await db.collection("products").findOne({ _id: row?._id }))?.filters
+            ?.wattage,
+      )
+      .toEqual([12]);
+
+    await page.reload();
+    await expect(page.getByLabel("CCT (K)", { exact: true })).toHaveValue(
+      "3000, 4000",
+    );
+    await expect(page.getByLabel("Wattage (W)", { exact: true })).toHaveValue(
+      "12",
+    );
+    await expect(
+      page.getByRole("checkbox", { name: EXTRA_CATEGORY }),
+    ).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: AREA })).toBeChecked();
+
+    const saved = await db.collection("products").findOne({ _id: row?._id });
+    expect(saved?.family).toBe("QA Family");
+    expect(saved?.productNo).toBe(76);
+    expect(saved?.filters).toEqual({
+      cctK: [3000, 4000],
+      cri: [90],
+      wattage: [12],
+    });
+    expect(saved?.extraCategories).toHaveLength(1);
+    expect(saved?.areas).toHaveLength(1);
+    expect(saved?.variants).toEqual([
+      { modelNo: `QA-${RUN}-1`, label: "Lens" },
+    ]);
+    expect(saved?.specs).toEqual({ cct: ["3000K"] });
+    expect(
+      await db
+        .collection("auditLog")
+        .countDocuments({ action: "product.update", "target.id": id }),
+    ).toBe(2);
+    await page.context().close();
+  });
+
+  test("publish is refused with the missing items listed", async ({
+    browser,
+  }) => {
+    const row = await db.collection("products").findOne({ name: PRODUCT });
+    const page = await asAdmin(browser);
+    await page.goto(`/admin/products/${String(row?._id)}`);
+    await page.getByRole("button", { name: "Publish" }).click();
+    const alert = page
+      .getByRole("alert")
+      .filter({ hasText: "This product can't be published yet" });
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText("Add at least one image");
+    expect(
+      (await db.collection("products").findOne({ _id: row?._id }))?.status,
+    ).toBe("draft");
+    await page.context().close();
+  });
+
+  test("the edit page: 403 for a customer, /login for a visitor, 404 for an unknown id", async ({
+    browser,
+    page,
+  }) => {
+    const row = await db.collection("products").findOne({ name: PRODUCT });
+    const path = `/admin/products/${String(row?._id)}`;
+
+    const context = await browser.newContext({ storageState: customerState });
+    const customer = await context.newPage();
+    expect((await customer.goto(path))?.status()).toBe(403);
+    expect(await customer.content()).not.toContain(PRODUCT);
+    const rsc = await customer.request.get(path, {
+      headers: { RSC: "1" },
+      maxRedirects: 0,
+    });
+    expect(await rsc.text()).not.toContain(PRODUCT);
+    await context.close();
+
+    const visitor = await page.request.get(path, { maxRedirects: 0 });
+    expect([302, 303, 307, 308]).toContain(visitor.status());
+    expect(visitor.headers().location).toMatch(/\/login$/);
+
+    const admin = await asAdmin(browser);
+    for (const missing of [
+      `/admin/products/${new ObjectId().toHexString()}`,
+      "/admin/products/not-an-id",
+    ]) {
+      const response = await admin.goto(missing);
+      expect(response?.status(), missing).toBe(404);
+      await expect(
+        admin.getByRole("heading", { level: 1, name: "Product not found" }),
+      ).toBeVisible();
+      await expect(admin.getByLabel("Name")).toHaveCount(0);
+    }
+    await admin.context().close();
+  });
+
+  test("axe WCAG 2.2 AA: the edit page and its delete dialog", async ({
+    browser,
+  }) => {
+    const row = await db.collection("products").findOne({ name: PRODUCT });
+    const page = await asAdmin(browser);
+    const response = await page.goto(`/admin/products/${String(row?._id)}`);
+    expect(response?.headers()["cache-control"] ?? "").toContain("no-store");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    expect(await axeViolations(page)).toEqual([]);
+    await page.getByRole("button", { name: "Delete product" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    expect(await axeViolations(page)).toEqual([]);
+    await page.context().close();
+  });
+
+  test("delete asks first, then opens the list with a notice", async ({
+    browser,
+  }) => {
+    const row = await db.collection("products").findOne({ name: PRODUCT });
+    const page = await asAdmin(browser);
+    await page.goto(`/admin/products/${String(row?._id)}`);
+    await page.getByRole("button", { name: "Delete product" }).click();
+    const dialog = page.getByRole("alertdialog", {
+      name: `Delete ${PRODUCT}?`,
+    });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(
+      await db.collection("products").countDocuments({ _id: row?._id }),
+    ).toBe(1);
+
+    await page.getByRole("button", { name: "Delete product" }).click();
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.waitForURL(/\/admin\/products\?notice=deleted$/);
+    await expect(page.getByText("Product deleted.")).toBeVisible();
+    expect(
+      await db.collection("products").countDocuments({ _id: row?._id }),
+    ).toBe(0);
     await page.context().close();
   });
 

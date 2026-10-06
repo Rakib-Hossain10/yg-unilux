@@ -56,6 +56,33 @@ export const MAGNETIC_TRACK_SLUG = "magnetic-track";
 const NOT_FOUND = "This product no longer exists. Reload the page.";
 const MODEL_NO_TAKEN = "This model no. already belongs to another product";
 const SLUG_TAKEN = "Another product already uses this slug.";
+/** A save or status change from a page loaded before the latest write. */
+export const PRODUCT_CHANGED =
+  "This product changed since you opened it. Reload to see the latest version.";
+
+/*
+ * Optimistic concurrency (T10a). The edit page sends the `updatedAt` it was
+ * loaded with; a write only lands while the stored value still matches, so a
+ * stale tab can't overwrite newer data. Given but malformed = refused.
+ */
+const expectedUpdatedAtSchema = z.iso
+  .datetime({ offset: true })
+  .transform((iso) => new Date(iso));
+
+export interface ProductWriteOptions {
+  /** The ISO `updatedAt` the form was loaded with. Absent = no check. */
+  expectedUpdatedAt?: unknown;
+}
+
+/*
+ * The parsed expected `updatedAt`, null when no check was asked for, or
+ * "bad" when the key is present but not an ISO date-time.
+ */
+function expectedVersion(options: ProductWriteOptions): Date | null | "bad" {
+  if (!("expectedUpdatedAt" in options)) return null;
+  const parsed = expectedUpdatedAtSchema.safeParse(options.expectedUpdatedAt);
+  return parsed.success ? parsed.data : "bad";
+}
 
 /*
  * Tags. A draft is invisible to the public, so only the product list tags are
@@ -607,29 +634,31 @@ const OPTIONAL_FIELDS = [
   "description",
   "trackSize",
 ] as const;
-const REQUIRED_FIELDS = [
-  "name",
-  "extraSpecs",
-  "publicFiles",
-  "status",
-] as const;
+// `status` is not here: only publishProduct/unpublishProduct change it.
+const REQUIRED_FIELDS = ["name", "extraSpecs", "publicFiles"] as const;
 const OBJECT_FIELDS = ["specs", "filters"] as const;
 
 /**
  * Saves the edit form. An empty slug keeps the current one. Images are never
- * touched. `status: "published"` needs publishCheck() to pass on what will be
- * stored. When nothing changed, nothing is written, audited or revalidated.
+ * touched, and neither is `status` (T10a): it is accepted by the schema but
+ * ignored, so a save from a stale tab can't re-publish or unpublish; use
+ * publishProduct/unpublishProduct. With `expectedUpdatedAt`, a product
+ * written since the form loaded is refused with PRODUCT_CHANGED. When nothing
+ * changed, nothing is written, audited or revalidated.
  */
 export async function updateProduct(
   actorId: string,
   id: unknown,
   input: unknown,
+  options: ProductWriteOptions = {},
 ): Promise<ServiceResult<{ id: string }>> {
   assertActorId(actorId);
   await connectDb();
 
   const parsedId = productIdSchema.safeParse(id);
   if (!parsedId.success) return formError(NOT_FOUND);
+  const expected = expectedVersion(options);
+  if (expected === "bad") return formError(PRODUCT_CHANGED);
   const parsed = productInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const values = parsed.data;
@@ -637,6 +666,9 @@ export async function updateProduct(
 
   const doc = await ProductModel.findById(selfId).lean<Product | null>();
   if (!doc) return formError(NOT_FOUND);
+  if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
+    return formError(PRODUCT_CHANGED);
+  }
   const stored = toInput(doc);
 
   const errors = {
@@ -649,7 +681,11 @@ export async function updateProduct(
   }
   if (Object.keys(errors).length > 0) return fieldErrors(errors);
 
-  if (values.status === "published") {
+  /*
+   * A published product must stay publishable: a save that would break
+   * publishCheck (e.g. removing the last variant) is refused.
+   */
+  if (doc.status === "published") {
     const problems = publishCheck({
       mainCategory: values.mainCategory,
       variants: values.variants,
@@ -712,15 +748,19 @@ export async function updateProduct(
 
   try {
     const result = await ProductModel.updateOne(
-      { _id: selfId },
+      // With a version, only while nobody wrote since the read above.
+      expected ? { _id: selfId, updatedAt: expected } : { _id: selfId },
       {
         ...(Object.keys(set).length > 0 ? { $set: set } : {}),
         ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
       },
       { runValidators: true },
     );
-    // Deleted between the read and the write.
-    if (result.matchedCount === 0) return formError(NOT_FOUND);
+    if (result.matchedCount === 0) {
+      // Deleted, or (with a version) written by someone else meanwhile.
+      const exists = await ProductModel.exists({ _id: selfId });
+      return formError(exists ? PRODUCT_CHANGED : NOT_FOUND);
+    }
   } catch (error) {
     if (isDuplicateKeyError(error)) {
       return duplicateKeyResult(error, values.variants);
@@ -728,25 +768,15 @@ export async function updateProduct(
     throw error;
   }
 
-  // A status-only change is recorded as publish/unpublish, not a generic edit.
-  const statusOnly = fields.length === 1 && fields[0] === "status";
-  const action = statusOnly
-    ? values.status === "published"
-      ? "product.publish"
-      : "product.unpublish"
-    : "product.update";
-  const touchedPublic =
-    doc.status === "published" || values.status === "published";
-
   return auditAndFinish(
     {
       actorId,
-      action,
+      action: "product.update",
       target: { type: "product", id: parsedId.data },
       meta: { fields, variantCount: values.variants.length },
     },
     { id: parsedId.data },
-    tagsFor(parsedId.data, touchedPublic),
+    tagsFor(parsedId.data, doc.status === "published"),
   );
 }
 
@@ -755,12 +785,15 @@ async function setStatus(
   actorId: string,
   id: unknown,
   status: ProductStatus,
+  options: ProductWriteOptions,
 ): Promise<ServiceResult<{ id: string }>> {
   assertActorId(actorId);
   await connectDb();
 
   const parsedId = productIdSchema.safeParse(id);
   if (!parsedId.success) return formError(NOT_FOUND);
+  const expected = expectedVersion(options);
+  if (expected === "bad") return formError(PRODUCT_CHANGED);
   const selfId = new ObjectId(parsedId.data);
 
   const doc = await ProductModel.findById(selfId, {
@@ -768,11 +801,15 @@ async function setStatus(
     mainCategory: 1,
     "variants.modelNo": 1,
     images: 1,
+    updatedAt: 1,
   }).lean<Pick<
     Product,
-    "status" | "mainCategory" | "variants" | "images"
+    "status" | "mainCategory" | "variants" | "images" | "updatedAt"
   > | null>();
   if (!doc) return formError(NOT_FOUND);
+  if (expected && doc.updatedAt.getTime() !== expected.getTime()) {
+    return formError(PRODUCT_CHANGED);
+  }
   if (doc.status === status) return unchanged({ id: parsedId.data });
 
   if (status === "published") {
@@ -785,10 +822,13 @@ async function setStatus(
   }
 
   const result = await ProductModel.updateOne(
-    { _id: selfId },
+    expected ? { _id: selfId, updatedAt: expected } : { _id: selfId },
     { $set: { status } },
   );
-  if (result.matchedCount === 0) return formError(NOT_FOUND);
+  if (result.matchedCount === 0) {
+    const exists = await ProductModel.exists({ _id: selfId });
+    return formError(exists ? PRODUCT_CHANGED : NOT_FOUND);
+  }
 
   return auditAndFinish(
     {
@@ -805,16 +845,18 @@ async function setStatus(
 export function publishProduct(
   actorId: string,
   id: unknown,
+  options: ProductWriteOptions = {},
 ): Promise<ServiceResult<{ id: string }>> {
-  return setStatus(actorId, id, "published");
+  return setStatus(actorId, id, "published", options);
 }
 
 /** Takes a product back to draft. */
 export function unpublishProduct(
   actorId: string,
   id: unknown,
+  options: ProductWriteOptions = {},
 ): Promise<ServiceResult<{ id: string }>> {
-  return setStatus(actorId, id, "draft");
+  return setStatus(actorId, id, "draft", options);
 }
 
 /**

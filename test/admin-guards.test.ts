@@ -216,7 +216,7 @@ describe("admin pages and layouts call requireAdmin() first", () => {
 
   it("finds the admin layout and dashboard page", () => {
     expect(files).toContain("src/app/admin/layout.tsx");
-    expect(files).toContain("src/app/admin/page.tsx");
+    expect(files).toContain("src/app/admin/(dashboard)/page.tsx");
   });
 
   it("has no admin route file that this suite does not check", () => {

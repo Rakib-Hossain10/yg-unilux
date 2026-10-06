@@ -1,5 +1,6 @@
 // Loading state for the products list: skeletons in the shape of the heading,
-// the filter row and the table. The new page has its own form-shaped one.
+// the filter row and the table. In the (list) route group so it doesn't wrap
+// [id]: the edit page's not-found then answers a real 404 (gate A, L-1).
 // Renders no data, so no guard: the layout and the page check the admin.
 
 import { Skeleton } from "@/components/ui/skeleton";

@@ -58,3 +58,4 @@ Template:
 | [0040](0040-product-schema.md) | Product form schema: pure/client-safe, strict, 28 spec keys, https-only files, `publishCheck` on stored facts enforced by the T8 service | Accepted |
 | [0041](0041-product-service.md) | Product service: trackSize only under Magnetic Track, publish gate on stored facts, modelNo duplicates as field errors, URL-tolerant list, tag policy | Accepted |
 | [0042](0042-products-list-ui.md) | Products list UI: GET filters, draft redirect to edit page, shared `useSerialAction` move guard, notice cleared after settle | Accepted |
+| [0043](0043-product-edit-form.md) | Product edit form: status only via publish/unpublish, optimistic concurrency on `updatedAt`, published stays publishable, round-trip of unedited fields, route groups for a real 404 | Accepted |
