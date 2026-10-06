@@ -1,9 +1,66 @@
-/* Design tokens for the public site (CLAUDE.md "Design", ADR 0028): black,
-   white and warm greys taken from the logo; photography carries the colour.
-   Exposed to Tailwind 4 through @theme, so classes such as bg-paper,
-   text-ink, text-grey-600, font-display and font-sans use them. */
+/* Design tokens (CLAUDE.md "Design", ADR 0028): black, white and warm greys
+   taken from the logo; photography carries the colour. Exposed to Tailwind 4
+   through @theme, so classes such as bg-paper, text-ink, text-grey-600,
+   font-display and font-sans use them.
+   The shadcn variables for the admin panel (--background, --primary, ...) are
+   defined at the bottom and only point at these tokens (ADR 0034). */
 
 @import "tailwindcss";
+
+/* State variants the shadcn components use (data-open, data-checked, ...).
+   Copied from the shadcn package so we do not ship the package itself.
+   No dark variant and no animation package: the admin UI is light and plain. */
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-selected {
+  &:where([data-selected="true"]) {
+    @slot;
+  }
+}
+@custom-variant data-disabled {
+  &:where([data-disabled="true"]),
+  &:where([data-disabled]:not([data-disabled="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-active {
+  &:where([data-state="active"]),
+  &:where([data-active]:not([data-active="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
 
 @theme {
   /* Core palette */
@@ -22,9 +79,16 @@
   --color-grey-800: #2b2824;
   --color-grey-900: #1a1816;
 
+  /* Error red for destructive actions and invalid fields in the admin panel.
+     The greys have no red, so one extra token: 6.6:1 on paper and 5.8:1 on
+     grey-100 (checked in design-shell.qa.test.ts). Never used on ink. */
+  --color-danger: #b42318;
+
   /* Typefaces, from next/font CSS variables set on <html> (src/app/fonts.ts) */
   --font-display: var(--font-cormorant), "Times New Roman", serif;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* shadcn headings use the body face: the admin panel is plain, no serif. */
+  --font-heading: var(--font-sans);
 
   /* Motion: one calm easing and two durations for the whole site */
   --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
@@ -59,6 +123,14 @@
     background-color: var(--color-ink);
     color: var(--color-paper);
   }
+
+  /* shadcn components write a bare `border`; Tailwind 4 would colour it
+     currentColor, so give every border the theme colour by default. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
 }
 
 /* Respect the visitor's motion setting site-wide (CLAUDE.md "Design"):
@@ -72,4 +144,58 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Tailwind colour and radius names for the shadcn variables below, so
+   classes such as bg-primary, text-muted-foreground and rounded-lg work. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* shadcn variables -> our tokens (ADR 0034). Light only, no .dark block. */
+:root {
+  --background: var(--color-paper);
+  --foreground: var(--color-ink);
+  --card: var(--color-paper);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-paper);
+  --popover-foreground: var(--color-ink);
+  --primary: var(--color-ink);
+  --primary-foreground: var(--color-paper);
+  --secondary: var(--color-grey-100);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-grey-100);
+  --muted-foreground: var(--color-grey-600);
+  --accent: var(--color-grey-100);
+  --accent-foreground: var(--color-ink);
+  --destructive: var(--color-danger);
+  --border: var(--color-grey-200);
+  /* Field outlines need 3:1 against paper (WCAG 1.4.11): grey-500 is 4.5:1. */
+  --input: var(--color-grey-500);
+  --ring: var(--color-ink);
+  --radius: 0.5rem;
 }

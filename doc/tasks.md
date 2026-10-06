@@ -6,8 +6,16 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 ## ▶ Resume here (next session)
 - **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, `5fff0bb`, 2026-10-06).
 - **Phase 2 is PLANNED and APPROVED. Read `doc/phase-2-plan.md` first** — it holds the architecture, 18 ordered tasks (T1–T18, one commit each), owners, models, tests, QA gates A–E, risks and ADR list. The user's decisions are in it: direct browser uploads with server-side verification (amends ADR 0009), and the ADR 0019 product defaults.
-- **Next: T1 — shadcn init and token mapping** (`admin-panel-builder`, Sonnet). Create `.claude/reviews/.disabled` first and **remove it when T1 is done**. Do not start before reading the plan's "Architecture" section.
-- **Model guidance:** Opus 5.5 for T2, T4, T6a, T7, T8, T11a, T12, T14, T17 and every `qa-security-reviewer` run; Sonnet 5.5 for the UI tasks. Switch with `/model`.
+- **T1 done** (shadcn + token mapping, ADR 0034). The review hook is back on.
+- **Next: T2: shared building blocks** (`backend-architect`, Opus):
+  - `src/lib/{revalidate,audit,slug,constants}.ts`;
+  - the `products.datasheetId` index in `src/models/product.ts` and `db-indexes`;
+  - tests: revalidate (mock `next/cache`), audit (memory DB: oversize meta and unknown action rejected), slug, db-indexes;
+  - draft ADR 0035 "Admin write path".
+
+  Read the plan's "Architecture" section first.
+- **Model guidance (user rule, 2026-10-06; overrides the plan's model column):** every subagent runs on **Opus**. UI work always goes to the frontend subagents (`admin-panel-builder`, `site-frontend`, `motion-engineer`) with `model: "opus"`. Never build UI in the main session.
+- **shadcn adds:** every later `npx shadcn add` gets the ADR 0034 strip pass (header line, no animation, no `dark:`, tokens instead of raw colours). `design-shell.qa.test.ts` enforces it. Admin forms will probably need `field`, `alert`, `pagination` and `empty`.
 - **GitHub:** use `gh` (push, PR, CI, merge); always ask the user before merging into `main`.
 - **Before T11/T12 the user must apply the R2 CORS rule** (exact JSON in the plan, "Things the user must do"). Remind them when T11a starts.
 - **Verified 2026-10-06:** `npm run check:services` passes for MongoDB (non-SRV `mongodb://` string in `.env.local`, database `yg_unilux_db`), Cloudinary (upload + delete + Admin API) and R2 (write + delete). The `mongodb+srv://` form fails on the user's machine because a VPN DNS proxy (`127.0.0.1`) drops SRV lookups, so keep the non-SRV string.
@@ -36,7 +44,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — planning (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1 done, next T2 (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -114,7 +122,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Phase 1 wrap-up: task-12 Lows (ADR 0030), task-5 L1 (ADR 0031), "Keep me signed in" (ADR 0032), task-5 L2 (ADR 0033); CI green; PR #9 merged to `main` 2026-10-06
 
 ## Phase 2 — Admin core — plan: `doc/phase-2-plan.md` (T1–T18)
-- [ ] shadcn init; admin layout with `requireAdmin()` everywhere
+- [x] T1: shadcn init (radix-nova, 16 ui components), tokens mapped, animation and dark mode stripped, contrast pairs tested — ADR 0034
+- [ ] Admin layout with `requireAdmin()` everywhere
 - [ ] Dashboard counts
 - [ ] Categories tree editor
 - [ ] Areas module
@@ -194,6 +203,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-06 — T1 committed (shadcn + token mapping, ADR 0034). The user ruled that UI work always goes to the frontend subagents on Opus. A Sonnet run was stopped and an Opus run reviewed its draft, fixing 11 issues: a dead QA regex, a nearly invisible destructive focus ring, leftover motion, needless `"use client"`, raw black overlays, CRLF. 819 tests and the build are green. Next: T2.
 - 2026-10-06 — Phase 2 planned in plan mode and approved (`doc/phase-2-plan.md`, T1–T18, QA gates A–E). Services verified with `npm run check:services` (committed). User decisions: direct uploads with server verification; ADR 0019 defaults. Next: T1 (shadcn init) in a fresh session.
 - 2026-10-06 — CI green and PR #9 merged to `main` (`5fff0bb`) with the user's approval. Phase 1 is done. `phase-2` branched off. Next: plan Phase 2 in plan mode.
 - 2026-10-06 — The next CI run failed differently: on a cold binary cache, parallel Vitest workers raced on mongodb-memory-server's download lockfile. Fixed with a Vitest `globalSetup` (`test/global-setup.ts`) that downloads the binary once before the workers start. GitHub is now handled through `gh` (PR #9 "Phase 1"). Ask the user before merging to `main`.
