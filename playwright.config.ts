@@ -17,7 +17,22 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      testIgnore: /admin-settings-gate-d/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Changes site-wide settings and clears filter numbers on EVERY product
+      // in the shared test database, so it must not overlap the other specs
+      // (they run on parallel workers locally). It starts after them.
+      name: "settings-gate-d",
+      testMatch: /admin-settings-gate-d/,
+      dependencies: ["chromium"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+  ],
   webServer: {
     // Production build, so tests see what Vercel serves (not the dev overlay),
     // started by e2e/test-server.ts against a seeded in-memory MongoDB.
