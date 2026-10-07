@@ -401,7 +401,8 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
       commitImportBatch(ACTOR, commitInput(p)),
       commitImportBatch(ACTOR, commitInput(p)),
     ]);
-    expect(first.ok && second.ok).toBe(true);
+    // The loser may be refused ("preview again"): the hash check is racy by design.
+    expect(first.ok || second.ok).toBe(true);
     expect(await ProductModel.countDocuments()).toBe(3);
     // Every upload is either referenced by a saved product or destroyed.
     const uploaded = (

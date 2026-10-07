@@ -18,3 +18,4 @@ ADR 0057 planned one `planHash` re-checked at commit. That cannot work with seve
 ## Consequences
 - Each batch re-parses the whole workbook; T9 must check `maxDuration`.
 - Test fixture quirk: exceljs writes the 5th anchor with the wrong `r:embed` when `fillTemplate` uses pictures 3 and 4; our reader is right.
+- Gate B fixes: the plan refuses files with more than `MAX_IMPORT_PLAN_ENTRIES` products (`too_many_products`), so a preview is always committable. The template's note boxes are enlarged by rewriting the VML after exceljs writes the file (exceljs has no setting for it).
