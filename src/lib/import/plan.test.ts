@@ -28,7 +28,7 @@ import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 import { DEFAULT_CATEGORY_GONE, previewImport, type ImportPreview } from ".";
 import { filtersFromSpecs } from "./numbers";
-import { planHash } from "./plan";
+import { planHash, planProducts } from "./plan";
 import type { ImportProduct, PlanEntry, PlanTarget } from "./types";
 
 vi.mock("@/lib/storage", () => ({
@@ -595,6 +595,61 @@ describe("previewImport: blocked", () => {
     }
     expect(entryOf(data, 78).status).toBe("create");
     expect(data.plan.summary).toMatchObject({ create: 1, blocked: 2 });
+  });
+});
+
+describe("plan guards", () => {
+  it("blocks a merged record that fails the product schema (invalid_record)", async () => {
+    useFile(fixtureBytes); // no Category column: saved extras are kept
+    const entry = entryOf(await preview(), 76);
+    await saveAsCommitWould(entry, {
+      // one more than MAX_EXTRA_CATEGORIES (20)
+      extraCategories: Array.from({ length: 21 }, () => new ObjectId()),
+    });
+    const again = entryOf(await preview(), 76);
+    expect(again.status).toBe("blocked");
+    expect(again.target).toBeNull();
+    expect(again.warnings.map((w) => w.code)).toContain("invalid_record");
+  });
+
+  it("blocks a product no slug can be made for (no_slug)", async () => {
+    const product = {
+      ...fakeProduct({
+        sheet: "S",
+        rows: [2],
+        productNo: 1,
+        family: null,
+        name: "°°°",
+      } as PlanEntry),
+      baseModelCode: "°°°",
+      slug: "",
+    };
+    product.variants[0]!.modelNo = "°°°";
+    product.variants[0]!.modelNoKey = "°°°";
+    const plan = await planProducts([product], [], {
+      categories: [],
+      areas: [],
+      defaultCategoryId: defaultCategory,
+    });
+    expect(plan.entries[0]?.status).toBe("blocked");
+    expect(plan.entries[0]?.warnings.map((w) => w.code)).toEqual(["no_slug"]);
+  });
+
+  it("adds no picture beyond the 30-image cap and says so", async () => {
+    const entry = entryOf(await preview(), 76);
+    const id = new ObjectId();
+    await saveAsCommitWould(entry, {
+      _id: id,
+      images: Array.from({ length: 30 }, (_, n) => ({
+        publicId: testPublicId(n, id.toHexString()),
+        order: n,
+        kind: "gallery",
+      })),
+    });
+    const again = entryOf(await preview(), 76);
+    expect(again.imagesToAdd).toEqual([]);
+    expect(again.status).toBe("unchanged");
+    expect(again.warnings.map((w) => w.code)).toContain("value_truncated");
   });
 });
 
