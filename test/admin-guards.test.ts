@@ -455,6 +455,33 @@ function actionProblems(source: string): string[] {
   if (declared !== actions.length) {
     problems.push("has an action this check cannot parse (write `name(`)");
   }
+  /*
+   * Every action must revalidate and write through a service. Audit entries
+   * are written inside the services (ADR 0035): an action that calls none of
+   * the names imported from "@/lib/admin/*" cannot have audited its write.
+   * `revalidators` is the shared helper plus any local helper that calls it
+   * (e.g. a writeResult() tail).
+   */
+  const revalidators = new Set(["revalidateCatalogInAction"]);
+  for (const helper of code.matchAll(
+    /(?:^|\n)(?:async\s+)?function\s+(\w+)\s*\(/g,
+  )) {
+    const at = (helper.index ?? 0) + helper[0].length - 1;
+    if (
+      /\brevalidateCatalogInAction\s*\(/.test(bodyAfterParams(code, at) ?? "")
+    ) {
+      revalidators.add(helper[1] ?? "");
+    }
+  }
+  const services = new Set<string>();
+  for (const imp of withStrings.matchAll(
+    /import\s*\{([^}]*)\}\s*from\s*["']@\/lib\/admin\/(?!write-result)[\w-]+["']/g,
+  )) {
+    for (const name of (imp[1] ?? "").split(",")) {
+      const clean = name.trim();
+      if (clean !== "" && !/^type\s/.test(clean)) services.add(clean);
+    }
+  }
   for (const match of actions) {
     const parts = paramsAndBody(code, match.index + match[0].length - 1);
     // A default value runs when the action is called, before the guard.
@@ -466,8 +493,26 @@ function actionProblems(source: string): string[] {
         `${match[1]} does not start with \`await requireAdmin();\``,
       );
     }
+    if (parts?.body) {
+      const body = parts.body;
+      if (!callsAny(body, revalidators)) {
+        problems.push(
+          `${match[1]} does not revalidate (revalidateCatalogInAction)`,
+        );
+      }
+      if (!callsAny(body, services)) {
+        problems.push(
+          `${match[1]} calls no admin service (the audit entry is written there)`,
+        );
+      }
+    }
   }
   return problems;
+}
+
+/** True when the body calls one of the names, e.g. `name(`. */
+function callsAny(body: string, names: Set<string>): boolean {
+  return [...names].some((name) => new RegExp(`\\b${name}\\s*\\(`).test(body));
 }
 
 describe("admin Server Actions call requireAdmin() first", () => {
@@ -487,6 +532,10 @@ describe("admin Server Actions call requireAdmin() first", () => {
 
   it("finds the datasheets actions", () => {
     expect(files).toContain("src/app/admin/datasheets/actions.ts");
+  });
+
+  it("finds the settings actions", () => {
+    expect(files).toContain("src/app/admin/settings/actions.ts");
   });
 
   it.each(files)("%s", (file) => {
@@ -527,17 +576,21 @@ describe("the Server Action check itself", () => {
 // header
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
+import { revalidateCatalogInAction } from "@/lib/revalidate";
+import { save, move } from "@/lib/admin/things";
 export type Result = { ok: boolean };
 function helper(x: unknown) { return x; }
+function tail(result: unknown) { revalidateCatalogInAction([]); return result; }
 export async function saveAction(id: unknown, values: unknown): Promise<Result> {
   const viewer = await requireAdmin();
   const result = await save(viewer.user.id, { id, values });
+  revalidateCatalogInAction(result.tags);
   if (!result.ok) return helper(result);
   redirect("/admin");
 }
 export async function moveAction(id: unknown) {
   await requireAdmin();
-  return { ok: true };
+  return tail(await move(id));
 }`;
 
   it("accepts actions that each start with the guard", () => {
@@ -547,10 +600,35 @@ export async function moveAction(id: unknown) {
   it("accepts a function-typed parameter (=> is not a default value)", () => {
     const source = `"use server";
 import { requireAdmin } from "@/lib/permissions";
+import { revalidateCatalogInAction } from "@/lib/revalidate";
+import { save } from "@/lib/admin/things";
 export async function a(pick: (id: string) => boolean) {
   await requireAdmin();
+  revalidateCatalogInAction((await save()).tags);
 }`;
     expect(actionProblems(source)).toEqual([]);
+  });
+
+  it("rejects an action that does not revalidate", () => {
+    const source = `"use server";
+import { requireAdmin } from "@/lib/permissions";
+import { save } from "@/lib/admin/things";
+export async function a() {
+  await requireAdmin();
+  await save();
+}`;
+    expect(actionProblems(source).join()).toMatch(/does not revalidate/);
+  });
+
+  it("rejects an action that calls no admin service", () => {
+    const source = `"use server";
+import { requireAdmin } from "@/lib/permissions";
+import { revalidateCatalogInAction } from "@/lib/revalidate";
+export async function a() {
+  await requireAdmin();
+  revalidateCatalogInAction([]);
+}`;
+    expect(actionProblems(source).join()).toMatch(/calls no admin service/);
   });
 
   it.each([
@@ -568,8 +646,8 @@ export async function a() { await requireAdmin(); }`,
     [
       "one action without the guard",
       ok.replace(
-        "  await requireAdmin();\n  return { ok: true };",
-        "  return { ok: true };",
+        "  await requireAdmin();\n  return tail(await move(id));",
+        "  return tail(await move(id));",
       ),
     ],
     [
@@ -646,6 +724,7 @@ export async function a(id = purgeDrafts()) {
 import { requireAdmin } from "@/lib/permissions";`,
     ],
   ])("rejects: %s", (_name, source) => {
+    expect(source).not.toBe(ok);
     expect(actionProblems(source)).not.toEqual([]);
   });
 });

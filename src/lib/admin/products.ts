@@ -43,6 +43,7 @@ import {
   type ServiceErrors,
   type ServiceResult,
 } from "./write-result";
+import { FILTER_KEY_BY_SPEC, getColumnVisibility } from "./settings";
 
 const { ObjectId } = mongoose.Types;
 
@@ -633,6 +634,27 @@ function storedVariants(variants: ProductInput["variants"]) {
   }));
 }
 
+/**
+ * The product's filter numbers minus those of every column the admin has
+ * made restricted (read fresh from the setting; fails closed).
+ */
+export async function withoutRestrictedFilters<T extends object>(
+  filters: T,
+): Promise<T> {
+  const visibility = await getColumnVisibility();
+  const dropped = new Set<string>(
+    SPEC_KEYS.flatMap((key) => {
+      const filter = FILTER_KEY_BY_SPEC[key];
+      return visibility[key] === "restricted" && filter !== undefined
+        ? [filter]
+        : [];
+    }),
+  );
+  return Object.fromEntries(
+    Object.entries(filters).filter(([name]) => !dropped.has(name)),
+  ) as T;
+}
+
 /* Form fields written as-is when they change; optional ones are unset when null. */
 const OPTIONAL_FIELDS = [
   "modelCode",
@@ -669,7 +691,12 @@ export async function updateProduct(
   if (expected === "bad") return formError(PRODUCT_CHANGED);
   const parsed = productInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
-  const values = parsed.data;
+  // Filters of a restricted column are dropped, so a save never brings back
+  // numbers the column-visibility cleanup removed (ADR 0049, rule 9).
+  const values = {
+    ...parsed.data,
+    filters: await withoutRestrictedFilters(parsed.data.filters),
+  };
   const selfId = new ObjectId(parsedId.data);
 
   const doc = await ProductModel.findById(selfId).lean<Product | null>();

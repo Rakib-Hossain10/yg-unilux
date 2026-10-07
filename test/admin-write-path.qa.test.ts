@@ -62,6 +62,7 @@ describe("Server Actions exist only in admin actions.ts files", () => {
       "src/app/admin/categories/actions.ts",
       "src/app/admin/datasheets/actions.ts",
       "src/app/admin/products/actions.ts",
+      "src/app/admin/settings/actions.ts",
     ]);
   });
 });

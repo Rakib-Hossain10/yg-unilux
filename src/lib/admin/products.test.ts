@@ -10,7 +10,12 @@ import {
   CategoryModel,
   DatasheetModel,
   ProductModel,
+  SiteContentModel,
 } from "@/models";
+import {
+  DEFAULT_COLUMN_VISIBILITY,
+  SETTINGS_KEYS,
+} from "@/lib/schemas/settings";
 import { AuditLogModel } from "@/models/audit-log";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
@@ -55,6 +60,7 @@ beforeEach(async () => {
     AreaModel.deleteMany({}),
     DatasheetModel.deleteMany({}),
     AuditLogModel.deleteMany({}),
+    SiteContentModel.deleteMany({}),
   ]);
   const [s, t] = await CategoryModel.create([
     { name: "Spot Lights", slug: "spot-lights", parent: null, order: 0 },
@@ -286,6 +292,37 @@ describe("updateProduct", () => {
     expect(entry).toMatchObject({ action: "product.update" });
     expect(JSON.stringify(entry?.meta)).toContain("areas");
     expect(JSON.stringify(entry?.meta)).not.toContain("AR-013A1");
+  });
+
+  it("drops the filters of a restricted column on save, keeps the others", async () => {
+    const id = await draft();
+    // Default: every filtered column is public.
+    await updateProduct(
+      ADMIN,
+      id,
+      form({ filters: { cctK: [3000], cri: [90], wattage: [10] } }),
+    );
+    expect((await ProductModel.findById(id).lean())?.filters).toMatchObject({
+      cctK: [3000],
+      cri: [90],
+      wattage: [10],
+    });
+
+    await SiteContentModel.create({
+      key: SETTINGS_KEYS.columnVisibility,
+      value: { ...DEFAULT_COLUMN_VISIBILITY, cct: "restricted" },
+    });
+    expectOk(
+      await updateProduct(
+        ADMIN,
+        id,
+        form({ filters: { cctK: [3000, 4000], cri: [90], wattage: [10] } }),
+      ),
+    );
+    const filters = (await ProductModel.findById(id).lean())?.filters;
+    expect(filters).toMatchObject({ cri: [90], wattage: [10] });
+    expect(filters).not.toHaveProperty("cctK");
+    await SiteContentModel.deleteMany({});
   });
 
   it("is a no-op when nothing changed: no write, audit or tags", async () => {
