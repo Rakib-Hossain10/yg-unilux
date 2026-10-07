@@ -177,10 +177,11 @@ export interface SavedDatasheet {
  * replaces the file of an existing one (mode "replace", same `storageKey`,
  * so products and the later download route keep working).
  *
- * Order: validate the key -> HEAD (exists, size) -> read at most 10 MB ->
- * checkXlsx (zip magic, workbook parts, entry cap) -> copy to
- * `datasheets/<uuid>.xlsx` (or onto the existing key) -> write the document
- * -> audit. The `incoming/` object is deleted on EVERY path, success,
+ * Order: validate the key -> HEAD (exists, size, ETag) -> read at most 10 MB
+ * if the ETag still matches -> checkXlsx (zip magic, workbook parts, entry
+ * cap) -> copy to `datasheets/<uuid>.xlsx` (or onto the existing key) only if
+ * the source still has that ETag -> write the document -> audit. An object
+ * replaced in between fails the condition: generic error, nothing stored. The `incoming/` object is deleted on EVERY path, success,
  * rejection or thrown error (`finally`). A brand-new copy whose document
  * write failed is deleted too, so it does not become an orphan.
  */
@@ -218,10 +219,19 @@ export async function finalizeDatasheet(
     const head = await storage.headObject(incomingKey);
     if (head === null) return formError(UPLOAD_NOT_FOUND);
     if (head.size > MAX_DATASHEET_BYTES) return formError(SIZE_MISMATCH);
+    // The presigned PUT stays usable for 5 minutes, so the incoming object
+    // can be replaced while we work (gate E L-1). Pin one version by its
+    // ETag: the read and the copy both carry it as a condition, so the copy
+    // is exactly the bytes checkXlsx accepted, or it fails with
+    // StorageConditionError (generic error below, nothing written). Without
+    // an ETag the version cannot be pinned, so refuse.
+    const etag = head.etag;
+    if (!etag) return formError(UPLOAD_FAILED);
 
     const bytes = await storage.getObjectBytes(
       incomingKey,
       MAX_DATASHEET_BYTES,
+      { ifMatch: etag },
     );
     if (bytes === null) return formError(UPLOAD_NOT_FOUND);
     const check = await checkXlsx(bytes);
@@ -230,7 +240,7 @@ export async function finalizeDatasheet(
     const size = bytes.length;
     const storageKey =
       existing?.storageKey ?? `datasheets/${randomUUID()}.xlsx`;
-    await storage.copyObject(incomingKey, storageKey);
+    await storage.copyObject(incomingKey, storageKey, { ifMatch: etag });
 
     if (existing) {
       const result = await DatasheetModel.updateOne(

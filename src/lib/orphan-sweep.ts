@@ -172,15 +172,128 @@ export async function applySelection(
   return result;
 }
 
-/** `--apply` turns deletion on; any other argument is an error. */
+export interface SweepArgs {
+  /** Delete for real. Without it the run is a dry run. */
+  apply: boolean;
+  /**
+   * Explicit ceiling the operator accepts for this run (`--max-delete N`). It
+   * overrides the mass-delete guard, but a selection larger than N is still
+   * refused.
+   */
+  maxDelete?: number;
+}
+
+const ARGS_HELP = "Only --apply and --max-delete <N> are accepted.";
+
+/**
+ * `--apply` turns deletion on; `--max-delete N` (N a positive integer, as the
+ * next argument) overrides the mass-delete guard up to N deletions. Any other
+ * argument, a repeated `--max-delete` or a malformed N is an error.
+ */
 export function parseSweepArgs(
   argv: readonly string[],
-): { apply: boolean } | { error: string } {
-  let apply = false;
-  for (const arg of argv) {
-    if (arg === "--apply") apply = true;
-    else
-      return { error: `Unknown argument "${arg}". Only --apply is accepted.` };
+): SweepArgs | { error: string } {
+  const args: SweepArgs = { apply: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--apply") {
+      args.apply = true;
+    } else if (arg === "--max-delete") {
+      if (args.maxDelete !== undefined) {
+        return { error: "--max-delete was given twice." };
+      }
+      const value = argv[i + 1];
+      // Digits only, no sign, no leading zero, no exponent or decimals.
+      if (value === undefined || !/^[1-9][0-9]{0,8}$/.test(value)) {
+        return {
+          error:
+            "--max-delete needs a positive whole number, e.g. --max-delete 50.",
+        };
+      }
+      args.maxDelete = Number(value);
+      i += 1;
+    } else {
+      return { error: `Unknown argument "${arg}". ${ARGS_HELP}` };
+    }
   }
-  return { apply };
+  return args;
+}
+
+/** Cloudinary: refuse to delete more than this share of the listed assets. */
+export const MAX_UNGUARDED_IMAGE_SHARE = 0.2;
+/**
+ * R2 `incoming/`: every object there older than 24 h is junk, so a share
+ * makes no sense; an absolute count catches a prefix or listing bug instead.
+ */
+export const MAX_UNGUARDED_INCOMING_COUNT = 100;
+
+export interface MassDeleteInput {
+  /** How many ids the selection chose. */
+  selected: number;
+  /** How many objects/assets were listed in the swept area. */
+  listed: number;
+  /**
+   * Size of the reference set read from the database. Omitted for a sweep
+   * that has none (`incoming/`).
+   */
+  referenced?: number;
+  /** The operator's explicit `--max-delete N`, if any. */
+  maxDelete?: number;
+}
+
+export interface MassDeleteLimits {
+  /** Largest selected/listed ratio allowed without `--max-delete`. */
+  maxShare?: number;
+  /** Largest selection allowed without `--max-delete`. */
+  maxCount?: number;
+}
+
+export type MassDeleteVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Decides whether `--apply` may delete the selection (ADR 0051 follow-up,
+ * gate E M-1). A wrong or empty database makes every asset look orphaned, so:
+ * - nothing selected: always fine;
+ * - `--max-delete N` given: allowed only when the selection is at most N
+ *   (the operator has looked at the dry run and accepts this many);
+ * - otherwise refused when the reference set is empty, the selection is a
+ *   larger share of the listing than `maxShare`, or larger than `maxCount`.
+ */
+export function checkMassDelete(
+  input: MassDeleteInput,
+  limits: MassDeleteLimits,
+): MassDeleteVerdict {
+  const { selected, listed, referenced, maxDelete } = input;
+  if (selected === 0) return { ok: true };
+  if (maxDelete !== undefined) {
+    return selected <= maxDelete
+      ? { ok: true }
+      : {
+          ok: false,
+          reason: `${selected} selected is more than --max-delete ${maxDelete}.`,
+        };
+  }
+  const override = `Check the dry run, then re-run with --max-delete ${selected} if this is really intended.`;
+  if (referenced === 0) {
+    return {
+      ok: false,
+      reason: `The database references nothing, so everything listed looks orphaned (wrong database?). ${override}`,
+    };
+  }
+  if (
+    limits.maxShare !== undefined &&
+    (listed <= 0 || selected / listed > limits.maxShare)
+  ) {
+    return {
+      ok: false,
+      reason: `${selected} of ${listed} listed would be deleted, more than ${Math.round(limits.maxShare * 100)}%. ${override}`,
+    };
+  }
+  if (limits.maxCount !== undefined && selected > limits.maxCount) {
+    return {
+      ok: false,
+      reason: `${selected} would be deleted, more than ${limits.maxCount}. ${override}`,
+    };
+  }
+  return { ok: true };
 }

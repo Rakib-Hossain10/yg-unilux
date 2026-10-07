@@ -68,3 +68,4 @@ Template:
 | [0050](0050-settings-ui.md) | Settings UI: two cards, retry stays enabled after a failed filter cleanup, static guard requires revalidate + service call, restricted filters dropped on product save | Accepted |
 | [0051](0051-orphan-sweep-scripts.md) | Orphan sweep scripts: pure selection, dry-run default, 24 h window, Cloudinary products/areas only, list-only datasheet report | Accepted |
 | [0052](0052-e2e-provider-fakes.md) | E2E: in-memory R2/Cloudinary fakes via a preload on `next start`, shared sign-in state, one worker, `admin-exit` project last | Accepted |
+| [0053](0053-sweep-guard-etag-finalize.md) | Sweep mass-delete guard (`--max-delete`, names printed) and ETag-pinned datasheet finalize (gate E M-1, L-1) | Accepted |

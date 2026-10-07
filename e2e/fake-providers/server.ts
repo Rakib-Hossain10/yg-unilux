@@ -4,6 +4,7 @@
 // browser's own calls are forwarded here by e2e/fixtures/providers.ts. Holds
 // bytes in memory only; nothing real is contacted and nothing is persisted.
 
+import { createHash } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -64,6 +65,20 @@ function s3Error(response: ServerResponse, status: number, code: string): void {
   );
 }
 
+/* R2's ETag for a single-part upload: the quoted MD5 of the bytes. */
+function etagOf(bytes: Buffer): string {
+  return `"${createHash("md5").update(bytes).digest("hex")}"`;
+}
+
+/* An If-Match / x-amz-copy-source-if-match condition that the object fails. */
+function failsMatch(
+  condition: string | string[] | undefined,
+  object: StoredObject,
+): boolean {
+  if (typeof condition !== "string") return false;
+  return condition !== "*" && condition !== etagOf(object.bytes);
+}
+
 function detectFormat(bytes: Buffer): string {
   if (bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
     return "png";
@@ -107,11 +122,14 @@ async function handleS3(
       const [, ...from] = decodeURIComponent(copySource).split("/");
       const source = objects.get(from.join("/"));
       if (!source) return s3Error(response, 404, "NoSuchKey");
+      if (failsMatch(request.headers["x-amz-copy-source-if-match"], source)) {
+        return s3Error(response, 412, "PreconditionFailed");
+      }
       objects.set(key, { ...source, lastModified: new Date() });
       return send(
         response,
         200,
-        `<?xml version="1.0"?><CopyObjectResult><ETag>"e2e"</ETag><LastModified>${new Date().toISOString()}</LastModified></CopyObjectResult>`,
+        `<?xml version="1.0"?><CopyObjectResult><ETag>${etagOf(source.bytes)}</ETag><LastModified>${new Date().toISOString()}</LastModified></CopyObjectResult>`,
         XML_HEADER,
       );
     }
@@ -123,7 +141,7 @@ async function handleS3(
       ),
       lastModified: new Date(),
     });
-    return send(response, 200, "", { etag: '"e2e"' });
+    return send(response, 200, "", { etag: etagOf(bytes) });
   }
 
   const found = objects.get(key);
@@ -132,10 +150,14 @@ async function handleS3(
     return send(response, 200, "", {
       "content-length": found.bytes.length,
       "content-type": found.contentType,
+      etag: etagOf(found.bytes),
     });
   }
   if (method === "GET") {
     if (!found) return s3Error(response, 404, "NoSuchKey");
+    if (failsMatch(request.headers["if-match"], found)) {
+      return s3Error(response, 412, "PreconditionFailed");
+    }
     const range = /^bytes=(\d+)-(\d+)$/.exec(
       String(request.headers.range ?? ""),
     );
@@ -147,11 +169,13 @@ async function handleS3(
         "content-type": found.contentType,
         "content-length": part.length,
         "content-range": `bytes ${start}-${end}/${found.bytes.length}`,
+        etag: etagOf(found.bytes),
       });
     }
     return send(response, 200, found.bytes, {
       "content-type": found.contentType,
       "content-length": found.bytes.length,
+      etag: etagOf(found.bytes),
     });
   }
   if (method === "DELETE") {

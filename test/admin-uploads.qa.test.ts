@@ -74,18 +74,29 @@ vi.mock("@/lib/storage", () => ({
   headObject: vi.fn(async (key: string) => {
     bucket.calls.push(`head:${key}`);
     const bytes = bucket.objects.get(key);
-    return bytes ? { size: bytes.length, contentType: undefined } : null;
+    // The ETag only has to be stable per content here (gate E L-1 is tested
+    // in phase2-exit.qa.test.ts); length + first/last byte is enough.
+    return bytes
+      ? {
+          size: bytes.length,
+          contentType: undefined,
+          etag: `"${bytes.length}-${bytes[0] ?? 0}-${bytes.at(-1) ?? 0}"`,
+        }
+      : null;
   }),
   getObjectBytes: vi.fn(async (key: string) => {
     bucket.calls.push(`get:${key}`);
     return bucket.objects.get(key) ?? null;
   }),
-  copyObject: vi.fn(async (from: string, to: string) => {
-    bucket.calls.push(`copy:${from}->${to}`);
-    const bytes = bucket.objects.get(from);
-    if (!bytes) throw new Error("no source");
-    bucket.objects.set(to, bytes);
-  }),
+  copyObject: vi.fn(
+    async (from: string, to: string, options: { ifMatch: string }) => {
+      bucket.calls.push(`copy:${from}->${to}`);
+      const bytes = bucket.objects.get(from);
+      if (!bytes) throw new Error("no source");
+      if (!options.ifMatch) throw new Error("unconditional copy");
+      bucket.objects.set(to, bytes);
+    },
+  ),
   deleteObject: vi.fn(async (key: string) => {
     bucket.calls.push(`delete:${key}`);
     bucket.objects.delete(key);

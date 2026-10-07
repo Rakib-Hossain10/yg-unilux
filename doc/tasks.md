@@ -42,10 +42,9 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - T17 done (ADR 0051, Sonnet 5.5 at the user's request): `src/lib/orphan-sweep.ts`, `scripts/{sweep-incoming,sweep-cloudinary-orphans,report-orphan-datasheets}.ts`, `listImages` in `cloudinary.ts`, npm scripts `sweep:incoming`, `sweep:cloudinary`, `report:datasheets`. 2039 unit green (5 expected-fail). NOT run against real R2/Cloudinary: do a dry-run smoke with real credentials. Never schedule `--apply` in cron without a mass-delete guard.
 - T18 done (ADR 0052, Sonnet 5.5 at the user's request): `e2e/admin-product.spec.ts` (10 tests), in-memory R2/Cloudinary fakes (`e2e/fake-providers/`), shared sign-in (`e2e/global-setup.ts`, closes M-1), `workers: 1`. 2039 unit + 125 e2e green. Watch for a repeat of one unreproduced alt-text save flake.
 - **QA gate E: PASS** (Phase 2 exit, 2026-10-07, Opus). No Critical/High. 2060 unit (6 expected-fail) + 133 e2e green, build/audit OK, gitleaks clean, db:indexes OK on a scratch DB. Added `test/phase2-exit.qa.test.ts` (22) and `e2e/admin-gate-e.qa.spec.ts` (8).
-  - **M-1 (fix before merge, recommended):** `sweep:cloudinary --apply` has no mass-delete guard and all environments share `yg/products|areas` folders, so running it with a dev DB would destroy production images. Fix: refuse `--apply` on empty reference set or >~20% selection unless `--max-delete N`; print DB name + cloud name; ideally per-env folder prefix.
-  - **L-1 (new):** `finalizeDatasheet` (`src/lib/admin/datasheets.ts:222-233`) checks bytes then copies the incoming key; a swapped object can bypass the .xlsx check. Fix: `CopySourceIfMatch` with the ETag, or PutObject the checked buffer (`it.fails` in the QA test).
-  - Still open, not blocking: gate B L-A (case-insensitive model no., **fix before Phase 3 import**), gate C L-1/L-2/L-3/L-4, gate D L-1/L-2/L-3, gate A L-1 ([id] pages 200 for unknown id) and L-3. Phase 3: import preview images uploaded >24 h before confirm would be swept.
-- **Next:** decide on M-1/L-1 fixes, then ADR notes, tick Phase 2, rewrite Resume (next = Phase 3), push, PR with `gh`, wait for CI, **ask the user before merging**. **User must do:** real-credential smoke (T17 dry runs, real Cloudinary/R2 upload); rebuild before any local `npm start` (`.next` came from the e2e build). **Must-do:** the Phase 3 import must call `withoutRestrictedFilters`.
+    - **M-1 and L-1 FIXED** (ADR 0053): sweep mass-delete guard + ETag-pinned finalize. 2094 unit (5 expected-fail) + 133 e2e green. Open: per-environment Cloudinary folder prefix; real-credential smoke must confirm R2 honours `If-Match` / `CopySourceIfMatch`.
+- Still open, not blocking: gate B L-A (case-insensitive model no., **fix before Phase 3 import**), gate C L-1/L-2/L-3/L-4, gate D L-1/L-2/L-3, gate A L-1 ([id] pages 200 for unknown id) and L-3. Phase 3: import preview images uploaded >24 h before confirm would be swept.
+- **Next: Phase 2 PR** (push `phase-2`, `gh pr create`, wait for CI, **ask the user before merging**). Then Phase 3 (bulk import; plan first). **User must do:** real-credential smoke (T17 dry runs, real Cloudinary/R2 upload incl. If-Match behaviour); rebuild before any local `npm start`. **Phase 3 must-dos:** call `withoutRestrictedFilters`; fix gate B L-A (case-insensitive model no.) first; import preview images older than 24 h would be swept.
 - **Open items from gate D:**
   - **L-1:** `updateProduct` reads the visibility setting then writes; a save racing a column restriction can re-write restricted filter numbers (repaired by saving the column setting again). Fix with a version/`updatedAt` check or a second cleanup pass.
   - **L-2:** a retry whose setting is unchanged but cleanup modified products writes no audit entry.
@@ -135,7 +134,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T11b done, QA gate B PASS, next T12 (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 2 — Admin core — T1–T18 done, QA gate E PASS, PR pending (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -301,6 +300,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07 — Gate E fixes (ADR 0053): sweep guard + ETag-pinned datasheet finalize. 2094 unit + 133 e2e green. Next: push, PR.
 - 2026-10-07 — QA gate E PASS (Phase 2 exit) on Opus: 1 Medium (sweep guard), 1 new Low (datasheet copy race). 30 QA tests added.
 - 2026-10-07 — T18 done (ADR 0052): exit e2e, provider fakes, shared sign-in. 2039 unit + 125 e2e green. Next: QA gate E.
 - 2026-10-07 — T17 done (ADR 0051): orphan sweep scripts, dry-run default. 2039 unit green. Next: T18.

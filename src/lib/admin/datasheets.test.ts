@@ -25,11 +25,22 @@ import {
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
 
 /* A Map-backed bucket. Keys not present behave like missing objects. */
+/*
+ * The ETag is a hash of the bytes (like R2's MD5), so a conditional read or
+ * copy fails once the object was replaced.
+ */
 const bucket = vi.hoisted(() => ({
   objects: new Map<string, Uint8Array>(),
   deleted: [] as string[],
   failDelete: new Set<string>(),
   failCopy: false,
+  /** HEAD returns no ETag (R2 never does this; the service must refuse). */
+  noEtag: false,
+  etagOf(bytes: Uint8Array): string {
+    let hash = 0x811c9dc5;
+    for (const byte of bytes) hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+    return `"${hash.toString(16)}-${bytes.length}"`;
+  },
 }));
 vi.mock("@/lib/storage", () => ({
   presignPut: vi.fn(async (o: { key: string; contentType: string }) => ({
@@ -39,15 +50,33 @@ vi.mock("@/lib/storage", () => ({
   })),
   headObject: vi.fn(async (key: string) => {
     const bytes = bucket.objects.get(key);
-    return bytes ? { size: bytes.length, contentType: undefined } : null;
+    if (!bytes) return null;
+    return {
+      size: bytes.length,
+      contentType: undefined,
+      etag: bucket.noEtag ? undefined : bucket.etagOf(bytes),
+    };
   }),
-  getObjectBytes: vi.fn(async (key: string) => bucket.objects.get(key) ?? null),
-  copyObject: vi.fn(async (from: string, to: string) => {
-    if (bucket.failCopy) throw new Error("copy failed");
-    const bytes = bucket.objects.get(from);
-    if (!bytes) throw new Error("no source");
-    bucket.objects.set(to, bytes);
-  }),
+  getObjectBytes: vi.fn(
+    async (key: string, _max: number, options?: { ifMatch?: string }) => {
+      const bytes = bucket.objects.get(key) ?? null;
+      if (bytes && options?.ifMatch !== bucket.etagOf(bytes)) {
+        throw new Error("precondition failed");
+      }
+      return bytes;
+    },
+  ),
+  copyObject: vi.fn(
+    async (from: string, to: string, options: { ifMatch: string }) => {
+      if (bucket.failCopy) throw new Error("copy failed");
+      const bytes = bucket.objects.get(from);
+      if (!bytes) throw new Error("no source");
+      if (options.ifMatch !== bucket.etagOf(bytes)) {
+        throw new Error("precondition failed");
+      }
+      bucket.objects.set(to, bytes);
+    },
+  ),
   deleteObject: vi.fn(async (key: string) => {
     if (bucket.failDelete.has(key)) throw new Error("delete failed");
     bucket.deleted.push(key);
@@ -92,6 +121,7 @@ beforeEach(async () => {
   bucket.deleted.length = 0;
   bucket.failDelete.clear();
   bucket.failCopy = false;
+  bucket.noEtag = false;
   await Promise.all([
     DatasheetModel.deleteMany({}),
     ProductModel.deleteMany({}),
@@ -221,6 +251,46 @@ describe("finalizeDatasheet (new)", () => {
       fileName: "a.xlsx",
     });
     expect(formErrorsOf(result)).toEqual([UPLOAD_NOT_FOUND]);
+  });
+
+  it("refuses when HEAD gives no ETag (the version can't be pinned)", async () => {
+    bucket.objects.set(INCOMING_A, await workbook());
+    bucket.noEtag = true;
+    const storage = await import("@/lib/storage");
+    const result = await finalizeDatasheet(ADMIN, {
+      mode: "new",
+      incomingKey: INCOMING_A,
+      fileName: "a.xlsx",
+    });
+    expect(formErrorsOf(result)).toEqual([UPLOAD_FAILED]);
+    expect(storage.copyObject).not.toHaveBeenCalled();
+    expect(await DatasheetModel.countDocuments()).toBe(0);
+    expect([...bucket.objects.keys()]).toEqual([]);
+  });
+
+  it("reads and copies on the ETag from HEAD", async () => {
+    const bytes = await workbook();
+    bucket.objects.set(INCOMING_A, bytes);
+    const storage = await import("@/lib/storage");
+    const saved = expectOk(
+      await finalizeDatasheet(ADMIN, {
+        mode: "new",
+        incomingKey: INCOMING_A,
+        fileName: "a.xlsx",
+      }),
+    );
+    const etag = bucket.etagOf(bytes);
+    expect(storage.getObjectBytes).toHaveBeenCalledWith(
+      INCOMING_A,
+      MAX_DATASHEET_BYTES,
+      { ifMatch: etag },
+    );
+    const doc = await DatasheetModel.findById(saved.id).lean();
+    expect(storage.copyObject).toHaveBeenCalledWith(
+      INCOMING_A,
+      doc?.storageKey,
+      { ifMatch: etag },
+    );
   });
 
   it("refuses a key outside incoming/ and never touches a stored datasheet", async () => {

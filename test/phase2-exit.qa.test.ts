@@ -13,10 +13,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { finalizeDatasheet } from "@/lib/admin/datasheets";
+import { finalizeDatasheet, UPLOAD_FAILED } from "@/lib/admin/datasheets";
+import { XLSX_MIME_TYPE } from "@/lib/constants";
 import { mongoose } from "@/lib/db";
 import {
   applySelection,
+  checkMassDelete,
+  MAX_UNGUARDED_IMAGE_SHARE,
   parseSweepArgs,
   selectOrphanImages,
 } from "@/lib/orphan-sweep";
@@ -206,27 +209,67 @@ describe("e2e fake-provider preload stays out of the app", () => {
 /* Datasheet finalize: the stored bytes are the verified bytes               */
 /* ------------------------------------------------------------------------ */
 
-const bucket = vi.hoisted(() => ({
-  objects: new Map<string, Uint8Array>(),
-  /** Runs right after the service read the incoming bytes (a rival PUT). */
-  afterGet: undefined as undefined | ((key: string) => void),
-}));
+/*
+ * A Map-backed bucket that honours If-Match like R2: the ETag is a hash of
+ * the bytes, so replacing an object changes it and a stale condition fails.
+ */
+const bucket = vi.hoisted(() => {
+  const etagOf = (bytes: Uint8Array): string => {
+    let hash = 0x811c9dc5;
+    for (const byte of bytes) hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+    return `"${hash.toString(16)}-${bytes.length}"`;
+  };
+  const conditionFailed = () =>
+    Object.assign(new Error("condition failed"), {
+      name: "StorageConditionError",
+    });
+  return {
+    objects: new Map<string, Uint8Array>(),
+    /** Runs right after the service's HEAD (a rival PUT before the read). */
+    afterHead: undefined as undefined | ((key: string) => void),
+    /** Runs right after the service read the incoming bytes (a rival PUT). */
+    afterGet: undefined as undefined | ((key: string) => void),
+    etagOf,
+    conditionFailed,
+  };
+});
 vi.mock("@/lib/storage", () => ({
   presignPut: vi.fn(),
   headObject: vi.fn(async (key: string) => {
     const bytes = bucket.objects.get(key);
-    return bytes ? { size: bytes.length, contentType: undefined } : null;
+    bucket.afterHead?.(key);
+    return bytes
+      ? {
+          size: bytes.length,
+          contentType: undefined,
+          etag: bucket.etagOf(bytes),
+        }
+      : null;
   }),
-  getObjectBytes: vi.fn(async (key: string) => {
-    const bytes = bucket.objects.get(key) ?? null;
-    bucket.afterGet?.(key);
-    return bytes;
-  }),
-  copyObject: vi.fn(async (from: string, to: string) => {
-    const bytes = bucket.objects.get(from);
-    if (!bytes) throw new Error("no source");
-    bucket.objects.set(to, bytes);
-  }),
+  getObjectBytes: vi.fn(
+    async (key: string, _max: number, options?: { ifMatch?: string }) => {
+      const bytes = bucket.objects.get(key) ?? null;
+      if (
+        bytes &&
+        options?.ifMatch !== undefined &&
+        bucket.etagOf(bytes) !== options.ifMatch
+      ) {
+        throw bucket.conditionFailed();
+      }
+      bucket.afterGet?.(key);
+      return bytes;
+    },
+  ),
+  copyObject: vi.fn(
+    async (from: string, to: string, options: { ifMatch: string }) => {
+      const bytes = bucket.objects.get(from);
+      if (!bytes) throw new Error("no source");
+      if (bucket.etagOf(bytes) !== options.ifMatch) {
+        throw bucket.conditionFailed();
+      }
+      bucket.objects.set(to, bytes);
+    },
+  ),
   deleteObject: vi.fn(async (key: string) => {
     bucket.objects.delete(key);
   }),
@@ -245,7 +288,9 @@ async function workbook(): Promise<Uint8Array> {
 
 describe("finalizeDatasheet stores only what it verified", () => {
   beforeEach(async () => {
+    vi.restoreAllMocks();
     bucket.objects.clear();
+    bucket.afterHead = undefined;
     bucket.afterGet = undefined;
     await DatasheetModel.deleteMany({});
     await AuditLogModel.deleteMany({});
@@ -267,37 +312,87 @@ describe("finalizeDatasheet stores only what it verified", () => {
   /*
    * The presigned PUT stays valid for 5 minutes and signs only the length and
    * type, so whoever holds it can PUT again (same size, other bytes) between
-   * the service's read and its CopyObject. The copy then stores bytes that
-   * were never checked. Fix: CopyObject with CopySourceIfMatch on the ETag
-   * from HEAD, or PutObject the verified buffer instead of copying.
-   * `it.fails` turns into `it` once fixed.
+   * the service's read and its CopyObject. Fixed (gate E L-1): the read and
+   * the copy are both conditional on the ETag from HEAD, so a swap makes the
+   * finalize fail with the generic error and nothing is stored.
    */
-  it.fails(
-    "an incoming object swapped after the check is not what gets stored",
-    async () => {
-      const good = await workbook();
-      const evil = new Uint8Array(good.length).fill(0x3c); // "<<<<": not a zip
-      expect((await checkXlsx(evil)).ok).toBe(false);
-      bucket.objects.set(INCOMING, good);
-      bucket.afterGet = (key) => {
-        if (key === INCOMING) bucket.objects.set(INCOMING, evil);
-      };
-      const result = await finalizeDatasheet(ADMIN, {
-        mode: "new",
-        incomingKey: INCOMING,
-        fileName: "family.xlsx",
-      });
-      const row = await DatasheetModel.findOne().lean();
-      const stored = row ? bucket.objects.get(row.storageKey) : undefined;
-      // Either refused, or what is stored passes the signature check.
-      if (result.ok) {
-        expect(stored).toBeDefined();
-        expect((await checkXlsx(stored!)).ok).toBe(true);
-      } else {
-        expect(row).toBeNull();
-      }
-    },
-  );
+  it("an incoming object swapped after the check is not what gets stored", async () => {
+    const good = await workbook();
+    const evil = new Uint8Array(good.length).fill(0x3c); // "<<<<": not a zip
+    expect((await checkXlsx(evil)).ok).toBe(false);
+    bucket.objects.set(INCOMING, good);
+    bucket.afterGet = (key) => {
+      if (key === INCOMING) bucket.objects.set(INCOMING, evil);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const result = await finalizeDatasheet(ADMIN, {
+      mode: "new",
+      incomingKey: INCOMING,
+      fileName: "family.xlsx",
+    });
+    expect(result).toEqual({
+      ok: false,
+      errors: { formErrors: [UPLOAD_FAILED], fieldErrors: {} },
+      tags: [],
+    });
+    expect(await DatasheetModel.countDocuments()).toBe(0);
+    expect(await AuditLogModel.countDocuments()).toBe(0);
+    // Nothing under datasheets/, and the incoming object was cleaned up.
+    expect([...bucket.objects.keys()]).toEqual([]);
+  });
+
+  it("A-B-A: HEAD sees unchecked bytes, the read sees a good file, then the swap back fails the read", async () => {
+    const good = await workbook();
+    const evil = new Uint8Array(good.length).fill(0x3c);
+    bucket.objects.set(INCOMING, evil);
+    // Swapped to the good file after HEAD (whose ETag is the evil one's).
+    bucket.afterHead = (key) => {
+      if (key === INCOMING) bucket.objects.set(INCOMING, good);
+    };
+    bucket.afterGet = (key) => {
+      if (key === INCOMING) bucket.objects.set(INCOMING, evil);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const result = await finalizeDatasheet(ADMIN, {
+      mode: "new",
+      incomingKey: INCOMING,
+      fileName: "family.xlsx",
+    });
+    expect(result.ok).toBe(false);
+    expect(await DatasheetModel.countDocuments()).toBe(0);
+    expect([...bucket.objects.keys()]).toEqual([]);
+  });
+
+  it("replace: a swapped upload leaves the existing stored file untouched", async () => {
+    const original = await workbook();
+    const STORED = "datasheets/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee.xlsx";
+    bucket.objects.set(STORED, original);
+    const doc = await DatasheetModel.create({
+      storageKey: STORED,
+      fileName: "old.xlsx",
+      size: original.length,
+      mimeType: XLSX_MIME_TYPE,
+      uploadedBy: new mongoose.Types.ObjectId(ADMIN),
+    });
+    const update = await workbook();
+    const evil = new Uint8Array(update.length).fill(0x3c);
+    bucket.objects.set(INCOMING, update);
+    bucket.afterGet = (key) => {
+      if (key === INCOMING) bucket.objects.set(INCOMING, evil);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const result = await finalizeDatasheet(ADMIN, {
+      mode: "replace",
+      datasheetId: doc._id.toHexString(),
+      incomingKey: INCOMING,
+      fileName: "new.xlsx",
+    });
+    expect(result.ok).toBe(false);
+    expect(bucket.objects.get(STORED)).toBe(original);
+    expect(bucket.objects.has(INCOMING)).toBe(false);
+    const row = await DatasheetModel.findById(doc._id).lean();
+    expect(row?.fileName).toBe("old.xlsx");
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -330,23 +425,87 @@ describe("orphan sweep safety", () => {
   });
 
   /*
-   * Characterises the hazard behind the gate E finding: the selection trusts
-   * the reference set completely. Pointed at the wrong (or an empty) database
-   * while CLOUDINARY_URL names the shared cloud, `--apply` would select every
-   * product and area image older than 24 h. There is no guard in the script.
+   * The hazard behind gate E M-1: the selection trusts the reference set
+   * completely, so pointed at the wrong (or an empty) database while the
+   * Cloudinary credentials name the shared cloud, it selects every product
+   * and area image older than 24 h. Fixed: the script asks checkMassDelete
+   * before `--apply` deletes anything, and that guard refuses this case.
    */
-  it("hazard: an empty reference set selects every old product/area image", () => {
-    const now = new Date("2026-10-07T00:00:00Z");
-    const old = new Date("2026-09-01T00:00:00Z");
-    const assets = [
-      { publicId: testPublicId(1), createdAt: old },
-      { publicId: testPublicId(2), createdAt: old },
-      {
-        publicId: testPublicId(3, "0123456789abcdef01234568", "area"),
-        createdAt: old,
-      },
-    ];
+  const now = new Date("2026-10-07T00:00:00Z");
+  const old = new Date("2026-09-01T00:00:00Z");
+  const assets = [
+    { publicId: testPublicId(1), createdAt: old },
+    { publicId: testPublicId(2), createdAt: old },
+    {
+      publicId: testPublicId(3, "0123456789abcdef01234568", "area"),
+      createdAt: old,
+    },
+  ];
+  const imageLimits = { maxShare: MAX_UNGUARDED_IMAGE_SHARE };
+
+  it("hazard: an empty reference set still selects every old image, but --apply refuses it", () => {
     const selected = selectOrphanImages(assets, new Set(), now);
     expect(selected).toHaveLength(assets.length);
+    const verdict = checkMassDelete(
+      { selected: selected.length, listed: assets.length, referenced: 0 },
+      imageLimits,
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("hazard: a wrong but non-empty database (most images unreferenced) is refused", () => {
+    // A dev DB that references one unrelated id: nothing listed matches.
+    const referenced = new Set([testPublicId(99)]);
+    const selected = selectOrphanImages(assets, referenced, now);
+    expect(selected).toHaveLength(assets.length);
+    expect(
+      checkMassDelete(
+        {
+          selected: selected.length,
+          listed: assets.length,
+          referenced: referenced.size,
+        },
+        imageLimits,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("--max-delete is an explicit ceiling, never a blank cheque", () => {
+    const input = { selected: 3, listed: 3, referenced: 0 };
+    expect(checkMassDelete({ ...input, maxDelete: 3 }, imageLimits).ok).toBe(
+      true,
+    );
+    expect(checkMassDelete({ ...input, maxDelete: 2 }, imageLimits).ok).toBe(
+      false,
+    );
+    expect("error" in parseSweepArgs(["--apply", "--max-delete", "0"])).toBe(
+      true,
+    );
+    expect("error" in parseSweepArgs(["--apply", "--max-delete"])).toBe(true);
+  });
+
+  it("the sweep scripts call the guard and print names before deleting", () => {
+    const cloud = readFileSync(
+      path.join(root, "scripts", "sweep-cloudinary-orphans.ts"),
+      "utf8",
+    );
+    const incoming = readFileSync(
+      path.join(root, "scripts", "sweep-incoming.ts"),
+      "utf8",
+    );
+    for (const source of [cloud, incoming]) {
+      const guard = source.indexOf("checkMassDelete(");
+      const refuse = source.indexOf("if (!verdict.ok)");
+      const apply = source.indexOf("applySelection(");
+      expect(guard).toBeGreaterThan(-1);
+      expect(refuse).toBeGreaterThan(guard);
+      // Deletion only after the guard; applySelection is never in dry-run mode.
+      expect(apply).toBeGreaterThan(refuse);
+      expect(source).toMatch(/applySelection\(selected, true,/);
+    }
+    expect(cloud).toMatch(/getDb\(\)\.databaseName/);
+    expect(cloud).toMatch(/env\.cloudinary\(\)\.cloudName/);
+    // Names only: never the connection string or a URL.
+    expect(cloud).not.toMatch(/MONGODB_URI|mongodbUri|CLOUDINARY_URL/);
   });
 });

@@ -2,17 +2,22 @@
 // Deletes Cloudinary images under yg/products/ and yg/areas/ that no product
 // (images, variant images) or area references and that are older than 24 h:
 // images of deleted products and signed uploads that were never saved. Dry
-// run by default. Prints public ids only.
+// run by default. Prints public ids, the database name and the cloud name.
+// Mass-delete guard: `--apply` is refused when the database references no
+// image or the selection is over 20% of the listing, unless
+// `--max-delete N` is given and the selection is at most N.
 // Run with: node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sweep-cloudinary-orphans.ts
 
 import process from "node:process";
 
 import { destroyImage, listImages } from "@/lib/cloudinary";
-import { DbConnectionError, connectDb, disconnectDb } from "@/lib/db";
-import { EnvError } from "@/lib/env";
+import { DbConnectionError, connectDb, disconnectDb, getDb } from "@/lib/db";
+import { EnvError, env } from "@/lib/env";
 import {
+  MAX_UNGUARDED_IMAGE_SHARE,
   SWEPT_CLOUDINARY_FOLDERS,
   applySelection,
+  checkMassDelete,
   collectReferencedImageIds,
   parseSweepArgs,
   selectOrphanImages,
@@ -44,15 +49,35 @@ async function main(argv: string[]): Promise<number> {
       )
     ).flat();
     const selected = selectOrphanImages(assets, referenced, new Date());
+    // Names only (never the URI or credentials), so the operator can see
+    // which database and which cloud are being compared before anything goes.
+    console.log(
+      `Database: ${getDb().databaseName} | Cloudinary cloud: ${env.cloudinary().cloudName}`,
+    );
     console.log(
       `${assets.length} image(s) listed, ${referenced.size} referenced, ${selected.length} orphaned (older than 24 h).`,
     );
-    const result = await applySelection(selected, args.apply, destroyImage);
-    for (const id of result.selected) console.log(`  ${id}`);
+    for (const id of selected) console.log(`  ${id}`);
+    const verdict = checkMassDelete(
+      {
+        selected: selected.length,
+        listed: assets.length,
+        referenced: referenced.size,
+        maxDelete: args.maxDelete,
+      },
+      { maxShare: MAX_UNGUARDED_IMAGE_SHARE },
+    );
     if (!args.apply) {
+      if (!verdict.ok)
+        console.log(`Warning: --apply would refuse. ${verdict.reason}`);
       console.log("Dry run: nothing deleted. Re-run with --apply to delete.");
       return 0;
     }
+    if (!verdict.ok) {
+      console.error(`Refused: nothing deleted. ${verdict.reason}`);
+      return 1;
+    }
+    const result = await applySelection(selected, true, destroyImage);
     console.log(
       `Deleted ${result.deleted.length}, failed ${result.failed.length}.`,
     );

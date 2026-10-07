@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import packageJson from "../package.json";
 import {
   applySelection,
+  checkMassDelete,
   collectReferencedImageIds,
   parseSweepArgs,
   selectOrphanDatasheetObjects,
@@ -199,6 +200,125 @@ describe("parseSweepArgs", () => {
 
   it("rejects anything else", () => {
     expect(parseSweepArgs(["--aply"])).toEqual({ error: expect.any(String) });
+  });
+
+  it("reads --max-delete N in either order with --apply", () => {
+    expect(parseSweepArgs(["--apply", "--max-delete", "50"])).toEqual({
+      apply: true,
+      maxDelete: 50,
+    });
+    expect(parseSweepArgs(["--max-delete", "1", "--apply"])).toEqual({
+      apply: true,
+      maxDelete: 1,
+    });
+    // Allowed in a dry run: it previews whether --apply would pass.
+    expect(parseSweepArgs(["--max-delete", "7"])).toEqual({
+      apply: false,
+      maxDelete: 7,
+    });
+  });
+
+  it.each([
+    [["--max-delete"]],
+    [["--max-delete", "0"]],
+    [["--max-delete", "-3"]],
+    [["--max-delete", "05"]],
+    [["--max-delete", "2.5"]],
+    [["--max-delete", "1e3"]],
+    [["--max-delete", " 4"]],
+    [["--max-delete", "abc"]],
+    [["--max-delete", "--apply"]],
+    [["--max-delete", "9999999999"]],
+    [["--max-delete=5"]],
+    [["--max-delete", "5", "--max-delete", "6"]],
+  ])("rejects a malformed or repeated --max-delete: %j", (argv) => {
+    expect(parseSweepArgs(argv)).toEqual({ error: expect.any(String) });
+  });
+});
+
+describe("checkMassDelete", () => {
+  const images = { maxShare: 0.2 };
+  const incoming = { maxCount: 100 };
+
+  it("allows an empty selection, even with an empty reference set", () => {
+    expect(
+      checkMassDelete({ selected: 0, listed: 0, referenced: 0 }, images),
+    ).toEqual({ ok: true });
+  });
+
+  it("refuses when the reference set is empty", () => {
+    const verdict = checkMassDelete(
+      { selected: 1, listed: 100, referenced: 0 },
+      images,
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("allows exactly 20% and refuses just above it", () => {
+    expect(
+      checkMassDelete({ selected: 20, listed: 100, referenced: 80 }, images),
+    ).toEqual({ ok: true });
+    const verdict = checkMassDelete(
+      { selected: 21, listed: 100, referenced: 79 },
+      images,
+    );
+    expect(verdict).toEqual({
+      ok: false,
+      reason: expect.stringMatching(/20%/),
+    });
+  });
+
+  it("names the --max-delete override in the refusal", () => {
+    const verdict = checkMassDelete(
+      { selected: 30, listed: 100, referenced: 70 },
+      images,
+    );
+    expect(verdict).toEqual({
+      ok: false,
+      reason: expect.stringContaining("--max-delete 30"),
+    });
+  });
+
+  it("--max-delete overrides the share and empty-reference rules up to N", () => {
+    expect(
+      checkMassDelete(
+        { selected: 90, listed: 100, referenced: 0, maxDelete: 90 },
+        images,
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      checkMassDelete(
+        { selected: 91, listed: 100, referenced: 5, maxDelete: 90 },
+        images,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("a selection above N is refused even when it would pass the share rule", () => {
+    expect(
+      checkMassDelete(
+        { selected: 5, listed: 100, referenced: 95, maxDelete: 4 },
+        images,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("incoming: an absolute cap instead of a share (no reference set)", () => {
+    expect(checkMassDelete({ selected: 100, listed: 100 }, incoming)).toEqual({
+      ok: true,
+    });
+    expect(checkMassDelete({ selected: 101, listed: 101 }, incoming).ok).toBe(
+      false,
+    );
+    expect(
+      checkMassDelete({ selected: 101, listed: 101, maxDelete: 101 }, incoming),
+    ).toEqual({ ok: true });
+  });
+
+  it("a listing count of zero with a selection is refused (inconsistent input)", () => {
+    expect(
+      checkMassDelete({ selected: 1, listed: 0, referenced: 3 }, images).ok,
+    ).toBe(false);
   });
 });
 

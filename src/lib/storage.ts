@@ -104,19 +104,48 @@ export async function presignPut(options: {
   };
 }
 
+/**
+ * The object changed since its ETag was read (HTTP 412 on an If-Match or
+ * CopySourceIfMatch condition). Carries no request detail.
+ */
+export class StorageConditionError extends Error {
+  constructor() {
+    super("The stored object changed while it was being processed.");
+    this.name = "StorageConditionError";
+  }
+}
+
+/* True when the S3 error is a failed If-Match / CopySourceIfMatch. */
+function isPreconditionFailed(error: unknown): boolean {
+  if (!(error instanceof S3ServiceException)) return false;
+  return (
+    error.$metadata.httpStatusCode === 412 ||
+    error.name === "PreconditionFailed"
+  );
+}
+
 export interface ObjectHead {
   size: number;
   contentType: string | undefined;
+  /**
+   * The object's ETag exactly as R2 returns it (quoted). Pass it as `ifMatch`
+   * to read and copy exactly this version. Undefined only if R2 omits it.
+   */
+  etag: string | undefined;
 }
 
-/** Size and type of an object, or null when it does not exist. */
+/** Size, type and ETag of an object, or null when it does not exist. */
 export async function headObject(key: string): Promise<ObjectHead | null> {
   const { s3, bucket } = client();
   try {
     const out = await s3.send(
       new HeadObjectCommand({ Bucket: bucket, Key: key }),
     );
-    return { size: out.ContentLength ?? 0, contentType: out.ContentType };
+    return {
+      size: out.ContentLength ?? 0,
+      contentType: out.ContentType,
+      etag: out.ETag,
+    };
   } catch (error) {
     if (isNotFound(error)) return null;
     throw error;
@@ -138,6 +167,7 @@ export async function getRange(
   key: string,
   start: number,
   end: number,
+  options: { ifMatch?: string } = {},
 ): Promise<Uint8Array | null> {
   const { s3, bucket } = client();
   try {
@@ -146,11 +176,13 @@ export async function getRange(
         Bucket: bucket,
         Key: key,
         Range: `bytes=${start}-${end}`,
+        IfMatch: options.ifMatch,
       }),
     );
     return await bodyToBytes(out.Body);
   } catch (error) {
     if (isNotFound(error)) return null;
+    if (isPreconditionFailed(error)) throw new StorageConditionError();
     throw error;
   }
 }
@@ -159,26 +191,47 @@ export async function getRange(
  * The whole object in memory. The caller passes the size it already got from
  * headObject(), and `maxBytes` caps the read: the request asks for at most
  * `maxBytes + 1` bytes, so an object that grew after the check can't fill
- * memory. Returns null when it does not exist.
+ * memory. With `ifMatch` (the ETag from headObject) the read fails with
+ * StorageConditionError if the object was replaced since the HEAD. Returns
+ * null when it does not exist.
  */
 export async function getObjectBytes(
   key: string,
   maxBytes: number,
+  options: { ifMatch?: string } = {},
 ): Promise<Uint8Array | null> {
-  return getRange(key, 0, maxBytes);
+  return getRange(key, 0, maxBytes, options);
 }
 
-/** Copies one object inside the bucket (server side, nothing is downloaded). */
-export async function copyObject(from: string, to: string): Promise<void> {
+/**
+ * Copies one object inside the bucket (server side, nothing is downloaded),
+ * only if the source still has the ETag `ifMatch` (CopySourceIfMatch). So the
+ * copy is exactly the version the caller read and checked; a source replaced
+ * in between makes it throw StorageConditionError and nothing is written.
+ */
+export async function copyObject(
+  from: string,
+  to: string,
+  options: { ifMatch: string },
+): Promise<void> {
   const { s3, bucket } = client();
-  await s3.send(
-    new CopyObjectCommand({
-      Bucket: bucket,
-      // Keys are ours (uuid based), but encode anyway as the header needs it.
-      CopySource: encodeURIComponent(`${bucket}/${from}`).replace(/%2F/g, "/"),
-      Key: to,
-    }),
-  );
+  try {
+    await s3.send(
+      new CopyObjectCommand({
+        Bucket: bucket,
+        // Keys are ours (uuid based), but encode anyway as the header needs it.
+        CopySource: encodeURIComponent(`${bucket}/${from}`).replace(
+          /%2F/g,
+          "/",
+        ),
+        CopySourceIfMatch: options.ifMatch,
+        Key: to,
+      }),
+    );
+  } catch (error) {
+    if (isPreconditionFailed(error)) throw new StorageConditionError();
+    throw error;
+  }
 }
 
 /** Deletes one object. Deleting a missing object is not an error. */
