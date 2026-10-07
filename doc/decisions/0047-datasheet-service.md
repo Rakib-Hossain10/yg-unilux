@@ -32,3 +32,13 @@ Datasheets (.xlsx, up to 10 MB) are restricted files. Vercel limits request bodi
 - Replacing a file overwrites in place. A download at that moment may see either version; acceptable until Phase 5.
 - A failed document write during a replace (after the copy) leaves the new bytes under the old row. The admin sees an error and can re-upload.
 - ADR 0009's "uploads go through the server" is superseded by 0045 and this ADR.
+
+## Note (2026-10-07, Phase 3 T2)
+The zip central-directory reader is now shared with the import safety check (`readCentralDirectory` in `src/lib/xlsx-signature.ts`). That makes `checkXlsx` stricter on malformed zips. It now refuses:
+- a gap before the end record;
+- bytes after it;
+- disk numbers other than 0;
+- an entry count that doesn't fill the directory exactly;
+- stored parts whose sizes don't match.
+
+It still accepts a consistent zip64 record + locator, because some Open XML writers add one and datasheets are never opened with JSZip. The existing datasheet tests are unchanged and pass.

@@ -17,7 +17,19 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - `npm run check:model-nos`;
     - gate B L-A closed;
     - 2149 unit green (4 expected-fail).
-  - **Next: T2** (`import-engineer`, Opus): `src/lib/import/{types,safety,workbook}.ts`, a limits-aware central-directory reader exported from `xlsx-signature.ts`, and the synthetic fixture builder `test/fixtures/import/build.ts` (copies the real sheet, see the plan's "Fixture findings"). Then T3 (cleaner/columns/numbers).
+  - **T2 done** (`be96922`):
+    - `src/lib/import/{types,safety,columns,workbook}.ts`;
+    - shared `readCentralDirectory` (our reader now sees exactly what JSZip sees; 3 zip-bomb bypasses found by the auto-review were fixed);
+    - synthetic fixture `test/fixtures/import/build.ts` + `raw-zip.ts`;
+    - the real-sheet test passes locally (33 headers, 12 rows, 0 warnings) and is skipped in CI;
+    - 2237 unit green (4 expected-fail, 1 skipped).
+  - **Next: T3** (`import-engineer`, Opus): `clean.ts`, split policies in `columns.ts`, `numbers.ts` (pure, table-driven), plus ADR 0056 text. Then T4 (grouping + golden No. 76).
+  - **Carry into T4:** blank and "-" both mean not applicable and must compare equal for shared vs per-variant (No. 78 uses blanks, No. 76 uses "-").
+  - **Record in ADR 0057 (T7) from T2:**
+    - the 100:1 ratio cap only applies to entries >1 MB;
+    - header fallback: a row with 3+ known headers counts as the header, so a missing Model No. is `missing_required_column`;
+    - new reader warning codes: `duplicate_column`, `sheet_skipped`, `hidden_sheet`, `hidden_row`, `date_cell`, `formula_without_result`, `cell_error`;
+    - the safety refusal reasons map to `not_xlsx` / `too_large` / `zip_unsafe`.
   - **Carry into T7/T8:**
     - use `modelNoKey` for in-sheet duplicates;
     - pass `{ collation: MODEL_NO_COLLATION }` on every model-no. lookup;
@@ -171,7 +183,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 3 — Bulk import — plan approved, T0–T1 done, next T2 (Phase 2 merged 2026-10-07)
+**Current focus:** Phase 3 — Bulk import — plan approved, T0–T2 done, next T3 (Phase 2 merged 2026-10-07)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -273,7 +285,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Plan approved by the user (Q1–Q6: all defaults, 2026-10-07)
 - [x] T0: client sheet received (local only, gitignored), studied, ADR 0054 (product page layout)
 - [x] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
-- [ ] T2: workbook reader + safety + synthetic fixture
+- [x] T2: workbook reader + safety + synthetic fixture (ADR 0047 note: stricter shared zip reader)
+- [ ] T3: cleaner + split policies + numeric parsers — ADR 0056
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -342,6 +355,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07: T2 done (`be96922`): import safety pre-check, workbook reader, synthetic fixture, real-sheet test. The auto-review found 3 zip parser-difference bypasses (decoy directory, hidden entries past `count`, name or extra-field tricks); all fixed. The shared reader also hardens the datasheet check (note on ADR 0047). 2237 unit green. Next: T3.
 - 2026-10-07: T1 done (`bfbfa6f`, ADR 0055): case-insensitive model nos. via a collated unique index, shared `modelNoKey`, `sourceSha256`, `check:model-nos`. The auto-review caught a broken regex in the migration message (lost backslash); it was fixed before the commit. 2149 unit green. Next: T2.
 - 2026-10-07: Phase 3 plan approved (all six defaults). T0: client sheet received (WPS file; drawing-anchored PNGs; no merges; English before Chinese; Nos. 80/81 lack model nos.), gitignored, studied into the plan. ADR 0054 logs the client's pink/green product page layout for Phase 4. Next: T1.
 - 2026-10-07 — Phase 3 planned: `doc/phase-3-plan.md` (stateless preview + planHash, idempotent commit batches, images uploaded at commit with sha256 dedupe, field-ownership table, 6 questions for the user). `/find-skills`: only the installed `xlsx` skill applies. Existing subagents reused. Awaiting review; nothing built.
