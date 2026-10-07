@@ -1,7 +1,7 @@
 // Admin shell and dashboard (Phase 2 T3) against the production build: the
 // dashboard counts and module links, the active nav link, the skip link, the
 // mobile <details> menu, and axe WCAG 2.2 AA on /admin at desktop and phone
-// width. Signs in once (sign-in is rate-limited per email) and reuses the state.
+// width. Reuses the admin session that e2e/global-setup.ts signed in (M-1).
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import {
   expect,
 } from "@playwright/test";
 
-import { E2E_ADMIN } from "./fixtures/accounts";
+import { loadState } from "./fixtures/auth-state";
 
 const axeSource = readFileSync(
   join(process.cwd(), "node_modules", "axe-core", "axe.min.js"),
@@ -37,16 +37,9 @@ const test = base.extend<{ adminPage: Page }>({
 
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async ({ browser }) => {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(E2E_ADMIN.email);
-  await page.getByLabel("Password").fill(E2E_ADMIN.password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/admin$/);
-  adminState = await context.storageState();
-  await context.close();
+test.beforeAll(() => {
+  // Signed in once by e2e/global-setup.ts (the per-email limiter, M-1).
+  adminState = loadState("admin");
 });
 
 test("the dashboard shows counts and links every card to its module", async ({

@@ -2,9 +2,9 @@
 // switching JavaScript off) must not put field values in the URL; a customer's
 // 403 for the edit page carries no restricted spec value in HTML or RSC; and
 // the categories/areas not-found status (gate A L-1) is measured.
-import { type Page, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { type Db, type MongoClient, ObjectId } from "mongodb";
-import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
 
 const NETWORK = { "x-vercel-forwarded-for": "203.0.113.62" };
@@ -56,25 +56,12 @@ test.afterAll(async () => {
   await client.close();
 });
 
-async function signIn(page: Page, email: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => url.pathname !== "/login");
-}
-
 test("a native (pre-hydration) submit of the edit form puts no values in the URL", async ({
   browser,
 }) => {
-  // Sign in with JS on to get the session, then reuse it with JS off.
-  const first = await browser.newContext({ extraHTTPHeaders: NETWORK });
-  await signIn(await first.newPage(), E2E_ADMIN.email, E2E_ADMIN.password);
-  const state = await first.storageState();
-  await first.close();
-
+  // The admin session comes from global setup (M-1); JS is off here.
   const context = await browser.newContext({
-    storageState: state,
+    storageState: loadState("admin"),
     javaScriptEnabled: false,
   });
   const page = await context.newPage();
@@ -102,9 +89,11 @@ test("a native (pre-hydration) submit of the edit form puts no values in the URL
 test("a customer's 403 for the edit page leaks no spec value (HTML and RSC)", async ({
   browser,
 }) => {
-  const context = await browser.newContext({ extraHTTPHeaders: NETWORK });
+  const context = await browser.newContext({
+    extraHTTPHeaders: NETWORK,
+    storageState: loadState("customer"),
+  });
   const page = await context.newPage();
-  await signIn(page, E2E_CUSTOMER.email, E2E_CUSTOMER.password);
   const path = `/admin/products/${productId}`;
   expect((await page.goto(path))?.status()).toBe(403);
   const html = await page.content();
@@ -118,9 +107,11 @@ test("a customer's 403 for the edit page leaks no spec value (HTML and RSC)", as
 });
 
 test("the admin edit page is no-store", async ({ browser }) => {
-  const context = await browser.newContext({ extraHTTPHeaders: NETWORK });
+  const context = await browser.newContext({
+    extraHTTPHeaders: NETWORK,
+    storageState: loadState("admin"),
+  });
   const page = await context.newPage();
-  await signIn(page, E2E_ADMIN.email, E2E_ADMIN.password);
   const response = await page.goto(`/admin/products/${productId}`);
   expect(response?.headers()["cache-control"] ?? "").toContain("no-store");
   await context.close();
@@ -129,9 +120,11 @@ test("the admin edit page is no-store", async ({ browser }) => {
 test("gate A L-1: not-found status of categories/areas [id] (documented, measured)", async ({
   browser,
 }) => {
-  const context = await browser.newContext({ extraHTTPHeaders: NETWORK });
+  const context = await browser.newContext({
+    extraHTTPHeaders: NETWORK,
+    storageState: loadState("admin"),
+  });
   const page = await context.newPage();
-  await signIn(page, E2E_ADMIN.email, E2E_ADMIN.password);
   const missing = new ObjectId().toHexString();
   const statuses: Record<string, number | undefined> = {};
   for (const path of [

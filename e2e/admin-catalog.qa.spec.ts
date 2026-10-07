@@ -16,7 +16,7 @@ import {
 } from "@playwright/test";
 import { type Db, type MongoClient, ObjectId } from "mongodb";
 
-import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
 
 const axeSource = readFileSync(
@@ -29,7 +29,6 @@ const axeSource = readFileSync(
  * accounts in too. A documentation-range address in the one header the
  * limiter reads gives this file its own bucket, so it can't be the 6th try.
  */
-const OWN_NETWORK = { "x-vercel-forwarded-for": "203.0.113.61" };
 
 /* Unique per run, so a retry never trips over an earlier run's rows. */
 const RUN = Date.now().toString(36);
@@ -47,32 +46,11 @@ let db: Db;
 
 test.describe.configure({ mode: "serial" });
 
-async function signInState(
-  browser: Browser,
-  email: string,
-  password: string,
-): Promise<StorageState> {
-  const context = await browser.newContext({ extraHTTPHeaders: OWN_NETWORK });
-  const page = await context.newPage();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => url.pathname !== "/login");
-  const state = await context.storageState();
-  await context.close();
-  return state;
-}
-
-test.beforeAll(async ({ browser }) => {
+test.beforeAll(async () => {
   client = await connectE2eDb();
   db = client.db();
-  adminState = await signInState(browser, E2E_ADMIN.email, E2E_ADMIN.password);
-  customerState = await signInState(
-    browser,
-    E2E_CUSTOMER.email,
-    E2E_CUSTOMER.password,
-  );
+  adminState = loadState("admin");
+  customerState = loadState("customer");
 });
 
 test.afterAll(async () => {

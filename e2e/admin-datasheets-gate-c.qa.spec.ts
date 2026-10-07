@@ -1,8 +1,8 @@
 // QA gate C (Phase 2, T11-T13): the datasheets screen, the product form's
 // datasheet picker and the upload controls in a real browser. There is no
-// Cloudinary/R2 fake yet (that is T18), so uploads that reach a provider fail
-// at the first server step; what is checked here is what the admin and the
-// network see: no storage key or URL in the HTML or the RSC payload, access
+// The test server now fakes R2 and Cloudinary (T18, e2e/fake-providers); the
+// failure cases below inject a failing delete or a dropped connection. What is
+// checked here is what the admin and the network see: no storage key or URL in the HTML or the RSC payload, access
 // answers (visitor, customer, admin), the admin-only CSP, no-store, dialog and
 // live-region behaviour, keyboard focus, axe, and that a failed upload leaks no
 // environment name.
@@ -18,8 +18,9 @@ import {
 } from "@playwright/test";
 import { type Db, type MongoClient, ObjectId } from "mongodb";
 
-import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
+import { breakProviders, failR2Delete, pngFile } from "./fixtures/providers";
 
 const axeSource = readFileSync(
   join(process.cwd(), "node_modules", "axe-core", "axe.min.js"),
@@ -50,32 +51,11 @@ let areaId: string;
 
 test.describe.configure({ mode: "serial" });
 
-async function signInState(
-  browser: Browser,
-  email: string,
-  password: string,
-): Promise<StorageState> {
-  const context = await browser.newContext({ extraHTTPHeaders: OWN_NETWORK });
-  const page = await context.newPage();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => url.pathname !== "/login");
-  const state = await context.storageState();
-  await context.close();
-  return state;
-}
-
-test.beforeAll(async ({ browser }) => {
+test.beforeAll(async () => {
   client = await connectE2eDb();
   db = client.db();
-  adminState = await signInState(browser, E2E_ADMIN.email, E2E_ADMIN.password);
-  customerState = await signInState(
-    browser,
-    E2E_CUSTOMER.email,
-    E2E_CUSTOMER.password,
-  );
+  adminState = loadState("admin");
+  customerState = loadState("customer");
 
   const now = new Date();
   const mime =
@@ -416,6 +396,8 @@ test.describe("datasheets screen in the browser", () => {
   test("deleting an unused datasheet while storage is unreachable keeps the row and leaks no setting name", async ({
     browser,
   }) => {
+    // The bucket fake refuses to delete this object, like an R2 outage.
+    await failR2Delete(FREE_KEY);
     const page = await asAdmin(browser);
     await page.goto("/admin/datasheets");
     await page.getByRole("button", { name: `Delete ${RENAMED}` }).click();
@@ -470,13 +452,13 @@ test.describe("datasheets screen in the browser", () => {
     await page.context().close();
   });
 
-  test("an upload that fails at the first server step shows a generic error, with no env name", async ({
+  test("an upload whose storage connection drops shows a generic error, with no env name", async ({
     browser,
   }) => {
     const page = await asAdmin(browser);
+    // The browser's PUT to storage fails like a dropped connection.
+    await breakProviders(page);
     await page.goto("/admin/datasheets");
-    const requests: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
     const [chooser] = await Promise.all([
       page.waitForEvent("filechooser"),
       // The hidden <input type=file> is also exposed as a button of the same name
@@ -497,10 +479,6 @@ test.describe("datasheets screen in the browser", () => {
     expect(text).not.toMatch(
       /R2_|ACCOUNT_ID|SECRET|EnvError|at .*\(.*:\d+:\d+\)/,
     );
-    // No PUT ever went to a storage host.
-    expect(
-      requests.filter((url) => /r2\.|cloudflarestorage/.test(url)),
-    ).toEqual([]);
     expect(
       await db
         .collection("datasheets")
@@ -539,24 +517,16 @@ test.describe("product form and area page", () => {
     await page.context().close();
   });
 
-  test("an image upload that cannot be signed shows a generic error and posts nothing to Cloudinary", async ({
+  test("an image upload whose connection to Cloudinary drops shows a generic error", async ({
     browser,
   }) => {
     const page = await asAdmin(browser);
-    const requests: string[] = [];
-    page.on("request", (request) => requests.push(request.url()));
+    await breakProviders(page);
     await page.goto(`/admin/products/${productId}`);
     await page
       .locator("input[type=file]")
       .first()
-      .setInputFiles({
-        name: "lamp.png",
-        mimeType: "image/png",
-        buffer: Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-          "base64",
-        ),
-      });
+      .setInputFiles(pngFile("lamp.png"));
     const uploads = page.getByRole("list", { name: "Uploads" });
     await expect(uploads).toBeVisible();
     await expect(uploads).not.toContainText(
@@ -565,9 +535,6 @@ test.describe("product form and area page", () => {
     await expect(page.locator("body")).not.toContainText(
       /CLOUDINARY_URL|EnvError/,
     );
-    expect(
-      requests.filter((url) => url.includes("api.cloudinary.com")),
-    ).toEqual([]);
     await page.context().close();
   });
 

@@ -14,11 +14,17 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import process from "node:process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
+import {
+  E2E_FAKE_PROVIDERS_PORT,
+  E2E_PROVIDER_ENV,
+} from "./fixtures/providers-port";
+import { startFakeProviders } from "./fake-providers/server";
 
 const PORT = "3000";
 
@@ -47,6 +53,8 @@ const testEnv = {
   AUTH_URL: `http://localhost:${PORT}`,
   // The geo-block e2e tests send a fake country header (ADR 0026).
   GEO_BLOCK_ENABLED: "true",
+  // Fake provider credentials (also used for the build, see providers-port.ts).
+  ...E2E_PROVIDER_ENV,
 };
 
 async function seed(uri: string): Promise<void> {
@@ -81,13 +89,28 @@ async function main(): Promise<void> {
   // category or area) read the throwaway database's URI from here.
   writeFileSync(E2E_MONGODB_URI_FILE, uri, "utf8");
 
+  // The R2 and Cloudinary fakes. The app's server reaches them only because
+  // the preload below is added to ITS NODE_OPTIONS and E2E_FAKE_PROVIDERS_PORT
+  // is set; neither exists anywhere but this file.
+  const fakes = await startFakeProviders(E2E_FAKE_PROVIDERS_PORT);
+  const preload = pathToFileURL(
+    fileURLToPath(new URL("./fake-providers/preload.mjs", import.meta.url)),
+  ).href;
+
   const nextBin = createRequire(import.meta.url).resolve("next/dist/bin/next");
   const child: ChildProcess = spawn(
     process.execPath,
     [nextBin, "start", "-p", PORT],
     {
       stdio: "inherit",
-      env: { ...process.env, ...testEnv, MONGODB_URI: uri },
+      env: {
+        ...process.env,
+        ...testEnv,
+        MONGODB_URI: uri,
+        E2E_FAKE_PROVIDERS_PORT: String(E2E_FAKE_PROVIDERS_PORT),
+        NODE_OPTIONS:
+          `${process.env.NODE_OPTIONS ?? ""} --import ${preload}`.trim(),
+      },
     },
   );
 
@@ -97,6 +120,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     child.kill();
+    fakes.close();
     await replSet.stop();
     process.exit(code);
   };
