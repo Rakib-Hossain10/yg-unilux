@@ -53,7 +53,7 @@ describe("gate A: zip safety", () => {
       { name: "xl/a.xml", data: enc.encode("<a/>"), uncompressedSize: 9999 },
     ]);
     const result = await checkImportFile(bytes);
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({ ok: false, reason: "size_mismatch" });
   });
 
   it("refuses many small entries that together pass the total cap", async () => {
@@ -81,7 +81,7 @@ describe("gate A: zip safety", () => {
       "XL/WORKBOOK.XML": workbook ?? "<workbook/>",
     });
     const result = await checkImportFile(bytes);
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({ ok: false, reason: "inconsistent_entries" });
   });
 
   // exceljs expands these ranges cell by cell on load (Worksheet
@@ -101,13 +101,21 @@ describe("gate A: zip safety", () => {
     });
   });
 
-  /* Bounded = the check passes, exceljs then reads the guarded file quickly
-   * and gets exactly the rows of the plain fixture. */
+  /* Bounded = the check passes, the guarded bytes hold no
+   * <dataValidations> / <definedNames> element, and exceljs gets exactly the
+   * rows of the plain fixture (load time is only a wide backstop). */
   async function readsLikeThePlainFixture(bytes: Uint8Array): Promise<void> {
     const plain = await readWorkbook(await checked(await buildFixture()));
+    const file = await checked(bytes);
+    const zip = await JSZip.loadAsync(file.bytes);
+    for (const name of ["xl/workbook.xml", "xl/worksheets/sheet1.xml"]) {
+      const xml = (await zip.file(name)?.async("string")) ?? "";
+      expect(xml).not.toContain("<dataValidations");
+      expect(xml).not.toContain("<definedNames");
+    }
     const start = performance.now();
-    const read = await readWorkbook(await checked(bytes));
-    expect(performance.now() - start).toBeLessThan(3_000);
+    const read = await readWorkbook(file);
+    expect(performance.now() - start).toBeLessThan(30_000);
     if (!read.ok || !plain.ok) throw new Error("expected both to read");
     expect(read.rows).toEqual(plain.rows);
   }

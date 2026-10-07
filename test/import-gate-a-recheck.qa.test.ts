@@ -1,14 +1,21 @@
-// Phase 3 QA gate A re-check (fixes in 620711c): attacks on the sheet guard
-// (parser differences against exceljs/saxes), the zip rewriter, the
-// CheckedImportFile brand, and regressions (datasheet check, real sheet).
-// `it.fails` = a confirmed defect.
+// Phase 3 QA gate A re-checks (fixes in 620711c and 09d7c23): attacks on the
+// sheet guard (parser differences against exceljs/saxes), the part-name rule
+// (JSZip resolves names on load), the zip rewriter, the CheckedImportFile
+// brand, and regressions (datasheet check, real sheet). Assertions inspect
+// the guard's output or the exact refusal reason; load time is only a
+// backstop with a wide margin.
 
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 
+import { MAX_IMPORT_MERGED_CELLS } from "@/lib/constants";
 import { readEmbeddedImages } from "@/lib/import/images";
-import { checkImportFile } from "@/lib/import/safety";
+import {
+  checkImportFile,
+  type CheckedImportFile,
+  type ImportSafetyRejection,
+} from "@/lib/import/safety";
 import { readWorkbook } from "@/lib/import/workbook";
 import { checkXlsx } from "@/lib/xlsx-signature";
 
@@ -18,43 +25,113 @@ import { patchZip, type PartEdit } from "./fixtures/import/patch-zip";
 import { rawZip } from "./fixtures/import/raw-zip";
 
 const SHEET = "xl/worksheets/sheet1.xml";
+const NEWLINE = String.fromCharCode(10);
+const BOM = String.fromCharCode(0xfeff);
+const BACKSLASH = String.fromCharCode(92);
 
-/* ~1.6M covered cells: exceljs needs ~5 s for this; bounded, not a hang. */
+/* ~1.6M covered cells: far over the 100,000 cap; exceljs needs seconds. */
 const BIG = "C3:XFD100";
+/* 220,000 cells: over the cap, yet cheap for exceljs if it ever got through. */
+const OVER_CAP = "AH20:AH220020";
 
 const afterSheetData = (fragment: string) => (xml: string) =>
   xml.replace("</sheetData>", `</sheetData>${fragment}`);
+const mergeOf = (ref: string) =>
+  `<mergeCells count="1"><mergeCell ref="${ref}"/></mergeCells>`;
 
-/*
- * The property every attack must respect: the file is refused, or exceljs
- * reads the checked bytes quickly (the range never reached it in full).
- */
-async function refusedOrFast(
-  edits: Record<string, PartEdit>,
-): Promise<"refused" | number> {
-  const bytes = await patchZip(await buildFixture(), edits);
+type Outcome =
+  { refused: ImportSafetyRejection } | { accepted: CheckedImportFile };
+
+async function outcomeOf(bytes: Uint8Array): Promise<Outcome> {
   const result = await checkImportFile(bytes);
-  if (!result.ok) return "refused";
-  const start = performance.now();
-  await readWorkbook(result.file);
-  return performance.now() - start;
+  return result.ok ? { accepted: result.file } : { refused: result.reason };
 }
 
-function expectSafe(outcome: "refused" | number) {
-  if (outcome !== "refused") expect(outcome).toBeLessThan(2000);
+async function patched(edits: Record<string, PartEdit>): Promise<Outcome> {
+  return outcomeOf(await patchZip(await buildFixture(), edits));
+}
+
+function reasonOf(outcome: Outcome): ImportSafetyRejection | "accepted" {
+  return "refused" in outcome ? outcome.refused : "accepted";
+}
+
+/* "A" → 1, "XFD" → 16384; NaN for anything that is not letters. */
+function columnNumber(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) {
+    const code = ch.charCodeAt(0) - 64;
+    if (code < 1 || code > 26) return Number.NaN;
+    n = n * 26 + code;
+  }
+  return n;
+}
+
+/* Cells of an "A1" / "A1:B2" ref; Infinity when it is not a plain ref. */
+function areaOf(ref: string): number {
+  const corners = ref.replaceAll("$", "").split(":");
+  const cells = corners.map((corner) => {
+    let i = 0;
+    while (i < corner.length && /[A-Za-z]/.test(corner.charAt(i))) i++;
+    const digits = corner.slice(i);
+    return {
+      col: columnNumber(corner.slice(0, i)),
+      row: /^[0-9]+$/.test(digits) ? Number(digits) : Number.NaN,
+    };
+  });
+  const [a, b = a] = cells;
+  if (!a || !b || corners.length > 2) return Number.POSITIVE_INFINITY;
+  const area = (Math.abs(b.row - a.row) + 1) * (Math.abs(b.col - a.col) + 1);
+  return Number.isFinite(area) ? area : Number.POSITIVE_INFINITY;
+}
+
+/* Total cells covered by every <mergeCell> (any prefix) in one part. */
+function mergedCellsIn(xml: string): number {
+  let total = 0;
+  let at = xml.indexOf("mergeCell");
+  while (at !== -1) {
+    const next = xml.charAt(at + "mergeCell".length);
+    const tagEnd = xml.indexOf(">", at);
+    if (next !== "s" && xml.charAt(at - 1) !== "/" && tagEnd !== -1) {
+      const tag = xml.slice(at, tagEnd);
+      const ref = /(?:^|[^:\w])ref\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(tag);
+      if (ref) total += areaOf(ref[1] ?? ref[2] ?? "");
+    }
+    at = xml.indexOf("mergeCell", at + 1);
+  }
+  return total;
+}
+
+/*
+ * What the guard handed on is bounded: no <dataValidations> or
+ * <definedNames> element left in any part exceljs reads as the workbook or
+ * a worksheet, and merges within the cap.
+ */
+async function expectBounded(file: CheckedImportFile): Promise<void> {
+  const zip = await JSZip.loadAsync(file.bytes);
+  for (const entry of Object.values(zip.files)) {
+    const name = entry.name.toLowerCase();
+    if (entry.dir) continue;
+    if (name !== "xl/workbook.xml" && !name.includes("xl/worksheets/sheet")) {
+      continue;
+    }
+    const xml = await entry.async("string");
+    expect(xml).not.toMatch(/<(?:\w+:)?dataValidations[\s/>]/);
+    expect(xml).not.toMatch(/<(?:\w+:)?definedNames[\s/>]/);
+    expect(mergedCellsIn(xml)).toBeLessThanOrEqual(MAX_IMPORT_MERGED_CELLS);
+  }
 }
 
 describe("gate A re-check: sheet guard vs exceljs", () => {
-  it("refuses a namespaced, single-quoted or spaced merge ref (superset of exceljs)", async () => {
+  it("counts namespaced, single-quoted, spaced and decoy-attribute merge refs", async () => {
     for (const merge of [
       `<x:mergeCells count="1"><x:mergeCell ref="${BIG}"/></x:mergeCells>`,
       `<mergeCells count="1"><mergeCell ref='${BIG}'/></mergeCells>`,
       `<mergeCells count="1"><mergeCell   ref = "${BIG}"  /></mergeCells>`,
-      `<mergeCells count="1"><mergeCell\nref="${BIG}"></mergeCell></mergeCells>`,
+      `<mergeCells count="1"><mergeCell${NEWLINE}ref="${BIG}"></mergeCell></mergeCells>`,
       `<mergeCells count="1"><mergeCell r:ref="A1" ref="${BIG}"/></mergeCells>`,
     ]) {
-      const outcome = await refusedOrFast({ [SHEET]: afterSheetData(merge) });
-      expect(outcome).toBe("refused");
+      const outcome = await patched({ [SHEET]: afterSheetData(merge) });
+      expect(reasonOf(outcome)).toBe("too_many_merged_cells");
     }
   }, 60_000);
 
@@ -65,16 +142,12 @@ describe("gate A re-check: sheet guard vs exceljs", () => {
       "C3:XFD1&#48;0",
       "C3:XFD100 ",
     ]) {
-      const outcome = await refusedOrFast({
-        [SHEET]: afterSheetData(
-          `<mergeCells count="1"><mergeCell ref="${ref}"/></mergeCells>`,
-        ),
-      });
-      expectSafe(outcome);
+      const outcome = await patched({ [SHEET]: afterSheetData(mergeOf(ref)) });
+      expect(reasonOf(outcome)).toBe("sheet_out_of_range");
     }
   }, 60_000);
 
-  it("is not fooled by a close tag inside a comment or CDATA within dataValidations", async () => {
+  it("leaves no <dataValidations> element when a close tag hides in a comment or CDATA", async () => {
     const dv = `<dataValidation type="whole" sqref="${BIG}"><formula1>1</formula1></dataValidation>`;
     for (const block of [
       `<dataValidations count="1"><!-- </dataValidations> -->${dv}</dataValidations>`,
@@ -82,23 +155,26 @@ describe("gate A re-check: sheet guard vs exceljs", () => {
       `<dataValidations count="1">${dv}<![CDATA[</dataValidations>]]></dataValidations>`,
       `<dataValidations count="1">${dv}</dataValidations  >`,
     ]) {
-      const outcome = await refusedOrFast({
+      const outcome = await patched({
         [SHEET]: (xml) => xml.replace(/<pageMargins/, `${block}<pageMargins`),
       });
-      expectSafe(outcome);
+      if ("accepted" in outcome) await expectBounded(outcome.accepted);
+      else expect(outcome.refused).toBe("corrupt");
     }
   }, 60_000);
 
-  it("guards a merge in a UTF-8-BOM part and refuses a UTF-16 part", async () => {
-    const merge = `<mergeCells count="1"><mergeCell ref="${BIG}"/></mergeCells>`;
-    const bom = await refusedOrFast({
-      [SHEET]: (xml) => "﻿" + afterSheetData(merge)(xml),
+  it("guards a merge in a UTF-8-BOM part", async () => {
+    const outcome = await patched({
+      [SHEET]: (xml) => BOM + afterSheetData(mergeOf(BIG))(xml),
     });
-    expect(bom).toBe("refused");
+    expect(reasonOf(outcome)).toBe("too_many_merged_cells");
+  }, 60_000);
+
+  it("a UTF-16 worksheet never reaches exceljs as a readable sheet", async () => {
     const original = await new JSZip()
       .loadAsync(await buildFixture())
       .then((z) => z.file(SHEET)?.async("string"));
-    const text = afterSheetData(merge)(
+    const text = afterSheetData(mergeOf(BIG))(
       (original ?? "").replace('encoding="UTF-8"', 'encoding="UTF-16"'),
     );
     const utf16 = new Uint8Array(2 + text.length * 2);
@@ -108,75 +184,92 @@ describe("gate A re-check: sheet guard vs exceljs", () => {
       utf16[2 + 2 * i] = c & 0xff;
       utf16[3 + 2 * i] = c >> 8;
     }
-    expectSafe(await refusedOrFast({ [SHEET]: utf16 }));
+    const outcome = await patched({ [SHEET]: utf16 });
+    if ("refused" in outcome) return;
+    // Accepted: exceljs decodes parts as UTF-8 and saxes refuses the NULs.
+    const read = await readWorkbook(outcome.accepted);
+    expect(read.ok).toBe(false);
   }, 60_000);
 
   it("guards every part exceljs reads as a worksheet (its pattern is unanchored)", async () => {
     const original = await new JSZip()
       .loadAsync(await buildFixture())
       .then((z) => z.file(SHEET)?.async("string"));
-    const evil = afterSheetData(
-      `<mergeCells count="1"><mergeCell ref="${BIG}"/></mergeCells>`,
-    )(original ?? "");
+    const evil = afterSheetData(mergeOf(BIG))(original ?? "");
     for (const name of [
       "zz/xl/worksheets/sheet7.xml",
       "xl/worksheets/sheet8.xml.bak",
-      "XL/Worksheets/Sheet9.XML",
       "xl/worksheets/sheet10.xmlx",
     ]) {
-      expectSafe(await refusedOrFast({ [name]: evil }));
+      expect([name, reasonOf(await patched({ [name]: evil }))]).toEqual([
+        name,
+        "too_many_merged_cells",
+      ]);
+    }
+    // A case variant: JSZip adds the folders "XL/" and "XL/Worksheets/",
+    // which collide with "xl/" without case, so the duplicate rule would
+    // refuse it first; written raw (no folders) the guard must refuse it.
+    // Same for a non-ASCII name (JSZip would add a Unicode Path extra field,
+    // which the identity rule refuses).
+    for (const name of [
+      "XL/Worksheets/Sheet9.XML",
+      `xl/worksheets/sheet11.xml${String.fromCharCode(0x301)}`,
+    ]) {
+      const raw = await rawOutcome((parts) => [
+        ...parts,
+        [name, bytesOf(evil)],
+      ]);
+      expect([name, reasonOf(raw)]).toEqual([name, "too_many_merged_cells"]);
     }
   }, 60_000);
 
-  it("allows 2,000 small merges and exceljs still loads them fast (O(n^2) check)", async () => {
+  it("keeps 2,000 small merges (bounded output; load time only a backstop)", async () => {
     const merges: string[] = [];
     for (let i = 0; i < 2000; i++) {
       const r = 20 + i;
       merges.push(`<mergeCell ref="AH${r}:AI${r}"/>`);
     }
-    const outcome = await refusedOrFast({
+    const outcome = await patched({
       [SHEET]: afterSheetData(
         `<mergeCells count="2000">${merges.join("")}</mergeCells>`,
       ),
     });
-    expect(outcome).not.toBe("refused");
-    expect(outcome).toBeLessThan(5000);
+    if (!("accepted" in outcome)) throw new Error(reasonOf(outcome));
+    await expectBounded(outcome.accepted);
+    const start = performance.now();
+    expect((await readWorkbook(outcome.accepted)).ok).toBe(true);
+    expect(performance.now() - start).toBeLessThan(30_000);
   }, 60_000);
 
   it("refuses 2,001 merges and a single merge over 100,000 cells", async () => {
     const merges: string[] = [];
-    for (let i = 0; i < 2001; i++)
+    for (let i = 0; i < 2001; i++) {
       merges.push(`<mergeCell ref="AH${20 + i}"/>`);
-    expect(
-      await refusedOrFast({
-        [SHEET]: afterSheetData(`<mergeCells>${merges.join("")}</mergeCells>`),
-      }),
-    ).toBe("refused");
-    expect(
-      await refusedOrFast({
-        [SHEET]: afterSheetData(
-          '<mergeCells><mergeCell ref="AH20:AH100020"/></mergeCells>',
-        ),
-      }),
-    ).toBe("refused");
+    }
+    const many = await patched({
+      [SHEET]: afterSheetData(`<mergeCells>${merges.join("")}</mergeCells>`),
+    });
+    expect(reasonOf(many)).toBe("too_many_merged_cells");
+    const large = await patched({
+      [SHEET]: afterSheetData(mergeOf("AH20:AH100020")),
+    });
+    expect(reasonOf(large)).toBe("too_many_merged_cells");
   }, 60_000);
 
   it("refuses <col max> past XFD and a huge sheetId", async () => {
-    expect(
-      await refusedOrFast({
-        [SHEET]: (xml) =>
-          xml.replace(
-            /<sheetData/,
-            '<cols><col min="1" max="99999999" width="9"/></cols><sheetData',
-          ),
-      }),
-    ).toBe("refused");
-    expect(
-      await refusedOrFast({
-        "xl/workbook.xml": (xml) =>
-          xml.replace(/sheetId="1"/, 'sheetId="99999999"'),
-      }),
-    ).toBe("refused");
+    const cols = await patched({
+      [SHEET]: (xml) =>
+        xml.replace(
+          /<sheetData/,
+          '<cols><col min="1" max="99999999" width="9"/></cols><sheetData',
+        ),
+    });
+    expect(reasonOf(cols)).toBe("sheet_out_of_range");
+    const sheetId = await patched({
+      "xl/workbook.xml": (xml) =>
+        xml.replace(/sheetId="1"/, 'sheetId="99999999"'),
+    });
+    expect(reasonOf(sheetId)).toBe("sheet_out_of_range");
   }, 60_000);
 });
 
@@ -244,79 +337,157 @@ describe("gate A re-check: zip rewrite", () => {
 
 /*
  * JSZip (inside exceljs) RESOLVES entry names on load (jszip/lib/load.js:66,
- * utils.resolve): "." and empty segments are dropped and ".." pops a
- * segment, and a later entry with the same resolved name replaces an
- * earlier one. safety.ts and the sheet guard work on the RAW names, so
- * "xl/./worksheets/sheet1.xml" is not guarded (WORKSHEET_PART does not
- * match it) yet exceljs reads it as xl/worksheets/sheet1.xml, and
- * "xl/a/../workbook.xml" placed after the real workbook passes the
- * duplicate check yet replaces it inside exceljs.
+ * utils.resolve): "." and empty segments are dropped, ".." pops a segment,
+ * and a later entry with the same resolved name replaces an earlier one.
+ * patchZip goes through JSZip (which resolves on add), so these files are
+ * written with the raw zip writer.
  */
-async function rawFixture(
-  edit: (parts: Map<string, Uint8Array>) => [string, Uint8Array][],
-): Promise<Uint8Array> {
-  const parts = new Map<string, Uint8Array>();
+async function fixtureParts(): Promise<[string, Uint8Array][]> {
   const zip = await JSZip.loadAsync(await buildFixture());
+  const parts: [string, Uint8Array][] = [];
   for (const file of Object.values(zip.files)) {
-    if (!file.dir) parts.set(file.name, await file.async("uint8array"));
+    if (!file.dir) parts.push([file.name, await file.async("uint8array")]);
   }
-  return rawZip(edit(parts).map(([name, data]) => ({ name, data })));
+  return parts;
 }
 
 const text = (data: Uint8Array | undefined) => new TextDecoder().decode(data);
 const bytesOf = (s: string) => new TextEncoder().encode(s);
 
-async function safeOutcome(bytes: Uint8Array): Promise<"refused" | number> {
-  const result = await checkImportFile(bytes);
-  if (!result.ok) return "refused";
-  const start = performance.now();
-  await readWorkbook(result.file);
-  return performance.now() - start;
+async function rawOutcome(
+  edit: (parts: [string, Uint8Array][]) => [string, Uint8Array][],
+): Promise<Outcome> {
+  const parts = edit(await fixtureParts());
+  return outcomeOf(rawZip(parts.map(([name, data]) => ({ name, data }))));
 }
 
-describe("gate A re-check: entry names JSZip resolves", () => {
-  it("baseline: the hand-rebuilt stored fixture is accepted and reads fast", async () => {
-    const bytes = await rawFixture((parts) => [...parts]);
-    const outcome = await safeOutcome(bytes);
-    expect(outcome).not.toBe("refused");
-    expect(outcome).toBeLessThan(2000);
-  }, 60_000);
-
-  it("[Medium, T2] guards a worksheet whose name has a '.' segment (xl/./worksheets/sheet1.xml)", async () => {
-    // 220,000 merged cells: over the 100,000 cap, so a guarded sheet is
-    // refused. Today it is accepted and exceljs applies the merge (the
-    // sheet reads 98+ extra rows from a range like C3:XFD100).
-    const bytes = await rawFixture((parts) =>
-      [...parts].map(([name, data]): [string, Uint8Array] =>
-        name === SHEET
-          ? [
-              "xl/./worksheets/sheet1.xml",
-              bytesOf(
-                afterSheetData(
-                  '<mergeCells count="1"><mergeCell ref="AH20:AH220020"/></mergeCells>',
-                )(text(data)),
-              ),
-            ]
-          : [name, data],
-      ),
+/* The fixture with sheet1 renamed and carrying a merge over the cap. */
+const renamedSheet =
+  (name: string) =>
+  (parts: [string, Uint8Array][]): [string, Uint8Array][] =>
+    parts.map(([n, data]): [string, Uint8Array] =>
+      n === SHEET
+        ? [name, bytesOf(afterSheetData(mergeOf(OVER_CAP))(text(data)))]
+        : [n, data],
     );
-    expect(await safeOutcome(bytes)).toBe("refused");
+
+describe("gate A re-check: entry names JSZip resolves (M-3)", () => {
+  it("baseline: the raw-written stored fixture is accepted and bounded", async () => {
+    const outcome = await rawOutcome((parts) => parts);
+    if (!("accepted" in outcome)) throw new Error(reasonOf(outcome));
+    await expectBounded(outcome.accepted);
+    expect((await readWorkbook(outcome.accepted)).ok).toBe(true);
   }, 60_000);
 
-  it("[Medium, T2] refuses a second workbook part that resolves onto xl/workbook.xml", async () => {
-    const bytes = await rawFixture((parts) => {
-      const workbook = text(parts.get("xl/workbook.xml"));
+  it("refuses every name JSZip would resolve to another name, and backslashes", async () => {
+    for (const name of [
+      "xl/./worksheets/sheet1.xml",
+      "./xl/worksheets/sheet1.xml",
+      "xl//worksheets/sheet1.xml",
+      "//xl/worksheets/sheet1.xml",
+      "xl/a/../worksheets/sheet1.xml",
+      "xl/worksheets/sheet1.xml/..",
+      `xl${BACKSLASH}worksheets${BACKSLASH}sheet1.xml`,
+    ]) {
+      const outcome = await rawOutcome(renamedSheet(name));
+      expect([name, reasonOf(outcome)]).toEqual([name, "inconsistent_entries"]);
+    }
+  }, 60_000);
+
+  it("refuses a second workbook part that resolves onto xl/workbook.xml", async () => {
+    const outcome = await rawOutcome((parts) => {
+      const workbook = text(parts.find(([n]) => n === "xl/workbook.xml")?.[1]);
       const evil = workbook.replace(
         "</sheets>",
         '</sheets><definedNames><definedName name="x">Sheet1!$A$1:$B$2</definedName></definedNames>',
       );
       return [...parts, ["xl/a/../workbook.xml", bytesOf(evil)]];
     });
-    const result = await checkImportFile(bytes);
-    if (!result.ok) return; // refused: fixed
-    const read = await readWorkbook(result.file);
-    // The guard strips every <definedNames>; exceljs must see none.
-    expect(read.ok && read.workbook.definedNames.model).toEqual([]);
+    expect(reasonOf(outcome)).toBe("inconsistent_entries");
+  }, 60_000);
+
+  it("refuses names that collide after dropping one leading '/' or ignoring case", async () => {
+    for (const twin of [
+      "/xl/worksheets/sheet1.xml",
+      "XL/Worksheets/Sheet1.xml",
+    ]) {
+      const outcome = await rawOutcome((parts) => {
+        const sheet = parts.find(([n]) => n === SHEET)?.[1] ?? new Uint8Array();
+        return [
+          ...parts,
+          [twin, bytesOf(afterSheetData(mergeOf(OVER_CAP))(text(sheet)))],
+        ];
+      });
+      expect(reasonOf(outcome)).toBe("inconsistent_entries");
+    }
+  }, 60_000);
+
+  it("a single leading '/' is accepted and still guarded", async () => {
+    const outcome = await rawOutcome(renamedSheet("/xl/worksheets/sheet1.xml"));
+    expect(reasonOf(outcome)).toBe("too_many_merged_cells");
+  }, 60_000);
+
+  it("a percent-encoded or trailing-dot name never reaches exceljs as an unguarded sheet", async () => {
+    for (const name of [
+      "xl/worksheets/sheet%31.xml",
+      "xl/worksheets/sheet1.xml.",
+      "xl/worksheets/sheet1.xml ",
+    ]) {
+      const outcome = await rawOutcome((parts) => [
+        ...parts,
+        ...renamedSheet(name)([
+          [SHEET, parts.find(([n]) => n === SHEET)?.[1] ?? new Uint8Array()],
+        ]),
+      ]);
+      if ("refused" in outcome) {
+        expect(outcome.refused).toBe("too_many_merged_cells");
+        continue;
+      }
+      // Accepted: exceljs must not hold the over-cap merge anywhere.
+      const read = await readWorkbook(outcome.accepted);
+      if (!read.ok) continue;
+      for (const ws of read.workbook.worksheets) {
+        const merges = (ws as unknown as { _merges: Record<string, unknown> })
+          ._merges;
+        expect(Object.keys(merges)).toHaveLength(0);
+      }
+    }
+  }, 60_000);
+});
+
+describe("gate A re-check: pictures and rows come from one part (I-7)", () => {
+  it("skips a sheet's pictures when exceljs would splice its target to another path", async () => {
+    // exceljs: `xl/${" /xl/worksheets/sheet1.xml".replace(/^(\s|\/xl\/)+/, "")}`
+    // = xl/worksheets/sheet1.xml; resolveTarget reads " " as a relative
+    // segment. The two differ, so the pictures must not be read at all.
+    const bytes = await patchZip(await buildFixture(), {
+      "xl/_rels/workbook.xml.rels": (xml) =>
+        xml.replace(
+          'Target="worksheets/sheet1.xml"',
+          'Target=" /xl/worksheets/sheet1.xml"',
+        ),
+    });
+    const outcome = await outcomeOf(bytes);
+    if (!("accepted" in outcome)) throw new Error(reasonOf(outcome));
+    const read = await readWorkbook(outcome.accepted);
+    if (!read.ok) return;
+    const embedded = await readEmbeddedImages(
+      outcome.accepted,
+      read.sheets.map((s) => s.name),
+    );
+    expect(embedded.anchors).toEqual([]);
+    expect(embedded.warnings.map((w) => w.code)).toContain(
+      "unsupported_image_store",
+    );
+  }, 60_000);
+
+  it("refuses two sheets with one name (exceljs throws), so rows cannot cross sheets", async () => {
+    const bytes = await patchZip(await buildFixture({ secondSheet: true }), {
+      "xl/workbook.xml": (xml) => xml.replace('name="Sheet2"', 'name="Sheet1"'),
+    });
+    const outcome = await outcomeOf(bytes);
+    if (!("accepted" in outcome)) return;
+    expect((await readWorkbook(outcome.accepted)).ok).toBe(false);
   }, 60_000);
 });
 
@@ -345,8 +516,7 @@ describe("gate A re-check: real client sheet (local only, never committed)", () 
       .map(([n]) => n);
     for (const name of changed) {
       expect(
-        name === "xl/workbook.xml" ||
-          /xl\/worksheets\/sheet\d+\.xml/.test(name),
+        name === "xl/workbook.xml" || name.includes("xl/worksheets/sheet"),
       ).toBe(true);
     }
     const direct = new ExcelJS.Workbook();
@@ -354,9 +524,8 @@ describe("gate A re-check: real client sheet (local only, never committed)", () 
     await direct.xlsx.load(Buffer.from(original) as unknown as ExcelJS.Buffer);
     const read = await readWorkbook(result.file);
     if (!read.ok) throw new Error("unreadable");
-    const sheet = direct.worksheets[0];
     const directRows: string[] = [];
-    sheet?.eachRow((row, r) => {
+    direct.worksheets[0]?.eachRow((row, r) => {
       if (r > (read.sheets[0]?.headerRow ?? 1)) directRows.push(String(r));
     });
     expect(read.rows.map((r) => String(r.row))).toEqual(directRows);
