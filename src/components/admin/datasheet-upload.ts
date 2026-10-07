@@ -61,7 +61,8 @@ const UPLOAD_CANCELLED = "The upload was cancelled.";
  * accepted PUT with a 2xx and an empty body. Never logs: the URL is signed.
  */
 export function putDatasheet(
-  ticket: DatasheetUploadTicket,
+  // Only the URL and the signed headers are used (the import reuses it).
+  ticket: Pick<DatasheetUploadTicket, "uploadUrl" | "headers">,
   file: Blob,
   onProgress: (percent: number) => void,
   signal?: AbortSignal,

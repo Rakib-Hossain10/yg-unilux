@@ -473,13 +473,22 @@ function actionProblems(source: string): string[] {
       revalidators.add(helper[1] ?? "");
     }
   }
+  /*
+   * Services: the names imported from "@/lib/admin/*" and the bulk import's
+   * entry module "@/lib/import" (T9, ADR 0058). A presign writes nothing and
+   * has no audit entry, so a `presign…` function from "@/lib/storage" counts
+   * too; any other storage call does not.
+   */
   const services = new Set<string>();
   for (const imp of withStrings.matchAll(
-    /import\s*\{([^}]*)\}\s*from\s*["']@\/lib\/admin\/(?!write-result)[\w-]+["']/g,
+    /import\s*\{([^}]*)\}\s*from\s*["']@\/lib\/(admin\/(?!write-result)[\w-]+|import|storage)["']/g,
   )) {
+    const fromStorage = imp[2] === "storage";
     for (const name of (imp[1] ?? "").split(",")) {
       const clean = name.trim();
-      if (clean !== "" && !/^type\s/.test(clean)) services.add(clean);
+      if (clean === "" || /^type\s/.test(clean)) continue;
+      if (fromStorage && !/^presign\w+$/.test(clean)) continue;
+      services.add(clean);
     }
   }
   for (const match of actions) {
@@ -536,6 +545,10 @@ describe("admin Server Actions call requireAdmin() first", () => {
 
   it("finds the settings actions", () => {
     expect(files).toContain("src/app/admin/settings/actions.ts");
+  });
+
+  it("finds the import actions", () => {
+    expect(files).toContain("src/app/admin/import/actions.ts");
   });
 
   it.each(files)("%s", (file) => {
@@ -618,6 +631,37 @@ export async function a() {
   await save();
 }`;
     expect(actionProblems(source).join()).toMatch(/does not revalidate/);
+  });
+
+  it("accepts the import service module and a storage presign as services", () => {
+    const source = `"use server";
+import { requireAdmin } from "@/lib/permissions";
+import { revalidateCatalogInAction } from "@/lib/revalidate";
+import { previewImport } from "@/lib/import";
+import { presignImportUpload } from "@/lib/storage";
+export async function a(input: unknown) {
+  await requireAdmin();
+  revalidateCatalogInAction((await previewImport(input)).tags);
+}
+export async function b() {
+  await requireAdmin();
+  await presignImportUpload({ contentType: "x", contentLength: 1 });
+  revalidateCatalogInAction([]);
+}`;
+    expect(actionProblems(source)).toEqual([]);
+  });
+
+  it("does not count a non-presign storage call as a service", () => {
+    const source = `"use server";
+import { requireAdmin } from "@/lib/permissions";
+import { revalidateCatalogInAction } from "@/lib/revalidate";
+import { deleteObject } from "@/lib/storage";
+export async function a(key: unknown) {
+  await requireAdmin();
+  await deleteObject(key);
+  revalidateCatalogInAction([]);
+}`;
+    expect(actionProblems(source).join()).toMatch(/calls no admin service/);
   });
 
   it("rejects an action that calls no admin service", () => {
