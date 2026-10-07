@@ -180,3 +180,55 @@ export async function destroyImage(publicId: string): Promise<boolean> {
     return false;
   }
 }
+
+/** One uploaded image as listed by the Admin API. */
+export interface ListedImage {
+  publicId: string;
+  createdAt: Date | undefined;
+}
+
+/**
+ * Every uploaded image whose public id starts with `prefix` (follows
+ * pagination). For the orphan sweep. Throws on failure with a message that
+ * carries only the HTTP code, never the request options.
+ */
+export async function listImages(prefix: string): Promise<ListedImage[]> {
+  configure();
+  const found: ListedImage[] = [];
+  let cursor: string | undefined;
+  try {
+    do {
+      const page = (await cloudinary.api.resources({
+        resource_type: "image",
+        type: "upload",
+        prefix,
+        max_results: 500,
+        next_cursor: cursor,
+      })) as {
+        resources?: { public_id?: unknown; created_at?: unknown }[];
+        next_cursor?: unknown;
+      };
+      for (const item of page.resources ?? []) {
+        if (typeof item.public_id !== "string") continue;
+        const created =
+          typeof item.created_at === "string"
+            ? new Date(item.created_at)
+            : undefined;
+        found.push({
+          publicId: item.public_id,
+          createdAt:
+            created && !Number.isNaN(created.getTime()) ? created : undefined,
+        });
+      }
+      cursor =
+        typeof page.next_cursor === "string" && page.next_cursor
+          ? page.next_cursor
+          : undefined;
+    } while (cursor !== undefined);
+  } catch (error) {
+    throw new Error(
+      `Cloudinary listing failed (http ${httpCode(error) ?? "n/a"})`,
+    );
+  }
+  return found;
+}

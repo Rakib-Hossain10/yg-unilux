@@ -66,3 +66,4 @@ Template:
 | [0048](0048-datasheets-ui.md) | Datasheets admin UI: XHR PUT with exact headers, list search/paging in the page, row rename/replace/delete, picker in the product form, publish errors mark inputs | Accepted |
 | [0049](0049-settings-service.md) | Settings service: siteContent keys, 28-key strict visibility form that fails closed on read, filter cleanup for newly restricted columns, digits-only WhatsApp, value-free audit meta | Accepted |
 | [0050](0050-settings-ui.md) | Settings UI: two cards, retry stays enabled after a failed filter cleanup, static guard requires revalidate + service call, restricted filters dropped on product save | Accepted |
+| [0051](0051-orphan-sweep-scripts.md) | Orphan sweep scripts: pure selection, dry-run default, 24 h window, Cloudinary products/areas only, list-only datasheet report | Accepted |

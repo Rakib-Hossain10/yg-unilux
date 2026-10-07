@@ -39,7 +39,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - T15 done (ADR 0050, Sonnet 5.5 at the user's request): `/admin/settings` (28 column switches, WhatsApp, company email), 3 actions with customer/visitor/banned tests, static guard now requires revalidate + service call, T14 open item closed (`withoutRestrictedFilters` in `products.ts`). 1933 unit green (5 expected-fail), typecheck + lint + build OK. NOT yet seen in a browser.
 - **QA gate D: PASS** (T14–T15, 2026-10-07, Sonnet 5.5 at the user's request). No Critical/High/Medium; 3 Low + info. Added `test/admin-settings.qa.test.ts` (90) and `e2e/admin-settings-gate-d.qa.spec.ts` (15, own Playwright project `settings-gate-d`, depends on chromium; it wipes `filters.cctK` so it must not overlap other specs). 2023 unit green (5 expected-fail), gate D e2e 15/15, build OK, audit ok. The settings page was seen in a browser (axe clean, 375 px OK).
 - T16 done (no ADR, Sonnet 5.5 at the user's request): most already existed from T10a; added reason links (each publish reason links to its section/control and moves focus; `status-links.ts`) and `src/app/admin/not-found.tsx`. Root `admin/error.tsx` already covers all segments. 2025 unit green (5 expected-fail), typecheck/lint/build OK. NOT seen in a browser (link focus, not-found page); add e2e in T18.
-- **Next: T17** (orphan scripts: sweep-incoming, sweep-cloudinary-orphans, list-only R2 report; `backend-architect`, Opus), then T18 (exit e2e, Sonnet), QA gate E (Opus). **Must-do:** the Phase 3 import must call `withoutRestrictedFilters`.
+- T17 done (ADR 0051, Sonnet 5.5 at the user's request): `src/lib/orphan-sweep.ts`, `scripts/{sweep-incoming,sweep-cloudinary-orphans,report-orphan-datasheets}.ts`, `listImages` in `cloudinary.ts`, npm scripts `sweep:incoming`, `sweep:cloudinary`, `report:datasheets`. 2039 unit green (5 expected-fail). NOT run against real R2/Cloudinary: do a dry-run smoke with real credentials. Never schedule `--apply` in cron without a mass-delete guard.
+- **Next: T18** (exit e2e, Sonnet; see must-dos below, incl. M-1 login limiter and the storage/Cloudinary fakes), then QA gate E (Opus). **Must-do:** the Phase 3 import must call `withoutRestrictedFilters`.
 - **Open items from gate D:**
   - **L-1:** `updateProduct` reads the visibility setting then writes; a save racing a column restriction can re-write restricted filter numbers (repaired by saving the column setting again). Fix with a version/`updatedAt` check or a second cleanup pass.
   - **L-2:** a retry whose setting is unchanged but cleanup modified products writes no audit entry.
@@ -295,6 +296,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07 — T17 done (ADR 0051): orphan sweep scripts, dry-run default. 2039 unit green. Next: T18.
 - 2026-10-07 — QA gate D PASS (T14–T15) on Sonnet 5.5 at the user's request: 3 Low findings recorded, 90 unit + 15 e2e QA tests added. Next: T16.
 - 2026-10-07 — T15 done (ADR 0050): settings UI, guard test extended, T14 open item closed. 1933 unit green. Next: QA gate D.
 - 2026-10-06 — T11b done (ADR 0046): images editor, variant image select, area uploader. The first run on Sonnet was stopped because the user wants a very good-looking UI; Opus built it. 1670 unit + 84 e2e green, build OK. Next: T12.

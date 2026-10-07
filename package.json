@@ -27,6 +27,9 @@
     "db:indexes": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sync-indexes.ts",
     "check:services": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-services.ts",
     "seed:admin": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed-admin.ts",
+    "sweep:incoming": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sweep-incoming.ts",
+    "sweep:cloudinary": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sweep-cloudinary-orphans.ts",
+    "report:datasheets": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/report-orphan-datasheets.ts",
     "prepare": "husky"
   },
   "dependencies": {
