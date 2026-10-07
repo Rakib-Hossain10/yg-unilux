@@ -41,6 +41,8 @@ export const WARNING_CODES = {
   no_header: "fatal",
   missing_required_column: "fatal",
   // error (blocks that product)
+  invalid_product_no: "error",
+  invalid_model_no: "error",
   orphan_row: "error",
   missing_model_no: "error",
   duplicate_model_no: "error",

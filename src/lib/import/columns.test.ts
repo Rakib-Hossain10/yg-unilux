@@ -4,10 +4,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { SPEC_COLUMNS } from "@/models/spec-columns";
+import { SPEC_COLUMNS, SPEC_KEYS } from "@/models/spec-columns";
 
 import { FIXTURE_HEADERS } from "../../../test/fixtures/import/build";
-import { REQUIRED_COLUMNS, columnForHeader, normalizeHeader } from "./columns";
+import {
+  REQUIRED_COLUMNS,
+  SPLIT_POLICY,
+  columnForHeader,
+  normalizeHeader,
+} from "./columns";
 
 describe("normalizeHeader", () => {
   it.each([
@@ -62,5 +67,57 @@ describe("columnForHeader", () => {
 
   it("requires NO. and Model No.", () => {
     expect(REQUIRED_COLUMNS).toEqual(["productNo", "modelNo"]);
+  });
+});
+
+describe("SPLIT_POLICY", () => {
+  // Pinned from the plan's cleaning rule 7. Changing a policy changes how
+  // every imported product reads, so it must be a deliberate edit here too.
+  const EXPECTED = {
+    cct: "options",
+    beamAngle: "options",
+    wattage: "options",
+    lumenOutput: "options",
+    lumenEfficiency: "options",
+    cri: "options",
+    ugr: "options",
+    ipRating: "options",
+    voltageInput: "options",
+    chipType: "options",
+    driver: "options",
+    dimmable: "options",
+    housingFinish: "options+slash",
+    reflectorColor: "options+slash",
+    housingMaterial: "join",
+    lens: "join",
+    reflector: "join",
+    diffuser: "join",
+    dimensions: "join",
+    cutOutSize: "join",
+    rotatingAngle: "join",
+    holder: "join",
+    chipEfficiency: "join",
+    powerFactor: "join",
+    sdcm: "join",
+    lifespan: "join",
+    warrantyPeriod: "join",
+    batchNo: "join",
+  } as const;
+
+  it("pins the policy of all 28 spec keys", () => {
+    expect(Object.keys(EXPECTED)).toHaveLength(28);
+    expect(new Set(Object.keys(EXPECTED))).toEqual(new Set(SPEC_KEYS));
+    for (const key of SPEC_KEYS) {
+      expect([key, SPLIT_POLICY[key]]).toEqual([key, EXPECTED[key]]);
+    }
+  });
+
+  it("joins the identity columns Model Name and Model Type", () => {
+    expect(SPLIT_POLICY.family).toBe("join");
+    expect(SPLIT_POLICY.type).toBe("join");
+  });
+
+  it("has no policy for anything else", () => {
+    expect(Object.keys(SPLIT_POLICY)).toHaveLength(30);
   });
 });

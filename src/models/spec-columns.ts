@@ -100,6 +100,26 @@ export const DEFAULT_RESTRICTED_SPEC_KEYS: readonly SpecKey[] =
     (column) => column.defaultVisibility === "restricted",
   ).map((column) => column.key);
 
+/** A listing filter whose numbers are parsed from a spec column. */
+export type FilterKey = "cctK" | "cri" | "beamDeg" | "ugr" | "wattage" | "ip";
+
+/**
+ * The listing filters that are derived from a spec column. Making such a
+ * column restricted also removes its parsed numbers from every product, so
+ * the filter cannot be used to probe restricted values (rule 9, ADR 0002).
+ * Pure, so the importer's parsers (src/lib/import/numbers.ts) share it with
+ * the admin settings service, which re-exports it.
+ */
+export const FILTER_KEY_BY_SPEC: Readonly<Partial<Record<SpecKey, FilterKey>>> =
+  {
+    cct: "cctK",
+    cri: "cri",
+    beamAngle: "beamDeg",
+    ugr: "ugr",
+    wattage: "wattage",
+    ipRating: "ip",
+  };
+
 /**
  * Spec values as stored: each key holds English display strings. One entry is
  * a single value; several entries are options shown as chips

@@ -20,7 +20,11 @@ import {
   type ColumnVisibility,
 } from "@/lib/schemas/settings";
 import { ProductModel, SiteContentModel } from "@/models";
-import { SPEC_KEYS, type SpecKey } from "@/models/spec-columns";
+import {
+  FILTER_KEY_BY_SPEC,
+  SPEC_KEYS,
+  type SpecKey,
+} from "@/models/spec-columns";
 
 import {
   assertActorId,
@@ -30,19 +34,9 @@ import {
   type ServiceResult,
 } from "./write-result";
 
-/**
- * The listing filters that are derived from a spec column. Making such a
- * column restricted also removes its parsed numbers from every product, so
- * the filter cannot be used to probe restricted values (rule 9, ADR 0002).
- */
-export const FILTER_KEY_BY_SPEC: Readonly<Partial<Record<SpecKey, string>>> = {
-  cct: "cctK",
-  cri: "cri",
-  beamAngle: "beamDeg",
-  ugr: "ugr",
-  wattage: "wattage",
-  ipRating: "ip",
-};
+/* Re-exported from the pure spec-columns module (the importer shares it) for
+ * existing callers. */
+export { FILTER_KEY_BY_SPEC };
 
 const COLUMN_TAGS: CatalogTag[] = [
   CATALOG_TAGS.settingsColumns,

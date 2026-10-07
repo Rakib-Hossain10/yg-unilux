@@ -1,14 +1,66 @@
-// The import's column map: which sheet header means which column key. Pure.
-// T2 holds the header part; T3 adds each column's split policy here.
+// The import's column map: which sheet header means which column key, and how
+// each column's multi-line cells are split (the split policy). Pure.
 //
 // Headers are "English\nChinese" (CLAUDE.md). We match on the English first
 // line only, case-insensitively, with spaces collapsed and a trailing "."
 // optional, because the client's sheet spells them loosely ("HOLDER",
 // "Voltage INPUT", "Batch No.\n批号 ").
 
-import { SPEC_COLUMNS } from "@/models/spec-columns";
+import { SPEC_COLUMNS, type SpecKey } from "@/models/spec-columns";
 
 import type { ColumnKey, IdentityKey, TemplateKey } from "./types";
+
+/**
+ * How a multi-line cell becomes values (plan cleaning rule 7):
+ * - `options`: each line is one option ("3000K\n4000K" → two chips);
+ * - `options+slash`: lines and "/" both separate options ("White/Black");
+ * - `join`: the lines are one value spread over several lines, joined with a
+ *   space ("Die Casting\nAluminium + PC" → "Die Casting Aluminium + PC").
+ * Only `options+slash` splits on "/", so "AC100-240V/50-60Hz" stays one value.
+ */
+export type SplitPolicy = "options" | "options+slash" | "join";
+
+/**
+ * The split policy of every spec key plus the two text identity columns.
+ * `satisfies` makes a new spec key fail to compile until it has a policy,
+ * and columns.test.ts pins every entry. Decided from the client's sheet.
+ */
+export const SPLIT_POLICY = {
+  // Lists of choices: CCTs, beam angles, wattages, ...
+  cct: "options",
+  beamAngle: "options",
+  wattage: "options",
+  lumenOutput: "options",
+  lumenEfficiency: "options",
+  cri: "options",
+  ugr: "options",
+  ipRating: "options",
+  voltageInput: "options",
+  chipType: "options",
+  driver: "options",
+  dimmable: "options",
+  // Colours written "White/Black".
+  housingFinish: "options+slash",
+  reflectorColor: "options+slash",
+  // One description wrapped over lines.
+  housingMaterial: "join",
+  lens: "join",
+  reflector: "join",
+  diffuser: "join",
+  dimensions: "join",
+  cutOutSize: "join",
+  rotatingAngle: "join",
+  holder: "join",
+  chipEfficiency: "join",
+  powerFactor: "join",
+  sdcm: "join",
+  lifespan: "join",
+  warrantyPeriod: "join",
+  batchNo: "join",
+  // Identity text: "Pull-Down Spot Light\nTrim Round 1 Head" is one type.
+  family: "join",
+  type: "join",
+} as const satisfies Record<SpecKey | "family" | "type", SplitPolicy>;
 
 /** The five non-spec sheet columns, by their English header. */
 export const IDENTITY_COLUMNS: readonly {
@@ -35,9 +87,18 @@ export const TEMPLATE_COLUMNS: readonly {
 /** Without these two the sheet cannot be grouped: the file is refused. */
 export const REQUIRED_COLUMNS: readonly ColumnKey[] = ["productNo", "modelNo"];
 
+/**
+ * The CJK characters the import removes (English only, plan decision 7), as
+ * a regex character-class body: Han, Hiragana, Katakana, Hangul, Bopomofo,
+ * CJK symbols and punctuation (U+3000–303F), CJK compatibility forms
+ * (U+FE30–FE4F) and the full-width forms NFKC leaves (U+FF00–FFEF).
+ * Shared by header matching and the cell cleaner (clean.ts).
+ */
+export const CJK_CLASS =
+  "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\p{Script=Bopomofo}\\u3000-\\u303F\\uFE30-\\uFE4F\\uFF00-\\uFFEF";
+
 /* CJK characters, so "Lens 透镜" on one line still matches "Lens". */
-const CJK =
-  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}　-〿＀-￯]/gu;
+const CJK = new RegExp(`[${CJK_CLASS}]`, "gu");
 
 /**
  * The comparable form of a header cell: NFKC (full-width letters to ASCII),

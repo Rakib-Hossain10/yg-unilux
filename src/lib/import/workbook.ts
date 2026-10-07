@@ -13,6 +13,7 @@ import ExcelJS from "exceljs";
 
 import { IMPORT_HEADER_SCAN_ROWS } from "@/lib/constants";
 
+import { numberToText } from "./clean";
 import { REQUIRED_COLUMNS, columnForHeader } from "./columns";
 import {
   importWarning,
@@ -306,7 +307,7 @@ function cellValue(cell: ExcelJS.Cell, aboveRow = 0): CellText {
 function valueText(value: ExcelJS.CellValue | undefined): CellText {
   if (value === null || value === undefined) return {};
   if (typeof value === "string") return { text: value };
-  if (typeof value === "number") return { text: formatNumber(value) };
+  if (typeof value === "number") return { text: numberToText(value) };
   if (typeof value === "boolean") return { text: value ? "TRUE" : "FALSE" };
   if (value instanceof Date) {
     const text = formatDate(value);
@@ -327,19 +328,6 @@ function valueText(value: ExcelJS.CellValue | undefined): CellText {
   }
   if ("error" in value) return { issue: "cell_error" };
   return {};
-}
-
-/**
- * A number as a plain decimal string: at most 15 significant digits (so
- * 0.1 + 0.2 is "0.3"), no exponent, no grouping, and never "-0".
- */
-function formatNumber(n: number): string | undefined {
-  if (!Number.isFinite(n)) return undefined;
-  if (Object.is(n, -0)) return "0";
-  return n.toLocaleString("en-US", {
-    useGrouping: false,
-    maximumSignificantDigits: 15,
-  });
 }
 
 /* YYYY-MM-DD for a whole day (exceljs builds dates in UTC), else full ISO. */

@@ -782,10 +782,18 @@ describe("static rules", () => {
     const keys =
       /const FILTER_KEYS = \[([^\]]+)\]/.exec(productSchema)?.[1] ?? "";
     const names = [...keys.matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
-    const service = read("src/lib/admin/settings.ts");
+    // The map moved to the pure spec-columns module in Phase 3 T3 (the
+    // importer needs it); settings.ts re-exports it.
+    const service = read("src/models/spec-columns.ts");
     const map =
       /FILTER_KEY_BY_SPEC[^=]*=\s*\{([^}]+)\}/.exec(service)?.[1] ?? "";
     const mapped = [...map.matchAll(/:\s*"(\w+)"/g)].map((m) => m[1]).sort();
     expect(mapped).toEqual(names);
+  });
+
+  it("settings re-exports the one shared filter map", async () => {
+    const settings = await import("@/lib/admin/settings");
+    const columns = await import("@/models/spec-columns");
+    expect(settings.FILTER_KEY_BY_SPEC).toBe(columns.FILTER_KEY_BY_SPEC);
   });
 });
