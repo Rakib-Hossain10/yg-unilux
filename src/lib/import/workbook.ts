@@ -18,7 +18,7 @@ import ExcelJS from "exceljs";
 import { IMPORT_HEADER_SCAN_ROWS } from "@/lib/constants";
 
 import { numberToText } from "./clean";
-import { REQUIRED_COLUMNS, columnForHeader } from "./columns";
+import { REQUIRED_COLUMNS, classifyHeader, columnForHeader } from "./columns";
 import { isCheckedImportFile, type CheckedImportFile } from "./safety";
 import {
   importWarning,
@@ -35,6 +35,8 @@ export interface HeaderColumn {
   key: ColumnKey;
   /** The header cell's text as typed (both lines). */
   header: string;
+  /** Set for the template's `Area: <name>` columns. */
+  areaName?: string;
 }
 
 /** A sheet that has a header row and was read. */
@@ -60,6 +62,12 @@ export type WorkbookRead =
 /* A header row needs a Model No. cell; failing that, this many known headers
  * (so a sheet missing Model No. is reported as such, not as "no header"). */
 const MIN_KNOWN_HEADERS = 3;
+
+/** The template's helper sheet (dropdown lists); never data, never reported. */
+export const TEMPLATE_LISTS_SHEET = "Lists";
+
+/* Area flag cells that mean "not selected": they do not make a row data. */
+const NEGATIVE_FLAG = /^(?:no|n|false|0|-|)$/i;
 
 /**
  * Loads the workbook and reads every sheet that has a header row. Fatal
@@ -98,6 +106,11 @@ export async function readWorkbook(
   const rows: SheetRow[] = [];
 
   for (const worksheet of workbook.worksheets) {
+    if (
+      worksheet.name.trim().toLowerCase() === TEMPLATE_LISTS_SHEET.toLowerCase()
+    ) {
+      continue;
+    }
     const header = findHeader(worksheet, warnings);
     if (!header) {
       warnings.push(
@@ -165,12 +178,14 @@ function findHeader(
   const sheet = worksheet.name;
   const columns: HeaderColumn[] = [];
   const seen = new Set<ColumnKey>();
+  const seenHeaders = new Set<string>();
   worksheet.getRow(headerRow).eachCell((cell, column) => {
     // A header merged across columns names one column, not several.
     if (isCoveredByMerge(cell)) return;
     const header = cellValue(cell).text ?? "";
     if (header.trim() === "") return;
-    const key = columnForHeader(header);
+    const found = classifyHeader(header);
+    const key = found?.key ?? null;
     const label = `Column ${columnLetter(column)} "${firstLine(header)}"`;
     if (key === null) {
       warnings.push(
@@ -182,7 +197,15 @@ function findHeader(
       );
       return;
     }
-    if (seen.has(key)) {
+    // Several `Extra Category <n>` / `Area: <name>` columns are expected; only
+    // the same slot or the same area twice is a repeat.
+    const identity =
+      found?.areaName !== undefined
+        ? `area:${found.areaName.toLowerCase()}`
+        : found?.slot !== undefined
+          ? `slot:${found.slot}`
+          : key;
+    if (seenHeaders.has(identity)) {
       warnings.push(
         importWarning("duplicate_column", {
           sheet,
@@ -194,7 +217,12 @@ function findHeader(
       return;
     }
     seen.add(key);
-    columns.push({ column, key, header });
+    seenHeaders.add(identity);
+    columns.push(
+      found?.areaName !== undefined
+        ? { column, key, header, areaName: found.areaName }
+        : { column, key, header },
+    );
   });
 
   for (const key of REQUIRED_COLUMNS) {
@@ -240,8 +268,9 @@ function readRows(
   worksheet.eachRow({ includeEmpty: false }, (row, r) => {
     if (r <= header.headerRow) return;
     const cells: SheetRow["cells"] = {};
+    const areaFlags: { name: string; text: string }[] = [];
     const rowWarnings: ImportWarning[] = [];
-    for (const { column, key } of header.columns) {
+    for (const { column, key, areaName } of header.columns) {
       const cell = row.findCell(column);
       const { text, issue } = cell ? cellValue(cell, header.headerRow) : {};
       if (issue) {
@@ -254,9 +283,21 @@ function readRows(
           }),
         );
       }
-      if (text !== undefined && text.trim() !== "") cells[key] = text;
+      if (text === undefined || text.trim() === "") continue;
+      if (key === "areaFlag") {
+        if (areaName !== undefined) areaFlags.push({ name: areaName, text });
+      } else if (key === "extraCategories" && cells[key] !== undefined) {
+        // `Extra Category 1` + `Extra Category 2` (+ a legacy column).
+        cells[key] = [cells[key], text].join("\n");
+      } else {
+        cells[key] = text;
+      }
     }
-    if (Object.keys(cells).length === 0) {
+    // "No" in an area column is the dropdown's default, not row content.
+    const selected = areaFlags.filter(
+      ({ text }) => !NEGATIVE_FLAG.test(text.trim()),
+    );
+    if (Object.keys(cells).length === 0 && selected.length === 0) {
       // Skip the row, but say why if a cell could not be read.
       warnings.push(...rowWarnings);
       return;
@@ -272,7 +313,11 @@ function readRows(
       );
     }
     warnings.push(...rowWarnings);
-    rows.push({ sheet, row: r, hidden, cells });
+    rows.push(
+      areaFlags.length > 0
+        ? { sheet, row: r, hidden, cells, areaFlags }
+        : { sheet, row: r, hidden, cells },
+    );
   });
   return rows;
 }

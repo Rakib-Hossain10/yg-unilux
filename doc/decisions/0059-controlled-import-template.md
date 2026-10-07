@@ -53,3 +53,12 @@ Phase 3 was planned around importing the client's own spec sheet as it is: bilin
 - The template's dropdown values go stale when categories or areas change. The client downloads a fresh template, and the preview's `unknown_category` / `unknown_area` warnings catch an old one.
 - Excel caps a list dropdown at 32,767 items; the category tree is far below that.
 - QA gate B now also covers T10 (template generator, route guard, round trip).
+
+## Addendum (T10a implementation)
+- `MAX_TEMPLATE_ROWS = 3000`: validations cover data rows 2–3001, one `sqref` per column, never whole columns.
+- An area column holding only `No`/`n`/`false`/`0`/`-`/blank does not make a row a data row (a pre-filled "No" dropdown must not create `orphan_row` warnings). A `Yes` alone still makes one (orphan or continuation).
+- Numbered `Extra Category <n>` slots and the legacy `Extra Categories` column merge into one list; the same slot or the same area header twice → `duplicate_column`.
+- The helper sheet is skipped by name `Lists` (case-insensitive); any other hidden sheet still warns.
+- `cleanAreaFlag` accepts Yes/Y/True/1/✓/✔, strips CJK, uses the first non-empty line.
+- `unknown_area` is still emitted per row (only for a Yes under an unknown `Area:` column), not once per column; fixing that needs header names passed to `groupRows` (open).
+- Header notes are cell comments; check their box size in real Excel/WPS (gate B). The Image note must not suggest "Place in Cell" (stored as richData → `unsupported_image_store`); reword to floating pictures positioned on the row before client hand-off.

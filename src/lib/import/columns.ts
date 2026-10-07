@@ -74,7 +74,11 @@ export const IDENTITY_COLUMNS: readonly {
   { key: "image", header: "Image" },
 ];
 
-/** Optional columns the admin may add to assign categories and areas. */
+/**
+ * Optional columns that assign categories and areas. The template (ADR 0059)
+ * writes `Category`, `Extra Category <n>` and `Area: <name>` instead; the
+ * legacy ";"-separated `Extra Categories` / `Areas` columns still work.
+ */
 export const TEMPLATE_COLUMNS: readonly {
   key: TemplateKey;
   header: string;
@@ -136,6 +140,20 @@ export function normalizeHeader(raw: string): string {
     .trim();
 }
 
+/** `Extra Category 1`, `Extra Category 2`, ... (the template's dropdown slots). */
+const EXTRA_SLOT = /^extra categor(?:y|ies) (\d{1,2})$/;
+/** `Area: Residential` (the template's one Yes/No column per area). */
+const AREA_HEADER = /^area ?: ?(.+)$/;
+
+/** A header cell understood: its column key, and the area it names if any. */
+export interface HeaderClass {
+  key: ColumnKey;
+  /** Set for `Area: <name>` headers: the name as typed (English part). */
+  areaName?: string;
+  /** Set for `Extra Category <n>` headers. */
+  slot?: number;
+}
+
 const BY_HEADER: ReadonlyMap<string, ColumnKey> = new Map<string, ColumnKey>(
   [...IDENTITY_COLUMNS, ...SPEC_COLUMNS, ...TEMPLATE_COLUMNS].map((column) => [
     normalizeHeader(column.header),
@@ -143,9 +161,28 @@ const BY_HEADER: ReadonlyMap<string, ColumnKey> = new Map<string, ColumnKey>(
   ]),
 );
 
-/** The column key for a header cell's text, or null when it is unknown. */
-export function columnForHeader(raw: string): ColumnKey | null {
+/** What a header cell means, or null when it is unknown. */
+export function classifyHeader(raw: string): HeaderClass | null {
   const normalized = normalizeHeader(raw);
   if (normalized === "") return null;
-  return BY_HEADER.get(normalized) ?? null;
+  const known = BY_HEADER.get(normalized);
+  if (known !== undefined) return { key: known };
+  const slot = EXTRA_SLOT.exec(normalized);
+  if (slot !== null) return { key: "extraCategories", slot: Number(slot[1]) };
+  if (AREA_HEADER.test(normalized)) {
+    // The name keeps its own case (for messages): cut it from the first line.
+    const line = (raw.normalize("NFKC").split(/\r?\n/, 1)[0] ?? "")
+      .replace(CJK, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const areaName = line.slice(line.indexOf(":") + 1).trim();
+    if (areaName === "") return null;
+    return { key: "areaFlag", areaName };
+  }
+  return null;
+}
+
+/** The column key for a header cell's text, or null when it is unknown. */
+export function columnForHeader(raw: string): ColumnKey | null {
+  return classifyHeader(raw)?.key ?? null;
 }

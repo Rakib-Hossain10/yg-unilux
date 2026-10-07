@@ -9,7 +9,7 @@ import type { SpecKey, SpecValues } from "@/models/spec-columns";
 export type IdentityKey = "productNo" | "family" | "type" | "modelNo" | "image";
 
 /** Optional template columns the client may add (Phase 3 decision 2). */
-export type TemplateKey = "category" | "extraCategories" | "areas";
+export type TemplateKey = "category" | "extraCategories" | "areas" | "areaFlag";
 
 /** Every column the importer understands. */
 export type ColumnKey = IdentityKey | SpecKey | TemplateKey;
@@ -24,6 +24,11 @@ export interface SheetRow {
   row: number;
   hidden: boolean;
   cells: Partial<Record<ColumnKey, string>>;
+  /**
+   * The template's `Area: <name>` Yes/No cells with text in them: the area
+   * name from the header and the raw cell text, in column order.
+   */
+  areaFlags?: { name: string; text: string }[];
 }
 
 /**
@@ -58,6 +63,7 @@ export const WARNING_CODES = {
   unknown_column: "warning",
   unknown_category: "warning",
   unknown_area: "warning",
+  invalid_area_flag: "warning",
   unsupported_image: "warning",
   unsupported_image_store: "warning",
   image_too_large: "warning",

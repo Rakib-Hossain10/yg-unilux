@@ -232,15 +232,30 @@ describe("products and continuation rows", () => {
     expect(codes(only(result, 1))).toContain("invalid_model_no");
   });
 
-  it("blocks both products when one NO. starts two products", () => {
+  it("blocks both products when one NO. starts two products (not adjacent)", () => {
     const result = groupRows(
-      [variant(3, "7", "AB-101"), variant(4, "7", "CD-201")],
+      [
+        variant(3, "7", "AB-101"),
+        variant(4, "8", "EF-301"),
+        variant(5, "7", "CD-201"),
+      ],
       LOOKUPS,
     );
     expect(result.products.map((p) => [p.blocked, codes(p)])).toEqual([
       [true, ["duplicate_product_no"]],
+      [false, []],
       [true, ["duplicate_product_no"]],
     ]);
+  });
+
+  it("treats the same NO. on the directly following row as the same product (ADR 0059)", () => {
+    const result = groupRows(
+      [variant(3, "7", "AB-101"), variant(4, "7", "AB-102")],
+      LOOKUPS,
+    );
+    expect(result.products).toHaveLength(1);
+    expect(result.products[0]?.rows).toEqual([3, 4]);
+    expect(result.products[0]?.blocked).toBe(false);
   });
 
   it("allows the same NO. on two different sheets", () => {

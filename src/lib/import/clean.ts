@@ -500,6 +500,42 @@ export function cleanNameList(
   return { values: values ?? [], warnings };
 }
 
+const AREA_YES = new Set(["yes", "y", "true", "1", "✓", "✔"]);
+const AREA_NO = new Set(["", "no", "n", "false", "0", "-"]);
+const AREA_CJK = new RegExp(`[${CJK_CLASS}]`, "gu");
+
+/**
+ * One `Area: <name>` Yes/No cell. Yes / Y / True / 1 / a tick select the
+ * area; blank, No, N, False, 0 and "-" do not (case-insensitive, a Chinese
+ * word beside the English one is ignored); anything else is a warning
+ * (`invalid_area_flag`) and does not select.
+ */
+export function cleanAreaFlag(
+  raw: string,
+  name: string,
+  at: CellAt,
+): { selected: boolean; warnings: ImportWarning[] } {
+  const text =
+    raw
+      .normalize("NFKC")
+      .replace(AREA_CJK, " ")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/\s+/g, " ").trim().toLowerCase())
+      .find((line) => line !== "") ?? "";
+  if (AREA_YES.has(text)) return { selected: true, warnings: [] };
+  if (AREA_NO.has(text)) return { selected: false, warnings: [] };
+  return {
+    selected: false,
+    warnings: [
+      importWarning("invalid_area_flag", {
+        ...at,
+        column: "areaFlag",
+        detail: `Area "${name}": the cell says "${text.slice(0, 40)}"; use Yes or No. The area is not selected.`,
+      }),
+    ],
+  };
+}
+
 /** One sheet row with every column cleaned; the input of grouping (T4). */
 export interface CleanedRow {
   sheet: string;
@@ -544,6 +580,12 @@ export function cleanRow(row: SheetRow): CleanedRow {
     if (values !== null) specs[key] = values;
   }
 
+  const areas = [...take(cleanNameList("areas", cells.areas, at)).values];
+  for (const flag of row.areaFlags ?? []) {
+    const { selected } = take(cleanAreaFlag(flag.text, flag.name, at));
+    if (selected && !areas.includes(flag.name)) areas.push(flag.name);
+  }
+
   return {
     sheet: row.sheet,
     row: row.row,
@@ -557,7 +599,7 @@ export function cleanRow(row: SheetRow): CleanedRow {
     extraCategories: take(
       cleanNameList("extraCategories", cells.extraCategories, at),
     ).values,
-    areas: take(cleanNameList("areas", cells.areas, at)).values,
+    areas: areas,
     warnings,
   };
 }

@@ -90,7 +90,8 @@ interface RowGroup {
 
 /**
  * Groups cleaned rows (in sheet order) into products. A row with an empty
- * `NO.` belongs to the product above it on the same sheet; with no product
+ * `NO.` (or the same `NO.` as the row directly above) belongs to the product
+ * above it on the same sheet; with no product
  * above, it is an `orphan_row`. A product with any error is `blocked`.
  */
 export function groupRows(
@@ -118,6 +119,16 @@ export function groupRows(
       } else {
         current.rows.push(row);
       }
+      continue;
+    }
+    // The template tolerates a NO. typed on every variant row: the same NO.
+    // directly below its own product continues it (a later repeat does not).
+    if (
+      current !== null &&
+      row.productNo.status === "ok" &&
+      row.productNo.value === current.productNo
+    ) {
+      current.rows.push(row);
       continue;
     }
     current = {

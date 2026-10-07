@@ -124,3 +124,10 @@ export const MAX_IMPORT_SHEET_ID = 10_000;
  */
 export const MAX_IMPORT_XML_PART_BYTES = 16 * 1024 * 1024;
 export const MAX_IMPORT_IMAGE_PIXELS = 25_000_000;
+
+/*
+ * The downloadable import template (src/lib/import/template.ts, ADR 0059):
+ * its dropdowns cover data rows 2 to this many + 1 (a bounded range, never
+ * whole columns, so the file stays small and Excel stays fast).
+ */
+export const MAX_TEMPLATE_ROWS = 3000;
