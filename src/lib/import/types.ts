@@ -59,6 +59,8 @@ export const WARNING_CODES = {
   unknown_area: "warning",
   unsupported_image: "warning",
   unsupported_image_store: "warning",
+  image_too_large: "warning",
+  image_not_on_row: "warning",
   value_truncated: "warning",
   family_mismatch: "warning",
   short_base_model_code: "warning",
@@ -113,6 +115,38 @@ export interface ImportVariant {
   specs: SpecValues;
   sheet: string;
   row: number;
+  /**
+   * sha256 of this variant's own picture, set only when the product's
+   * variant rows carry different pictures (T5); null = use the gallery.
+   * Always also in the product's `images`.
+   */
+  imageSha256: string | null;
+}
+
+/** Picture formats the import accepts (sharp's names). */
+export type ImportImageFormat = "jpeg" | "png" | "webp";
+
+/**
+ * One distinct embedded picture of the file, identified by the sha256 of its
+ * bytes (lowercase hex; T8 stores it as `ProductImage.sourceSha256`). Pure
+ * metadata: the bytes travel separately (`EmbeddedImage.data` in images.ts),
+ * so nothing that is hashed or sent to the browser carries them.
+ */
+export interface ImportImage {
+  sha256: string;
+  format: ImportImageFormat;
+  width: number;
+  height: number;
+  /** Size of the picture file in bytes. */
+  bytes: number;
+}
+
+/** A product's use of a picture: which one, and the first row it sits on. */
+export interface ImportImageRef {
+  sha256: string;
+  sheet: string;
+  /** Excel row number of the first anchor of this picture in the product. */
+  row: number;
 }
 
 /**
@@ -137,6 +171,11 @@ export interface ImportProduct {
   /** Product-level specs: the same value on every row. */
   specs: SpecValues;
   variants: ImportVariant[];
+  /**
+   * The product's gallery from the sheet (T5): distinct pictures by sha256,
+   * in row order, then column. Empty until `attachImages` runs.
+   */
+  images: ImportImageRef[];
   mainCategory: string;
   mainCategoryFromSheet: boolean;
   extraCategories: string[];

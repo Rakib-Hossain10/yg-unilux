@@ -40,7 +40,20 @@ export interface FixtureOptions {
   hiddenRow?: boolean;
   /** Turn Lumen Output on row 3 into a hyperlink cell. */
   hyperlink?: boolean;
+  /** Rows whose picture is anchored twoCell (from + to) instead of oneCell. */
+  twoCellRows?: readonly number[];
+  /** Data rows that get NO picture (default: every data row has one). */
+  noImageRows?: readonly number[];
+  /** Row 4 (AR-013A2) carries its own picture E instead of picture A. */
+  variantPicture?: boolean;
+  /** Also anchor picture E in column 14 of row 3 (two pictures on a row). */
+  secondPictureOnRow3?: boolean;
+  /** Extra rows (e.g. the blank row 2) that get picture A anchored. */
+  extraImageRows?: readonly number[];
 }
+
+/** The 0-based column the fixture anchors pictures in (Image = column 6). */
+export const FIXTURE_IMAGE_COLUMN = 5;
 
 /*
  * The 33 header cells, in sheet order, exactly as the real sheet spells them
@@ -258,18 +271,46 @@ function writeRow(
   for (const [col, value] of cells) sheet.getCell(row, col).value = value;
 }
 
-/** Anchors an image oneCell in the Image column (col 6) of an Excel row. */
+/**
+ * Anchors an image in a column (default: Image, col 6) of an Excel row:
+ * oneCell by default, twoCell (from + to, like the real sheet) on request.
+ */
 function anchorImage(
   sheet: ExcelJS.Worksheet,
   imageId: number,
   row: number,
+  {
+    twoCell = false,
+    col = COL.image,
+  }: { twoCell?: boolean; col?: number } = {},
 ): void {
+  // exceljs uses 0-based col/row here; no `br` = oneCellAnchor.
+  if (twoCell) {
+    // exceljs accepts plain {col,row} corners at runtime; its types want the
+    // full Anchor class, hence the cast.
+    const range = {
+      tl: { col: col - 1, row: row - 1 },
+      br: { col: col - 0.5, row: row - 0.5 },
+    } as unknown as ExcelJS.ImageRange;
+    sheet.addImage(imageId, { ...range, editAs: "oneCell" });
+    return;
+  }
   sheet.addImage(imageId, {
-    // exceljs uses 0-based col/row here; no `br` = oneCellAnchor.
-    tl: { col: COL.image - 1, row: row - 1 },
+    tl: { col: col - 1, row: row - 1 },
     ext: { width: 64, height: 64 },
     editAs: "oneCell",
   });
+}
+
+/** The five fixture pictures (8x8 solid PNGs), A-D as the real sheet, E extra. */
+export async function fixturePictures(): Promise<Buffer[]> {
+  return Promise.all([
+    png(200, 40, 40),
+    png(40, 200, 40),
+    png(40, 40, 200),
+    png(200, 200, 40),
+    png(40, 200, 200),
+  ]);
 }
 
 /**
@@ -292,22 +333,31 @@ export async function buildFixture(
   rows.forEach((cells, i) => writeRow(sheet, i + 3, cells));
 
   // Pictures: A on Nos. 76+77 (rows 3-6), B on 78+79 (7-10), C on 80, D on 81.
-  const pictures = await Promise.all([
-    png(200, 40, 40),
-    png(40, 200, 40),
-    png(40, 40, 200),
-    png(200, 200, 40),
-  ]);
+  // E is only registered when an option uses it (the default has 4 media).
+  const useE = options.variantPicture || options.secondPictureOnRow3;
+  const pictures = (await fixturePictures()).slice(0, useE ? 5 : 4);
   const ids = pictures.map((buffer) =>
     workbook.addImage({
       buffer: buffer as unknown as ExcelJS.Buffer,
       extension: "png",
     }),
   );
-  const pictureForRow = (row: number) =>
-    ids[row <= 6 ? 0 : row <= 10 ? 1 : row <= 12 ? 2 : 3] as number;
+  const pictureE = ids[4] as number;
+  const pictureForRow = (row: number) => {
+    if (options.variantPicture && row === 4) return pictureE;
+    return ids[row <= 6 ? 0 : row <= 10 ? 1 : row <= 12 ? 2 : 3] as number;
+  };
+  const twoCell = new Set(options.twoCellRows ?? []);
+  const skipped = new Set(options.noImageRows ?? []);
   for (const row of FIXTURE_DATA_ROWS) {
-    anchorImage(sheet, pictureForRow(row), row);
+    if (skipped.has(row)) continue;
+    anchorImage(sheet, pictureForRow(row), row, { twoCell: twoCell.has(row) });
+  }
+  if (options.secondPictureOnRow3) {
+    anchorImage(sheet, pictureE, 3, { col: COL.dimensions });
+  }
+  for (const row of options.extraImageRows ?? []) {
+    anchorImage(sheet, ids[0] as number, row);
   }
 
   applyOptions(workbook, sheet, options);
@@ -341,7 +391,8 @@ function applyOptions(
   if (options.hiddenRow) sheet.getRow(6).hidden = true;
   if (options.missingColumn) {
     const col = options.missingColumn === "productNo" ? COL.no : COL.modelNo;
-    for (let row = 1; row <= 14; row++) sheet.getCell(row, col).value = null;
+    const last = FIXTURE_DATA_ROWS[FIXTURE_DATA_ROWS.length - 1] as number;
+    for (let row = 1; row <= last; row++) sheet.getCell(row, col).value = null;
   }
   if (options.merged) {
     // exceljs keeps the master's value; covered cells must be empty first.

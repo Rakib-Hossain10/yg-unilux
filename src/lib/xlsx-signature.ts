@@ -302,6 +302,24 @@ export function readZipPart(
   entry: CentralEntry,
   maxBytes: number,
 ): string | null {
+  const data = readZipBytes(bytes, entry, maxBytes);
+  if (data === null || data === "corrupt") return data;
+  return new TextDecoder().decode(data);
+}
+
+/**
+ * The bytes of one zip part (e.g. an embedded picture), with the same rules
+ * as `readZipPart`: null = refused (encrypted, declared larger than
+ * `maxBytes`, unknown method); "corrupt" = the data does not match the
+ * directory. Output is capped at `maxBytes` while inflating, and must equal
+ * the declared size. A stored part is returned as a view into `bytes`
+ * (no copy): never write to the result.
+ */
+export function readZipBytes(
+  bytes: Uint8Array,
+  entry: CentralEntry,
+  maxBytes: number,
+): Uint8Array | null | "corrupt" {
   if ((entry.flags & 1) !== 0) return null; // encrypted
   if (entry.uncompressedSize > maxBytes) return null;
   const data = entryData(bytes, entry);
@@ -310,12 +328,12 @@ export function readZipPart(
     if (entry.method === 0) {
       // Stored: the bytes ARE the part, so they must match the declared size.
       if (data.length !== entry.uncompressedSize) return "corrupt";
-      return new TextDecoder().decode(data);
+      return data;
     }
     if (entry.method !== 8) return null;
-    return new TextDecoder().decode(
-      inflateRawSync(data, { maxOutputLength: maxBytes }),
-    );
+    const out = inflateRawSync(data, { maxOutputLength: maxBytes });
+    if (out.length !== entry.uncompressedSize) return "corrupt";
+    return out;
   } catch {
     // Damaged stream, or it inflated past the cap: either way not a workbook.
     return "corrupt";

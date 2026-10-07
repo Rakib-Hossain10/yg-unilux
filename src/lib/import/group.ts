@@ -190,6 +190,7 @@ function buildProduct(group: RowGroup, lookups: GroupLookups): ImportProduct {
       specs,
       sheet,
       row: row.row,
+      imageSha256: null,
     };
   });
   uniqueLabels(variants);
@@ -212,6 +213,7 @@ function buildProduct(group: RowGroup, lookups: GroupLookups): ImportProduct {
     slug: slugify(title.join(" ")),
     specs: shared,
     variants,
+    images: [],
     ...templates,
     blocked: false,
     warnings,

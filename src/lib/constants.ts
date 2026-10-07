@@ -104,3 +104,12 @@ export const MAX_IMPORT_COMPRESSION_RATIO = 100;
 export const IMPORT_RATIO_MIN_BYTES = 1024 * 1024;
 /** The header row is searched for in the first rows of each sheet. */
 export const IMPORT_HEADER_SCAN_ROWS = 15;
+/*
+ * Embedded pictures (src/lib/import/images.ts). The drawing and relationship
+ * parts are read with this output cap (a drawing is ~1 KB per picture, so
+ * 16 MB is thousands of pictures). A picture larger than MAX_IMAGE_BYTES is
+ * never inflated; one above this many pixels is flagged before upload
+ * (Cloudinary's free plan refuses images above 25 megapixels).
+ */
+export const MAX_IMPORT_XML_PART_BYTES = 16 * 1024 * 1024;
+export const MAX_IMPORT_IMAGE_PIXELS = 25_000_000;

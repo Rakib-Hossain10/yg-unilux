@@ -2,12 +2,28 @@
 // not a workbook, plain text, a truncated file, an oversized file and a zip
 // with too many entries are all refused, whatever the file was named.
 
+import { deflateRawSync, inflateRawSync } from "node:zlib";
+
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MAX_DATASHEET_BYTES, MAX_XLSX_ENTRIES } from "./constants";
-import { checkXlsx, readCentralDirectory } from "./xlsx-signature";
+
+// The real zlib, with inflateRawSync observable (to prove the output cap
+// stops the inflate itself, not only the size check after it).
+vi.mock("node:zlib", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:zlib")>();
+  return { ...real, inflateRawSync: vi.fn(real.inflateRawSync) };
+});
+import { localRecord } from "../../test/fixtures/import/raw-zip";
+import {
+  checkXlsx,
+  readCentralDirectory,
+  readZipBytes,
+  readZipPart,
+  type CentralEntry,
+} from "./xlsx-signature";
 
 async function realWorkbook(): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
@@ -252,5 +268,88 @@ describe("readCentralDirectory trailer rule", () => {
       }
     }
     expect(await checkXlsx(out)).toEqual({ ok: false, reason: "corrupt" });
+  });
+});
+
+describe("readZipBytes / readZipPart", () => {
+  /* One local record (header + data) and a matching directory entry. */
+  function part(
+    payload: Uint8Array,
+    {
+      method = 8,
+      flags = 0,
+      declared,
+    }: { method?: number; flags?: number; declared?: number } = {},
+  ): { bytes: Uint8Array; entry: CentralEntry } {
+    const data = method === 8 ? deflateRawSync(payload) : payload;
+    const bytes = localRecord("p.bin", data);
+    const name = new TextEncoder().encode("p.bin");
+    return {
+      bytes,
+      entry: {
+        name: "p.bin",
+        nameBytes: name,
+        extraFieldIds: [],
+        flags,
+        method,
+        compressedSize: data.length,
+        uncompressedSize: declared ?? payload.length,
+        localOffset: 0,
+      },
+    };
+  }
+
+  const payload = Uint8Array.from({ length: 4096 }, (_, i) => i % 7);
+
+  it("round-trips a deflated and a stored part", () => {
+    const deflated = part(payload);
+    expect(readZipBytes(deflated.bytes, deflated.entry, 10_000)).toEqual(
+      Buffer.from(payload),
+    );
+    const stored = part(payload, { method: 0 });
+    expect(
+      Buffer.from(
+        readZipBytes(stored.bytes, stored.entry, 10_000) as Uint8Array,
+      ),
+    ).toEqual(Buffer.from(payload));
+  });
+
+  it("calls a part corrupt when its size differs from the directory", () => {
+    const smaller = part(payload, { declared: 100 });
+    expect(readZipBytes(smaller.bytes, smaller.entry, 10_000)).toBe("corrupt");
+    const larger = part(payload, { declared: 5000 });
+    expect(readZipBytes(larger.bytes, larger.entry, 10_000)).toBe("corrupt");
+    const stored = part(payload, { method: 0, declared: 4000 });
+    expect(readZipBytes(stored.bytes, stored.entry, 10_000)).toBe("corrupt");
+  });
+
+  it("stops inflating at the cap even when the directory lies", () => {
+    const inflate = vi.mocked(inflateRawSync);
+    inflate.mockClear();
+    const lying = part(payload, { declared: 100 });
+    expect(readZipBytes(lying.bytes, lying.entry, 1000)).toBe("corrupt");
+    expect(inflate).toHaveBeenCalledTimes(1);
+    expect(inflate.mock.calls[0]?.[1]).toMatchObject({ maxOutputLength: 1000 });
+    // zlib itself refused to go past the cap (it threw), long before 4096 B.
+    expect(inflate.mock.results[0]?.type).toBe("throw");
+  });
+
+  it("refuses an over-cap, encrypted or unknown-method part without reading it", () => {
+    const big = part(payload);
+    expect(readZipBytes(big.bytes, big.entry, 4095)).toBeNull();
+    expect(readZipBytes(big.bytes, big.entry, 4096)).not.toBeNull();
+    const encrypted = part(payload, { flags: 1 });
+    expect(readZipBytes(encrypted.bytes, encrypted.entry, 10_000)).toBeNull();
+    const method12 = part(payload, { method: 12 });
+    expect(readZipBytes(method12.bytes, method12.entry, 10_000)).toBeNull();
+  });
+
+  it("readZipPart decodes UTF-8 text and passes corrupt / null through", () => {
+    const text = part(new TextEncoder().encode("Lifud 莱福德"));
+    expect(readZipPart(text.bytes, text.entry, 1000)).toBe("Lifud 莱福德");
+    const lying = part(payload, { declared: 100 });
+    expect(readZipPart(lying.bytes, lying.entry, 10_000)).toBe("corrupt");
+    const encrypted = part(payload, { flags: 1 });
+    expect(readZipPart(encrypted.bytes, encrypted.entry, 10_000)).toBeNull();
   });
 });
