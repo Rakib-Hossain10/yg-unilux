@@ -70,7 +70,7 @@ The file is 4.2 MB, 28 zip entries, one sheet `Sheet1`, 14 rows × 33 columns, s
   - Shared: family Arc, type, material, finish, cut-out Ø90mm, dimensions, chip COB, CCT, CRI >90, beam angles, driver Lifud, voltage, 12W, PF 0.9, SDCM ≤3, lifespan, IP20.
   - Per variant: **lens** (AR-013A1 "Regular Lens", A2 none), **reflector** (A1 none, A2 "High Effciency Reflector"), **lumen output** (1140 LM / 1200 LM) and **lumen efficiency** (95± / 100±).
   - Base code `AR-013A`, slug `arc-ar-013a`, labels "Regular Lens" / "High Effciency Reflector".
-- **Images:** standard `xl/drawings/drawing1.xml`, `oneCellAnchor` in the Image column (col 6), one anchor per row, 4 PNGs (0.18–2.4 MB).
+- **Images:** standard `xl/drawings/drawing1.xml`, `twoCellAnchor editAs="oneCell"` (corrected in T5; not `oneCellAnchor`) in the Image column (col 6), one anchor per row, not in row order, every picture cropped in Excel (`a:srcRect`, we import the uncropped file), 4 PNGs (0.18–2.4 MB).
   - **The same picture is anchored on every row of two products** (image1 on rows 3–6 = Nos. 76 + 77; image2 on 78 + 79).
   - → Dedupe by sha256 within a product, so each product gets one gallery image. Each product uploads its own Cloudinary copy, because ids are per product.
   - An image is set on a variant only when that product's rows carry different images.
@@ -111,7 +111,7 @@ finishImport(key) — deletes the staged file (the sweep removes it after 24 h a
 | `clean.ts` | Cell cleaner (rules below) | yes |
 | `numbers.ts` | Filter parsers: cctK, cri, beamDeg, ugr, wattage, ip | yes |
 | `group.ts` | Groups rows into products by `NO.`. Splits shared values from per-variant values. Base model code, slug, variant label, filters, category/area resolution | yes (category/area lookups passed in) |
-| `images.ts` | Embedded images: standard drawing anchors (`xl/drawings/*.xml` + rels, twoCell and oneCell; the client sheet uses oneCell). Any other image store (WPS `cellimages.xml`, Excel `richData`) → warning `unsupported_image_store`. Maps each to a sheet row, computes sha256, checks format with `sharp` metadata (jpg/png/webp; EMF/WMF/GIF → warning "unsupported image"), caps size at 10 MB | no |
+| `images.ts` | Embedded images: standard drawing anchors (`xl/drawings/*.xml` + rels, twoCell, oneCell and absolute; the client sheet uses `twoCellAnchor editAs="oneCell"`). Any other image store (WPS `cellimages.xml`, Excel `richData`) → warning `unsupported_image_store`. Maps each to a sheet row, computes sha256, checks format with `sharp` metadata (jpg/png/webp; EMF/WMF/GIF → warning "unsupported image"), caps size at 10 MB | no |
 | `plan.ts` | Matches by model no. (collation) against the DB and classifies each product. Field-ownership merge, display diff, warnings, `planHash` | DB read only |
 | `commit.ts` | Batch commit (re-plan, hash check, stale check, image upload, write, audit, tags) | DB + Cloudinary |
 | `index.ts` | Service entry points: `previewImport`, `commitImportBatch`, `finishImport` (`ServiceResult`, like the ADR 0035 write path) | — |

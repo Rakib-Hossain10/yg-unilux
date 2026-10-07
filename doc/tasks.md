@@ -33,12 +33,18 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - the Magnetic Track rule now lives once in `src/models/product-constants.ts` (`isMagneticTrackCategory`, `trackSizeFromSlug`), used by `products.ts` and `product-category-options.ts` (behaviour unchanged);
     - golden No. 76 passes on the synthetic fixture and the real sheet; Nos. 80/81 blocked (`missing_model_no`);
     - 2506 unit green (4 expected-fail, 2 skipped = the "real sheet missing" notices).
-  - **Next: T5** (`import-engineer`, Opus): `src/lib/import/images.ts`.
-    - drawings + rels anchors (oneCell + twoCell) → Excel row; any other image store (`cellimages.xml`, `richData`) → `unsupported_image_store` warning;
-    - sha256 per image, `sharp` format/size check (unsupported EMF / oversize → warning);
-    - per product: dedupe by sha256 → first image = gallery; an image that differs between variants → that variant's image;
-    - a picture shared across two products gives each product its own gallery entry (tests on the synthetic fixture, and the real sheet when present).
-    - Then **QA gate A** (T1–T5: parser + safety, `qa-security-reviewer`, Opus).
+  - **T5 done** (`7866406`):
+    - `src/lib/import/images.ts` (`readEmbeddedImages(bytes, sheetNames)` → `{anchors, files: Map<sha256, EmbeddedImage>, warnings}`; pure `attachImages(products, embedded)` → `product.images: ImportImageRef[]`, `variant.imageSha256`);
+    - `src/lib/import/ooxml.ts` (linear XML reader: DOCTYPE refused, caps, prefix-free, rels that climb out of the package dropped);
+    - `readZipBytes` in `src/lib/xlsx-signature.ts` (`readZipPart` now also calls a deflated part with the wrong inflated length "corrupt"); `MAX_IMPORT_XML_PART_BYTES` 16 MB, `MAX_IMPORT_IMAGE_PIXELS` 25 MP in `constants.ts`;
+    - new warning codes `image_too_large`, `image_not_on_row`; `missing_image` is emitted here;
+    - real sheet: 12 anchors, 4 PNGs, one gallery image per product, 76+77 and 78+79 share a picture, no variant pictures;
+    - 2559 unit green (4 expected-fail, 3 skipped).
+  - **Next: QA gate A** (`qa-security-reviewer`, Opus): T1–T5, parser + safety (zip bombs, XML reader, image checks, CJK, model-no. collation, real-sheet goldens). Then **T6**.
+  - **Carry into T7 (from T5):** call `readEmbeddedImages(bytes, read.sheets.map(s => s.name))` after `readWorkbook`, then `attachImages(grouped.products, embedded)`, add its warnings at file level; planHash includes `images[].sha256` and `variants[].imageSha256`, never the `files` map.
+  - **Carry into T8 (from T5):** upload only sha256s that a written product references; one Cloudinary copy per product; skip sha256s already in that product's `sourceSha256`; 30-image cap on stored + new; `imageSha256` → `variants[].imagePublicId` only on create or new variant; pass `Buffer.from(img.data)`. The 25 MP cap assumes Cloudinary's free plan — confirm when the plan is known.
+  - **Carry into T9 (from T5):** labels `image_too_large` "Picture too large (over 10 MB / 25 MP)", `image_not_on_row` "Picture not on a product row", `unsupported_image` "Picture can't be used", `unsupported_image_store` "Pictures stored in cells (not imported)", `missing_image` "No picture"; alt text comes from the product name (sheet picture names are useless).
+  - **Record in ADR 0057 (T7) from T5:** pictures read from the zip ourselves, not exceljs's image model (it drops absolute anchors, AlternateContent, linked pictures); row = anchor `from` row + 1, any column counts; check order: declared size > 10 MB (never inflated) → magic-byte sniff (only JPEG/PNG/WebP reach sharp) → sharp header only (25 MP, format must match sniff); linked pictures never fetched; only picture parts of `richData` warn; gallery = distinct sha256 in row/column order, cap 30 → `value_truncated`; variant picture only when the variants' lead pictures differ; bytes live only in `EmbeddedImages.files`.
   - **Carry into T7 (from T4):**
     - make the slug unique with `uniqueSlug`; `ImportProduct.slug` is only a candidate and can be "";
     - filters = `withoutRestrictedFilters(filtersFromSpecs([p.specs, ...p.variants.map(v => v.specs)]))`;
@@ -74,7 +80,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     1. `npm run check:model-nos`, and fix anything it lists.
     2. In Atlas, open `products` → Indexes, then drop `variants.modelNo_1` (or in mongosh: `db.products.dropIndex("variants.modelNo_1")`).
     3. Right after step 2, run `npm run db:indexes`.
-  - **Ask the client:** Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, the "High Effciency Reflector" typo, whether NO. restarts on each sheet, and whether a base code like `AR-10`/`AR-12` → `AR-1` is OK or should stop at a digit boundary (decide before the first real import: slugs are set on create only).
+  - **Ask the client:** the sheet's pictures are cropped in Excel but we import the full photo (OK, or apply the crop at commit?); should a picture outside the Image column (e.g. a dimension drawing) become a gallery image (today it does); Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, the "High Effciency Reflector" typo, whether NO. restarts on each sheet, and whether a base code like `AR-10`/`AR-12` → `AR-1` is OK or should stop at a digit boundary (decide before the first real import: slugs are set on create only).
   - Subagents: `import-engineer`, `backend-architect`, `admin-panel-builder`, `qa-security-reviewer`. No new subagent. All on Opus.
 - **Phase 3 must-dos (all planned in, see the plan's last section):**
   - ~~Fix gate B L-A~~ (done in T1, ADR 0055).
@@ -440,4 +446,5 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-01 — Two QA rounds on Phase 0; all findings fixed; F4/F6 documented (ADR 0015, Phase 1 tasks); npm 12 via devEngines `warn` (ADR 0011).
 - 2026-09-30 — Phase 0 built by backend-architect on `phase-0` (9 commits); ADRs 0007/0008/0010/0011 updated from installed Next 16.3.7 docs; ADR 0015 added; Auth.js found to be maintenance-only → decision pending.
 - 2026-09-30 — Added the automatic review hook (ADR 0014) and moved code-reviewer into `.claude/agents/`; replaced the find-skills symlink with a copy (`core.symlinks=false`); committed the setup on `main`. Vercel deferred.
+- 2026-10-07: T5 done (`7866406`, images): own drawing/rels reader + linear XML reader, sha256 dedupe, sniff + sharp header checks, gallery/variant pictures. Found the real sheet uses `twoCellAnchor editAs="oneCell"` and Excel crops (plan corrected). `readZipPart` stricter on inflated length. 2559 unit green. Next: QA gate A.
 - 2026-10-07: T4 done (grouping, `group.ts`). The auto-review caught colliding variant labels and extras wiping stored values; both fixed. Main session made `duplicate_product_no` per sheet, widened the base-code trim, added type/name tests. 2506 unit green. Next: T5 (images), then QA gate A.
