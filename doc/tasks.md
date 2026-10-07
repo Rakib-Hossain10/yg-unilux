@@ -4,8 +4,17 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, `5fff0bb`, 2026-10-06).
-- **Phase 2 is PLANNED and APPROVED. Read `doc/phase-2-plan.md` first** — it holds the architecture, 18 ordered tasks (T1–T18, one commit each), owners, models, tests, QA gates A–E, risks and ADR list. The user's decisions are in it: direct browser uploads with server-side verification (amends ADR 0009), and the ADR 0019 product defaults.
+- **Branch:** `phase-3` (from `main`). **Phase 2 is merged** (PR #11, `b689cb7`, 2026-10-07; QA gates A–E passed, real-credential smoke passed). Phase 1 merged earlier (PR #9).
+- **Next: PLAN Phase 3 (bulk import) in plan mode** — write `doc/phase-3-plan.md` (tasks, owners, models, tests, QA gates, risks, ADRs from 0054), ask the user to approve, then build. Owner for import logic: `import-engineer`. Read the Phase 3 checklist below, CLAUDE.md "Bulk import rules", and the client's Arc sheet if provided.
+- **Phase 3 must-dos (do first or plan them in):**
+  - Fix gate B **L-A**: model numbers are case-insensitive within a product but case-sensitive across products (unique index on `variants.modelNo`); import upserts by model no., so fix with a collation or normalised case. The `it.fails` in `test/admin-products.qa.test.ts` becomes a plain `it`.
+  - The import MUST call `withoutRestrictedFilters` (`src/lib/admin/products.ts`) so restricted columns never get filter numbers.
+  - Import-preview images uploaded to Cloudinary and not confirmed within 24 h would be swept by `sweep:cloudinary`; design the preview step with this in mind (or confirm in the same sitting / track pending ids).
+  - Open: per-environment Cloudinary folder prefix (dev/preview/prod share `yg/products|areas`; sweep has a mass-delete guard, ADR 0053).
+- **Phase 2 leftovers (Low, not blocking):** gate C L-1 (escape `.` in key patterns, two `it.fails`), L-2/L-3 (delete races), L-4 (`aria-hidden` on hidden file inputs); gate D L-1/L-2/L-3; gate A L-1 (`[id]` pages 200 for unknown id), L-3; T13 follow-ups (uploader names in `listDatasheets()`), T11b low follow-ups. See the Phase 2 history below.
+- **User must do:** rebuild before any local `npm start` (the `.next` folder may come from an e2e build). Provide the client's Arc sheet as the import fixture when available.
+
+### Phase 2 history (done, kept for reference)
 - **Done:**
   - T1 (shadcn + tokens, ADR 0034).
   - T2 (shared helpers + `products.datasheetId` index, ADR 0035):
@@ -44,7 +53,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **QA gate E: PASS** (Phase 2 exit, 2026-10-07, Opus). No Critical/High. 2060 unit (6 expected-fail) + 133 e2e green, build/audit OK, gitleaks clean, db:indexes OK on a scratch DB. Added `test/phase2-exit.qa.test.ts` (22) and `e2e/admin-gate-e.qa.spec.ts` (8).
     - **M-1 and L-1 FIXED** (ADR 0053): sweep mass-delete guard + ETag-pinned finalize. 2094 unit (5 expected-fail) + 133 e2e green. Open: per-environment Cloudinary folder prefix; real-credential smoke must confirm R2 honours `If-Match` / `CopySourceIfMatch`.
 - Still open, not blocking: gate B L-A (case-insensitive model no., **fix before Phase 3 import**), gate C L-1/L-2/L-3/L-4, gate D L-1/L-2/L-3, gate A L-1 ([id] pages 200 for unknown id) and L-3. Phase 3: import preview images uploaded >24 h before confirm would be swept.
-- **Next: Phase 2 PR** (push `phase-2`, `gh pr create`, wait for CI, **ask the user before merging**). Then Phase 3 (bulk import; plan first). **Real-credential smoke DONE 2026-10-07** (R2 presigned PUT, HEAD ETag, GET `If-Match` and `CopySourceIfMatch` match + stale 412, Cloudinary signed upload/inspect/destroy, all three sweep dry runs; test objects cleaned up; dev bucket and Cloudinary were empty). CI green on PR #11. **User must do:** nothing before merge except approve; rebuild before any local `npm start`. **Phase 3 must-dos:** call `withoutRestrictedFilters`; fix gate B L-A (case-insensitive model no.) first; import preview images older than 24 h would be swept.
+- Phase 2 PR #11 merged; real-credential smoke done 2026-10-07 (R2 conditional read/copy, Cloudinary upload, sweep dry runs).
 - **Open items from gate D:**
   - **L-1:** `updateProduct` reads the visibility setting then writes; a save racing a column restriction can re-write restricted filter numbers (repaired by saving the column setting again). Fix with a version/`updatedAt` check or a second cleanup pass.
   - **L-2:** a retry whose setting is unchanged but cleanup modified products writes no audit entry.
@@ -134,7 +143,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T18 done, QA gate E PASS, PR pending (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 3 — Bulk import — planning (Phase 2 merged 2026-10-07)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -211,7 +220,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview — **met locally on `next start` (2026-10-04); preview pending the Vercel account**
 - [x] Phase 1 wrap-up: task-12 Lows (ADR 0030), task-5 L1 (ADR 0031), "Keep me signed in" (ADR 0032), task-5 L2 (ADR 0033); CI green; PR #9 merged to `main` 2026-10-06
 
-## Phase 2 — Admin core — plan: `doc/phase-2-plan.md` (T1–T18)
+## Phase 2 — Admin core ✅ (merged 2026-10-07, PR #11) — plan: `doc/phase-2-plan.md` (T1–T18)
 - [x] T1: shadcn init (radix-nova, 16 ui components), tokens mapped, animation and dark mode stripped, contrast pairs tested — ADR 0034
 - [x] T3: admin layout with `requireAdmin()` everywhere (static guard test), sidebar + mobile nav, loading/error — ADR 0036
 - [x] T3: dashboard counts (`src/lib/admin/dashboard.ts`, uncached)
@@ -300,6 +309,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07 — Phase 2 merged to `main` (PR #11, `b689cb7`). `phase-3` branched. Next: plan Phase 3 in plan mode.
 - 2026-10-07 — Real-credential smoke PASS (R2 conditional read/copy, Cloudinary upload, sweep dry runs); PR #11 CI green. Awaiting the user's merge approval.
 - 2026-10-07 — Gate E fixes (ADR 0053): sweep guard + ETag-pinned datasheet finalize. 2094 unit + 133 e2e green. Next: push, PR.
 - 2026-10-07 — QA gate E PASS (Phase 2 exit) on Opus: 1 Medium (sweep guard), 1 new Low (datasheet copy race). 30 QA tests added.
