@@ -28,15 +28,33 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - `FILTER_KEY_BY_SPEC` moved to `src/models/spec-columns.ts`;
     - the property test proves zero CJK on the real sheet;
     - 2452 unit green (4 expected-fail, 1 skipped).
-  - **Next: T4** (`import-engineer`, Opus): `src/lib/import/group.ts`.
-    - Group rows into products by `NO.` (blank = continuation; blank rows were already skipped).
-    - Shared vs per-variant values (blank and "-" are already equal: not-applicable keys are absent).
-    - Base model code, slug, name, variant labels, template category/area resolution (lookups passed in), trackSize rule, row warnings.
-    - Block a product on `invalid_model_no` / `invalid_product_no` / `missing_model_no` / `duplicate_model_no` (use `modelNoKey`) / `orphan_row`.
-    - Optionally warn when a model no. contains a space.
-    - The golden No. 76 test runs on the synthetic fixture and on the real sheet.
-    - Then T5 (images) → QA gate A (T1–T5).
-  - **Carry into T4:** blank and "-" both mean not applicable and must compare equal for shared vs per-variant (No. 78 uses blanks, No. 76 uses "-").
+  - **T4 done** (ADR notes pending for 0057, below):
+    - `src/lib/import/group.ts`: `groupRows(rows, {categories, areas, defaultCategoryId})` → `{products: ImportProduct[], warnings}` (orphan rows at file level); `ImportProduct` / `ImportVariant` in `types.ts`;
+    - the Magnetic Track rule now lives once in `src/models/product-constants.ts` (`isMagneticTrackCategory`, `trackSizeFromSlug`), used by `products.ts` and `product-category-options.ts` (behaviour unchanged);
+    - golden No. 76 passes on the synthetic fixture and the real sheet; Nos. 80/81 blocked (`missing_model_no`);
+    - 2506 unit green (4 expected-fail, 2 skipped = the "real sheet missing" notices).
+  - **Next: T5** (`import-engineer`, Opus): `src/lib/import/images.ts`.
+    - drawings + rels anchors (oneCell + twoCell) → Excel row; any other image store (`cellimages.xml`, `richData`) → `unsupported_image_store` warning;
+    - sha256 per image, `sharp` format/size check (unsupported EMF / oversize → warning);
+    - per product: dedupe by sha256 → first image = gallery; an image that differs between variants → that variant's image;
+    - a picture shared across two products gives each product its own gallery entry (tests on the synthetic fixture, and the real sheet when present).
+    - Then **QA gate A** (T1–T5: parser + safety, `qa-security-reviewer`, Opus).
+  - **Carry into T7 (from T4):**
+    - make the slug unique with `uniqueSlug`; `ImportProduct.slug` is only a candidate and can be "";
+    - filters = `withoutRestrictedFilters(filtersFromSpecs([p.specs, ...p.variants.map(v => v.specs)]))`;
+    - honour `mainCategoryFromSheet` / `extraCategoriesFromSheet` / `areasFromSheet` in the ownership merge (false → keep stored value);
+    - `product.blocked` → plan status `blocked`; show `GroupResult.warnings` (orphan rows) at file level;
+    - `NO.` is unique per sheet only: the "different sheet NO." conflict rule must compare grouped products, not a global `productNo`.
+  - **Carry into T9:** preview labels for `duplicate_product_no`, `short_base_model_code`, `model_no_has_space`, `invalid_product_no`, `invalid_model_no`.
+  - **Record in ADR 0057 (T7) from T4:**
+    - shared values are decided over rows with a model no. (all rows if none); option lists compare in order;
+    - family/type from the first non-empty value, a different later value → `family_mismatch` on that column;
+    - base code = case-insensitive common prefix, trailing `-_./ ` trimmed, < 3 chars → first model no. + `short_base_model_code`;
+    - labels = the variant's own differing optic values joined with ", "; collisions get ` (<model no.>)`, then the model no.;
+    - category cell: slug, name or `Main > Sub` (also `›`), case-insensitive; an ambiguous bare name → `unknown_category`; extras/areas = union of all rows, main removed from extras; `...FromSheet` only when something resolved/kept;
+    - trackSize: main category first, then extras;
+    - `duplicate_product_no` per sheet; an invalid NO. starts its own blocked product; `duplicate_model_no` on every involved row;
+    - `missing_spec` once per product when no row has it, else per variant row; `unparsed_filter_value` emitted in group.ts.
   - **Record in ADR 0057 (T7) from T2:**
     - the 100:1 ratio cap only applies to entries >1 MB;
     - header fallback: a row with 3+ known headers counts as the header, so a missing Model No. is `missing_required_column`;
@@ -56,7 +74,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     1. `npm run check:model-nos`, and fix anything it lists.
     2. In Atlas, open `products` → Indexes, then drop `variants.modelNo_1` (or in mongosh: `db.products.dropIndex("variants.modelNo_1")`).
     3. Right after step 2, run `npm run db:indexes`.
-  - **Ask the client:** Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, and the "High Effciency Reflector" typo.
+  - **Ask the client:** Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, the "High Effciency Reflector" typo, whether NO. restarts on each sheet, and whether a base code like `AR-10`/`AR-12` → `AR-1` is OK or should stop at a digit boundary (decide before the first real import: slugs are set on create only).
   - Subagents: `import-engineer`, `backend-architect`, `admin-panel-builder`, `qa-security-reviewer`. No new subagent. All on Opus.
 - **Phase 3 must-dos (all planned in, see the plan's last section):**
   - ~~Fix gate B L-A~~ (done in T1, ADR 0055).
@@ -299,7 +317,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
 - [x] T2: workbook reader + safety + synthetic fixture (ADR 0047 note: stricter shared zip reader)
 - [x] T3: cleaner + split policies + numeric parsers — ADR 0056
-- [ ] T4: grouping (products/variants, shared vs per-variant, base code, slug, labels)
+- [x] T4: grouping (products/variants, shared vs per-variant, base code, slug, labels)
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -365,7 +383,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Company email (whistleblower + request alerts)
 - [ ] Logo files (SVG preferred) — Phase 1
 - [ ] Categories 8–10; empty subcategories (Hanging 3rd, Track Light, Motorized)
-- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (blank vs "-" the same?; comma lists like `100,150W`?; Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, empty columns, public/restricted split)
+- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (blank vs "-" the same?; comma lists like `100,150W`?; Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, base code for `AR-10`/`AR-12` → `AR-1` (stop at a digit boundary?), does NO. restart per sheet, empty columns, public/restricted split)
 
 ## Session log
 - 2026-10-07: T3 done (`4c9821f`, ADR 0056): cell cleaner, per-column split policy, filter parsers. The auto-review caught wattage count and comma-list parsing bugs during test-first steps; all fixed. The real sheet cleans with zero warnings and zero CJK. 2452 unit green. Next: T4. The user is clearing the session here.
@@ -422,3 +440,4 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-01 — Two QA rounds on Phase 0; all findings fixed; F4/F6 documented (ADR 0015, Phase 1 tasks); npm 12 via devEngines `warn` (ADR 0011).
 - 2026-09-30 — Phase 0 built by backend-architect on `phase-0` (9 commits); ADRs 0007/0008/0010/0011 updated from installed Next 16.3.7 docs; ADR 0015 added; Auth.js found to be maintenance-only → decision pending.
 - 2026-09-30 — Added the automatic review hook (ADR 0014) and moved code-reviewer into `.claude/agents/`; replaced the find-skills symlink with a copy (`core.symlinks=false`); committed the setup on `main`. Vercel deferred.
+- 2026-10-07: T4 done (grouping, `group.ts`). The auto-review caught colliding variant labels and extras wiping stored values; both fixed. Main session made `duplicate_product_no` per sheet, widened the base-code trim, added type/name tests. 2506 unit green. Next: T5 (images), then QA gate A.

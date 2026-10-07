@@ -63,7 +63,7 @@ The file is 4.2 MB, 28 zip entries, one sheet `Sheet1`, 14 rows × 33 columns, s
 - **Products:**
   - No. 76 = AR-013A1/A2;
   - 77 = AR-013B1/B2;
-  - 78 = AR-013C1/C2 (Model Type "Trimless", the others "Trim");
+  - 78 = AR-013C1/C2 (Model Type "Trimless", like 79; 76/77 are "Trim");
   - 79 = AR-013D1/D2;
   - **80 and 81 have no Model No. and almost no specs** (only family, material, finish, image). → Error `missing_model_no`: they are blocked in the preview and the rest imports. This answers the open client question "Nos. 80/81" for the importer; the client still has to supply the data.
 - **Golden No. 76 (corrected):**
@@ -166,7 +166,7 @@ Examples, each a test case (the real sheet's cells):
 - `family` (Model Name) and `type` (Model Type) come from the first row. If later rows differ → warning.
 
 **Base model code and slug**
-- Base model code = the longest common prefix of the variants' model nos, with trailing `-`/space trimmed: `AR-013A1`, `AR-013A2` → `AR-013A`.
+- Base model code = the longest common prefix of the variants' model nos, with trailing `-`, `_`, `.`, `/` and spaces trimmed (T4): `AR-013A1`, `AR-013A2` → `AR-013A`.
 - With a single variant, the base code is its model no.
 - A prefix shorter than 3 characters → the first model no., plus a warning.
 - Slug = `slugify(family + " " + base)` → `arc-ar-013a`. A taken slug gets the existing `uniqueSlug` suffix. **The slug is set on create only** and never changed by a re-import.
@@ -183,6 +183,8 @@ Examples, each a test case (the real sheet's cells):
 
 **Duplicates**
 - The same model no. on two rows of the sheet (case-insensitive) is an error, `duplicate_model_no`. Both products are blocked.
+- The same `NO.` starting two products on one sheet is an error, `duplicate_product_no` (added in T4). NO. is unique per sheet only, because a workbook may restart numbering on each sheet.
+- Two variants whose labels would collide get ` (<model no.>)`; still colliding after the length cut → the model no. (T4).
 
 ### Matching and field ownership (`plan.ts`; ADR in T7)
 For each sheet product, look up existing products owning any of its model nos (case-insensitive):
@@ -206,8 +208,8 @@ For each sheet product, look up existing products owning any of its model nos (c
 | Code | Severity | Meaning |
 |---|---|---|
 | `not_xlsx`, `too_large`, `zip_unsafe`, `no_header`, `missing_required_column` (NO., Model No.) | fatal (whole file) | nothing is previewed |
-| `orphan_row`, `missing_model_no`, `duplicate_model_no`, `model_no_conflict` | error (blocks that product) | the rest still imports |
-| `missing_image`, `missing_spec` (CCT, CRI, Beam Angle, Wattage, Lumen Output), `unparsed_filter_value`, `cjk_only_cell`, `unknown_column`, `unknown_category`, `unknown_area`, `unsupported_image`, `value_truncated`, `family_mismatch`, `variant_removed` | warning | shown, does not block (`variant_removed` needs the acknowledgement) |
+| `orphan_row`, `invalid_product_no`, `invalid_model_no`, `missing_model_no`, `duplicate_model_no`, `duplicate_product_no`, `model_no_conflict` | error (blocks that product) | the rest still imports |
+| `missing_image`, `missing_spec` (CCT, CRI, Beam Angle, Wattage, Lumen Output), `unparsed_filter_value`, `cjk_only_cell`, `unknown_column`, `unknown_category`, `unknown_area`, `unsupported_image`, `value_truncated`, `family_mismatch`, `short_base_model_code`, `model_no_has_space`, `variant_removed` | warning | shown, does not block (`variant_removed` needs the acknowledgement) |
 
 Every warning carries a sheet name, an Excel row number, and the column where one applies.
 
