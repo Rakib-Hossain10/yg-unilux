@@ -44,7 +44,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **QA gate E: PASS** (Phase 2 exit, 2026-10-07, Opus). No Critical/High. 2060 unit (6 expected-fail) + 133 e2e green, build/audit OK, gitleaks clean, db:indexes OK on a scratch DB. Added `test/phase2-exit.qa.test.ts` (22) and `e2e/admin-gate-e.qa.spec.ts` (8).
     - **M-1 and L-1 FIXED** (ADR 0053): sweep mass-delete guard + ETag-pinned finalize. 2094 unit (5 expected-fail) + 133 e2e green. Open: per-environment Cloudinary folder prefix; real-credential smoke must confirm R2 honours `If-Match` / `CopySourceIfMatch`.
 - Still open, not blocking: gate B L-A (case-insensitive model no., **fix before Phase 3 import**), gate C L-1/L-2/L-3/L-4, gate D L-1/L-2/L-3, gate A L-1 ([id] pages 200 for unknown id) and L-3. Phase 3: import preview images uploaded >24 h before confirm would be swept.
-- **Next: Phase 2 PR** (push `phase-2`, `gh pr create`, wait for CI, **ask the user before merging**). Then Phase 3 (bulk import; plan first). **User must do:** real-credential smoke (T17 dry runs, real Cloudinary/R2 upload incl. If-Match behaviour); rebuild before any local `npm start`. **Phase 3 must-dos:** call `withoutRestrictedFilters`; fix gate B L-A (case-insensitive model no.) first; import preview images older than 24 h would be swept.
+- **Next: Phase 2 PR** (push `phase-2`, `gh pr create`, wait for CI, **ask the user before merging**). Then Phase 3 (bulk import; plan first). **Real-credential smoke DONE 2026-10-07** (R2 presigned PUT, HEAD ETag, GET `If-Match` and `CopySourceIfMatch` match + stale 412, Cloudinary signed upload/inspect/destroy, all three sweep dry runs; test objects cleaned up; dev bucket and Cloudinary were empty). CI green on PR #11. **User must do:** nothing before merge except approve; rebuild before any local `npm start`. **Phase 3 must-dos:** call `withoutRestrictedFilters`; fix gate B L-A (case-insensitive model no.) first; import preview images older than 24 h would be swept.
 - **Open items from gate D:**
   - **L-1:** `updateProduct` reads the visibility setting then writes; a save racing a column restriction can re-write restricted filter numbers (repaired by saving the column setting again). Fix with a version/`updatedAt` check or a second cleanup pass.
   - **L-2:** a retry whose setting is unchanged but cleanup modified products writes no audit entry.
@@ -300,6 +300,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07 — Real-credential smoke PASS (R2 conditional read/copy, Cloudinary upload, sweep dry runs); PR #11 CI green. Awaiting the user's merge approval.
 - 2026-10-07 — Gate E fixes (ADR 0053): sweep guard + ETag-pinned datasheet finalize. 2094 unit + 133 e2e green. Next: push, PR.
 - 2026-10-07 — QA gate E PASS (Phase 2 exit) on Opus: 1 Medium (sweep guard), 1 new Low (datasheet copy race). 30 QA tests added.
 - 2026-10-07 — T18 done (ADR 0052): exit e2e, provider fakes, shared sign-in. 2039 unit + 125 e2e green. Next: QA gate E.
