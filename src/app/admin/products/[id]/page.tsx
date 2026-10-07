@@ -56,7 +56,7 @@ export default async function EditProductPage({
     mainCategory: values.mainCategory,
     variants: values.variants ?? [],
     images: product.images,
-  }).map((problem) => problem.message);
+  });
 
   return (
     <div className="flex flex-col gap-6">

@@ -13,17 +13,25 @@ import {
 } from "@/components/ui/card";
 
 export function FormSection({
+  id,
   title,
   description,
   children,
 }: {
+  /** Anchor for in-page links (tabIndex -1 so a jump moves focus here). */
+  id?: string;
   title: string;
   description?: string;
   children: ReactNode;
 }) {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId}>
+    <section
+      id={id}
+      tabIndex={id === undefined ? undefined : -1}
+      aria-labelledby={headingId}
+      className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <Card>
         <CardHeader>
           <CardTitle>

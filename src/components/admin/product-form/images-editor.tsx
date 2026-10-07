@@ -66,6 +66,7 @@ import {
   type StoredImage,
 } from "./images-state";
 import { indexAfterRemove, useFocusAfterRender } from "./row-controls";
+import { sectionAnchor } from "./status-links";
 
 /** One file on its way to Cloudinary, or one that could not be added. */
 interface UploadItem {
@@ -377,9 +378,11 @@ export function ImagesEditor({
 
   return (
     <section
+      id={sectionAnchor("images")}
+      tabIndex={-1}
       aria-labelledby={headingId}
       aria-busy={saving}
-      className="flex flex-col rounded-xl bg-card text-sm text-card-foreground ring-1 ring-foreground/10"
+      className="flex flex-col rounded-xl bg-card text-sm text-card-foreground ring-1 ring-foreground/10 outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-4 pt-4 sm:px-6 sm:pt-6">
         <div className="flex min-w-0 flex-col gap-1">

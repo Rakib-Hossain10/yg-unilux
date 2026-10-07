@@ -31,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 
 import { FormSection } from "./form-section";
+import { sectionAnchor } from "./status-links";
 import {
   EMPTY_EXTRA_SPEC,
   EMPTY_PUBLIC_FILE,
@@ -237,7 +238,11 @@ export function RowListSection({
   const confirm = removing === null ? null : confirmRemove?.(removing.index);
 
   return (
-    <FormSection title={`${title} (${count})`} description={description}>
+    <FormSection
+      id={sectionAnchor(name)}
+      title={`${title} (${count})`}
+      description={description}
+    >
       <div className="flex flex-col gap-4">
         <ListError name={name} id={errorId} />
         {count === 0 ? (

@@ -21,10 +21,41 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { PublishProblem } from "@/lib/schemas/product";
 import type { ProductStatus } from "@/models/product-constants";
 
 import { callAction, type ServiceErrors } from "../action-result";
 import { useClearNotice } from "../clear-notice";
+import { reasonTarget } from "./status-links";
+
+/**
+ * A reason as text, linked to the control to fix when it has one. The click
+ * moves focus there (keyboard and screen-reader users land on the field).
+ */
+function ReasonItem({ text, field }: Reason) {
+  const target = field === undefined ? null : reasonTarget(field);
+  if (target === null) return <li>{text}</li>;
+  return (
+    <li>
+      <a
+        href={`#${target}`}
+        className="underline underline-offset-2 focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={(event) => {
+          const element = document.getElementById(target);
+          if (!element) return;
+          event.preventDefault();
+          element.scrollIntoView({ block: "center" });
+          element.focus();
+        }}
+      >
+        {text}
+      </a>
+    </li>
+  );
+}
+
+/** One reason to show; `field` (a publishCheck field) makes it a link. */
+export type Reason = { text: string; field?: string };
 
 /** The publish-check fields; their messages are the reasons to list. */
 const PROBLEM_FIELDS = [
@@ -45,14 +76,14 @@ export function statusFailure(
   errors: ServiceErrors,
   publishing: boolean,
   saved: boolean | "unknown",
-): { title: string; items: string[] } {
-  const reasons = PROBLEM_FIELDS.flatMap(
-    (field) => errors.fieldErrors[field] ?? [],
+): { title: string; items: Reason[] } {
+  const reasons = PROBLEM_FIELDS.flatMap((field) =>
+    (errors.fieldErrors[field] ?? []).map((text) => ({ text, field })),
   );
   if (publishing && reasons.length > 0) {
     return {
       title: "This product can't be published yet",
-      items: [...errors.formErrors, ...reasons],
+      items: [...errors.formErrors.map((text) => ({ text })), ...reasons],
     };
   }
   const title =
@@ -72,7 +103,7 @@ export function statusFailure(
         ...errors.formErrors,
         ...Object.values(errors.fieldErrors).flat(),
       ]),
-    ],
+    ].map((text) => ({ text })),
   };
 }
 
@@ -89,7 +120,7 @@ export function StatusPanel({
   version: string;
   status: ProductStatus;
   /** publishCheck() on the saved product, from the server. */
-  problems: string[];
+  problems: PublishProblem[];
   /** The form has unsaved edits. */
   dirty: boolean;
   /** Told a failed publish's field errors, to mark inputs in the form. */
@@ -98,7 +129,7 @@ export function StatusPanel({
   const [pending, startTransition] = useTransition();
   const [failure, setFailure] = useState<{
     title: string;
-    items: string[];
+    items: Reason[];
   } | null>(null);
   const [done, setDone] = useState("");
   // Set synchronously: two fast clicks send one request.
@@ -167,7 +198,7 @@ export function StatusPanel({
             <AlertDescription>
               <ul className="flex list-disc flex-col gap-1 pl-4">
                 {failure.items.map((item, index) => (
-                  <li key={`${index}-${item}`}>{item}</li>
+                  <ReasonItem key={`${index}-${item.text}`} {...item} />
                 ))}
               </ul>
             </AlertDescription>
@@ -177,7 +208,11 @@ export function StatusPanel({
             <p>Before it can be published, this product needs:</p>
             <ul className="flex list-disc flex-col gap-1 pl-4 text-muted-foreground">
               {problems.map((problem) => (
-                <li key={problem}>{problem}</li>
+                <ReasonItem
+                  key={problem.field}
+                  text={problem.message}
+                  field={problem.field}
+                />
               ))}
             </ul>
           </div>

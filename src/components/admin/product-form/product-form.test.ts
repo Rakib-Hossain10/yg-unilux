@@ -2,6 +2,7 @@
 // form-state conversions and their round trip (specs, variants, extra specs,
 // public files), error-path mapping, the resolver, publish refusals and markup.
 
+import type { PublishProblem } from "@/lib/schemas/product";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -57,6 +58,7 @@ import { indexAfterRemove } from "./row-controls";
 import { isRenderedField, type RenderedRows } from "./sections";
 import { SPEC_GROUPS } from "./spec-groups";
 import { statusFailure } from "./status-panel";
+import { reasonTarget } from "./status-links";
 import { VariantsEditor } from "./variants-editor";
 
 const MAIN = "65f0c0ffee0000000000000a";
@@ -344,6 +346,16 @@ describe("productEditResolver", () => {
   });
 });
 
+describe("reasonTarget", () => {
+  it("links each publishCheck field to a real anchor", () => {
+    expect(reasonTarget("variants")).toBe("product-section-variants");
+    expect(reasonTarget("images")).toBe("product-section-images");
+    expect(reasonTarget("mainCategory")).toBe("product-mainCategory");
+    expect(reasonTarget("datasheetId")).toBe("product-datasheetId");
+    expect(reasonTarget("status")).toBeNull();
+  });
+});
+
 describe("statusFailure", () => {
   it("lists each publishCheck reason without the generic status line", () => {
     expect(
@@ -361,7 +373,10 @@ describe("statusFailure", () => {
       ),
     ).toEqual({
       title: "This product can't be published yet",
-      items: ["Add at least one variant (model no.)", "Add at least one image"],
+      items: [
+        { text: "Add at least one variant (model no.)", field: "variants" },
+        { text: "Add at least one image", field: "images" },
+      ],
     });
   });
 
@@ -379,8 +394,8 @@ describe("statusFailure", () => {
         false,
       ).items,
     ).toEqual([
-      "This category no longer exists",
-      "This datasheet no longer exists",
+      { text: "This category no longer exists", field: "mainCategory" },
+      { text: "This datasheet no longer exists", field: "datasheetId" },
     ]);
   });
 
@@ -393,7 +408,7 @@ describe("statusFailure", () => {
       ),
     ).toEqual({
       title: "Not moved to draft",
-      items: ["This product no longer exists."],
+      items: [{ text: "This product no longer exists." }],
     });
   });
 
@@ -415,7 +430,9 @@ describe("ProductEditForm", () => {
   const render = (
     values: ProductFormValues = stored,
     magnetic: string[] = [],
-    problems: string[] = ["Add at least one image"],
+    problems: PublishProblem[] = [
+      { field: "images", message: "Add at least one image" },
+    ],
   ) =>
     renderToStaticMarkup(
       createElement(ProductEditForm, {
@@ -436,6 +453,20 @@ describe("ProductEditForm", () => {
         publishProblems: problems,
       }),
     );
+
+  it("lists the publish reasons as links to their sections", () => {
+    const html = render(
+      stored,
+      [],
+      [
+        { field: "variants", message: "Add at least one variant (model no.)" },
+        { field: "images", message: "Add at least one image" },
+      ],
+    );
+    expect(html).toContain('href="#product-section-variants"');
+    expect(html).toContain('href="#product-section-images"');
+    expect(html).toContain('id="product-section-variants"');
+  });
 
   it("renders the datasheet picker with a label, none selected and the stored files", () => {
     const html = renderToStaticMarkup(

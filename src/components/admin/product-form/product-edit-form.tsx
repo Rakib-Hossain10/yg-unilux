@@ -4,6 +4,7 @@
 // Filters, Specs, Variants, Extra specs, Public files, Save and Delete. The
 // client sends JSON; the Server Action re-parses it with productInputSchema.
 
+import type { PublishProblem } from "@/lib/schemas/product";
 import { CircleAlert } from "lucide-react";
 import Link from "next/link";
 import {
@@ -94,7 +95,7 @@ export function ProductEditForm({
   /** Magnetic Track and its subcategories (the track-size rule). */
   magneticTrackIds: string[];
   /** publishCheck() on the saved product, for the status card. */
-  publishProblems: string[];
+  publishProblems: PublishProblem[];
   /** The product's SAVED images, offered in each variant's image select. */
   savedImages: StoredImage[];
   /** Every stored datasheet (id and file name only, never a key or URL). */
