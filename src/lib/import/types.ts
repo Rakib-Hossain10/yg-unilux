@@ -2,7 +2,8 @@
 // reader produces and the warning every stage reports. Pure: no runtime
 // imports beyond the spec keys, so the admin UI can import it too.
 
-import type { SpecKey } from "@/models/spec-columns";
+import type { TrackSize } from "@/models/product-constants";
+import type { SpecKey, SpecValues } from "@/models/spec-columns";
 
 /** The five sheet columns that are not specs (CLAUDE.md "Sheet columns"). */
 export type IdentityKey = "productNo" | "family" | "type" | "modelNo" | "image";
@@ -46,6 +47,7 @@ export const WARNING_CODES = {
   orphan_row: "error",
   missing_model_no: "error",
   duplicate_model_no: "error",
+  duplicate_product_no: "error",
   model_no_conflict: "error",
   // warning (shown, does not block)
   missing_image: "warning",
@@ -59,6 +61,8 @@ export const WARNING_CODES = {
   unsupported_image_store: "warning",
   value_truncated: "warning",
   family_mismatch: "warning",
+  short_base_model_code: "warning",
+  model_no_has_space: "warning",
   variant_removed: "warning",
   // reader (T2)
   duplicate_column: "warning",
@@ -92,4 +96,57 @@ export function importWarning(
   where: Omit<ImportWarning, "code" | "severity">,
 ): ImportWarning {
   return { code, severity: WARNING_CODES[code], ...where };
+}
+
+/**
+ * One variant of a grouped product: one sheet row with a model no. `specs`
+ * holds only the keys whose value differs between the product's rows (an
+ * absent key = not applicable for this variant); shared keys live on the
+ * product.
+ */
+export interface ImportVariant {
+  modelNo: string;
+  /** `modelNoKey(modelNo)`: the case-insensitive match key (ADR 0055). */
+  modelNoKey: string;
+  /** The optic text that tells variants apart, else the model no. */
+  label: string;
+  specs: SpecValues;
+  sheet: string;
+  row: number;
+}
+
+/**
+ * One product as the sheet describes it (one `NO.`), before matching against
+ * the database (T7). Category and area fields carry ids from the lookups;
+ * `...FromSheet` says whether a template column supplied them (the plan step
+ * only overwrites stored values that came from the sheet).
+ */
+export interface ImportProduct {
+  sheet: string;
+  /** Null when the NO. cell was invalid (the product is then blocked). */
+  productNo: number | null;
+  /** Excel row numbers of every row of the product, in sheet order. */
+  rows: number[];
+  family: string | null;
+  type: string | null;
+  baseModelCode: string;
+  /** "<Family> <base>", used on create only. */
+  name: string;
+  /** Candidate slug; T7/T8 make it unique against the DB. May be "". */
+  slug: string;
+  /** Product-level specs: the same value on every row. */
+  specs: SpecValues;
+  variants: ImportVariant[];
+  mainCategory: string;
+  mainCategoryFromSheet: boolean;
+  extraCategories: string[];
+  extraCategoriesFromSheet: boolean;
+  areas: string[];
+  areasFromSheet: boolean;
+  /** From a Magnetic Track 5/10/20mm category, else null. */
+  trackSize: TrackSize | null;
+  /** True when any warning has severity "error": nothing is saved. */
+  blocked: boolean;
+  /** Every warning of the product's rows plus grouping's own. */
+  warnings: ImportWarning[];
 }

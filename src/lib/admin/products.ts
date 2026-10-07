@@ -28,6 +28,8 @@ import {
 } from "@/models";
 import type { Product, ProductImage } from "@/models/product";
 import {
+  isMagneticTrackCategory,
+  MAGNETIC_TRACK_SLUG,
   MODEL_NO_COLLATION,
   modelNoKey,
   PRODUCT_STATUSES,
@@ -54,7 +56,7 @@ export const PRODUCTS_PAGE_SIZE = 25;
 /** Longest search text used; longer input is cut, not refused. */
 export const MAX_PRODUCT_SEARCH_LENGTH = 80;
 /** The slug of the main category that may carry a `trackSize` (see below). */
-export const MAGNETIC_TRACK_SLUG = "magnetic-track";
+export { MAGNETIC_TRACK_SLUG };
 
 const NOT_FOUND = "This product no longer exists. Reload the page.";
 /** Shown when the product is gone (deleted in another tab). */
@@ -474,9 +476,7 @@ interface CategoryRef {
  */
 async function isMagneticTrack(categories: CategoryRef[]): Promise<boolean> {
   const isRoot = (c: CategoryRef) =>
-    c.parent === null &&
-    (c.slug === MAGNETIC_TRACK_SLUG ||
-      c.name.trim().toLowerCase() === "magnetic track");
+    c.parent === null && isMagneticTrackCategory(c);
   if (categories.some(isRoot)) return true;
   const parentIds = categories.flatMap((c) => (c.parent ? [c.parent] : []));
   if (parentIds.length === 0) return false;

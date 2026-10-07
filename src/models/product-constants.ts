@@ -9,6 +9,38 @@ export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 export const TRACK_SIZES = [5, 10, 20] as const;
 export type TrackSize = (typeof TRACK_SIZES)[number];
 
+/** The slug of the main category that may carry a `trackSize` (ADR 0041). */
+export const MAGNETIC_TRACK_SLUG = "magnetic-track";
+
+/**
+ * True when a category is named or slugged Magnetic Track (ADR 0041: slug
+ * `magnetic-track` or the name "Magnetic Track", any case). The caller checks
+ * that it is a MAIN category (parent null); the rule only applies to roots.
+ */
+export function isMagneticTrackCategory(category: {
+  slug: string;
+  name: string;
+}): boolean {
+  return (
+    category.slug === MAGNETIC_TRACK_SLUG ||
+    category.name.trim().toLowerCase() === "magnetic track"
+  );
+}
+
+/* "5mm", "10mm", "20mm", alone or followed by "-..." ("10mm-track"). */
+const TRACK_SIZE_SLUG = /^(5|10|20)mm(?:-|$)/;
+
+/**
+ * The track size a Magnetic Track subcategory's slug names, or null. The
+ * importer sets `trackSize` from it (Phase 3 plan); "15mm" or "gobo" → null.
+ */
+export function trackSizeFromSlug(slug: string): TrackSize | null {
+  const match = TRACK_SIZE_SLUG.exec(slug);
+  if (match === null) return null;
+  const size = Number(match[1]);
+  return TRACK_SIZES.find((s) => s === size) ?? null;
+}
+
 /** What a product image shows; the product page groups images by kind. */
 export const PRODUCT_IMAGE_KINDS = [
   "gallery",
