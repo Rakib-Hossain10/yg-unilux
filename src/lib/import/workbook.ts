@@ -1,11 +1,15 @@
 // Reads the client's spec sheet with exceljs into raw rows (no cleaning; that
-// is clean.ts). Call it only after safety.ts accepted the bytes. Formulas are
-// never evaluated: only the result Excel cached in the file is used.
+// is clean.ts). Formulas are never evaluated: only the result Excel cached in
+// the file is used.
 //
 // Per sheet: find the header row, map headers to column keys (columns.ts),
 // then turn every non-empty row below it into a SheetRow of raw strings keyed
 // by column, with Excel's own row numbers. The loaded workbook is returned
 // too, so the image stage (T5) reuses it instead of parsing the file again.
+//
+// The only input is a CheckedImportFile (safety.ts): the zip checks passed
+// and the range records exceljs expands cell by cell were stripped or
+// bounded (sheet-guard.ts), so exceljs never sees an unchecked upload.
 
 import "server-only";
 
@@ -15,6 +19,7 @@ import { IMPORT_HEADER_SCAN_ROWS } from "@/lib/constants";
 
 import { numberToText } from "./clean";
 import { REQUIRED_COLUMNS, columnForHeader } from "./columns";
+import { isCheckedImportFile, type CheckedImportFile } from "./safety";
 import {
   importWarning,
   type ColumnKey,
@@ -62,8 +67,12 @@ const MIN_KNOWN_HEADERS = 3;
  * return `ok: false` with the warnings; nothing else is returned then.
  */
 export async function readWorkbook(
-  bytes: Buffer | Uint8Array,
+  file: CheckedImportFile,
 ): Promise<WorkbookRead> {
+  if (!isCheckedImportFile(file)) {
+    throw new TypeError("readWorkbook: run checkImportFile first");
+  }
+  const { bytes } = file;
   const workbook = new ExcelJS.Workbook();
   try {
     const buffer = Buffer.isBuffer(bytes)

@@ -9,7 +9,11 @@
 // entries (the reused-kernel bomb), (3) proves it is a real .xlsx and not a
 // macro workbook, and (4) inflates every entry while COUNTING only, stopping
 // at its declared size, so a directory that lies about sizes is caught with
-// O(chunk) memory instead of after the damage.
+// O(chunk) memory instead of after the damage. Then (5) the sheet guard
+// strips or bounds the range records exceljs would expand cell by cell
+// (sheet-guard.ts) and the zip is written back out (zip-rebuild.ts). The
+// result is a CheckedImportFile: the only input readWorkbook and
+// readEmbeddedImages accept, so nothing parses an upload that skipped this.
 
 import { createInflateRaw } from "node:zlib";
 
@@ -18,6 +22,8 @@ import {
   MAX_IMPORT_BYTES,
   MAX_IMPORT_COMPRESSION_RATIO,
   MAX_IMPORT_ENTRIES,
+  MAX_IMPORT_MERGED_CELLS,
+  MAX_IMPORT_MERGES,
   MAX_IMPORT_UNCOMPRESSED_BYTES,
   MAX_XLSX_PART_BYTES,
 } from "@/lib/constants";
@@ -25,11 +31,18 @@ import {
   entryData,
   hasZipMagic,
   readCentralDirectory,
+  readZipBytes,
   readZipPart,
   type CentralEntry,
 } from "@/lib/xlsx-signature";
 
+import {
+  guardWorkbookXml,
+  guardWorksheetXml,
+  type GuardedXml,
+} from "./sheet-guard";
 import { importWarning, type ImportWarning } from "./types";
+import { rebuildZip } from "./zip-rebuild";
 
 /** One reason per refusal, so the admin message says exactly what is wrong. */
 export type ImportSafetyRejection =
@@ -45,11 +58,35 @@ export type ImportSafetyRejection =
   | "compression_ratio"
   | "size_mismatch"
   | "overlapping_entries"
-  | "inconsistent_entries";
+  | "inconsistent_entries"
+  | "too_many_merged_cells"
+  | "sheet_out_of_range";
+
+declare const CHECKED: unique symbol;
+
+/**
+ * An upload that passed `checkImportFile`, with its range records guarded.
+ * Only `checkImportFile` makes one (the brand is not exported, and readers
+ * also check at run time with `isCheckedImportFile`).
+ */
+export interface CheckedImportFile {
+  readonly [CHECKED]: true;
+  /** The checked, rewritten .xlsx: the only bytes the parsers may read. */
+  readonly bytes: Uint8Array;
+}
 
 export type ImportSafetyResult =
-  | { ok: true; entryNames: string[] }
+  | { ok: true; entryNames: string[]; file: CheckedImportFile }
   | { ok: false; reason: ImportSafetyRejection };
+
+const issued = new WeakSet<object>();
+
+/** Was this made by `checkImportFile` (in this process)? */
+export function isCheckedImportFile(
+  value: unknown,
+): value is CheckedImportFile {
+  return typeof value === "object" && value !== null && issued.has(value);
+}
 
 const MB = 1024 * 1024;
 
@@ -75,12 +112,15 @@ export const IMPORT_SAFETY_MESSAGES: Record<ImportSafetyRejection, string> = {
     "The file's parts overlap each other. It was refused for safety.",
   inconsistent_entries:
     "The file lists its parts inconsistently. Save it again in Excel and re-upload.",
+  too_many_merged_cells: `The sheet merges too many cells (more than ${MAX_IMPORT_MERGES.toLocaleString("en-US")} merged ranges or ${MAX_IMPORT_MERGED_CELLS.toLocaleString("en-US")} merged cells). Unmerge them in Excel and re-upload.`,
+  sheet_out_of_range:
+    "The file refers to rows, columns or sheets beyond Excel's limits. Save it again in Excel and re-upload.",
 };
 
 /* Which plan-level fatal code each reason is reported under. */
 const CODE_FOR: Record<
   ImportSafetyRejection,
-  "not_xlsx" | "too_large" | "zip_unsafe"
+  "not_xlsx" | "too_large" | "zip_unsafe" | "sheet_too_complex"
 > = {
   empty: "not_xlsx",
   too_large: "too_large",
@@ -95,6 +135,8 @@ const CODE_FOR: Record<
   size_mismatch: "zip_unsafe",
   overlapping_entries: "zip_unsafe",
   inconsistent_entries: "zip_unsafe",
+  too_many_merged_cells: "sheet_too_complex",
+  sheet_out_of_range: "not_xlsx",
 };
 
 /** The fatal preview warning for a refusal (whole file, so no sheet). */
@@ -112,9 +154,11 @@ const WORKBOOK_CONTENT_TYPE =
  * Is this upload safe to hand to exceljs? Checks, in order: size, zip magic,
  * central directory (entry cap before walking it), declared total size,
  * per-entry ratio, encryption/compression method, overlapping data,
- * required parts and content type, macros, then a counting inflate of every
- * entry against its declared size. Returns the entry names on success, so
- * later stages (images) need not re-read the directory.
+ * required parts and content type, macros, a counting inflate of every
+ * entry against its declared size, then the sheet guard (range records
+ * stripped or bounded) and a rewrite of the zip. On success returns the
+ * entry names and the CheckedImportFile that readWorkbook and
+ * readEmbeddedImages require (its bytes are the rewritten zip).
  */
 export async function checkImportFile(
   bytes: Uint8Array,
@@ -145,11 +189,67 @@ export async function checkImportFile(
     const problem = await verifyInflatedSize(data, entry);
     if (problem) return refuse(problem);
   }
-  return { ok: true, entryNames: entries.map((e) => e.name) };
+
+  // Sizes are now proven, so the guarded parts can be inflated in full.
+  const replacements = guardRanges(bytes, entries);
+  if (!(replacements instanceof Map)) return refuse(replacements);
+  const rebuilt = rebuildZip(bytes, entries, replacements);
+  if (rebuilt === "corrupt") return refuse("corrupt");
+  const file = Object.freeze({
+    bytes: rebuilt,
+  }) as unknown as CheckedImportFile;
+  issued.add(file);
+  return { ok: true, entryNames: entries.map((e) => e.name), file };
 }
 
 function refuse(reason: ImportSafetyRejection): ImportSafetyResult {
   return { ok: false, reason };
+}
+
+/* The parts exceljs reads as the workbook and as worksheets, matched the way
+ * xlsx.js matches them (leading "/" stripped; its worksheet pattern is not
+ * anchored), case-insensitively so the guard covers a superset. */
+const WORKBOOK_PART = /^xl\/workbook\.xml$/i;
+const WORKSHEET_PART = /xl\/worksheets\/sheet\d+\.xml/i;
+
+const strictUtf8Text = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+});
+
+/*
+ * Runs the sheet guard on the workbook part and every worksheet part. Returns
+ * the parts it rewrote (name → new bytes; empty when none changed), or the
+ * refusal. A part that is not valid UTF-8 is refused: exceljs could not
+ * parse it either, and the guard must read exactly what exceljs reads.
+ */
+function guardRanges(
+  bytes: Uint8Array,
+  entries: CentralEntry[],
+): Map<string, Uint8Array> | ImportSafetyRejection {
+  const replacements = new Map<string, Uint8Array>();
+  for (const entry of entries) {
+    const name = entry.name.replace(/^\/+/, "");
+    let guard: ((xml: string) => GuardedXml) | null = null;
+    if (WORKBOOK_PART.test(name)) guard = guardWorkbookXml;
+    else if (WORKSHEET_PART.test(name)) guard = guardWorksheetXml;
+    if (guard === null) continue;
+
+    const data = readZipBytes(bytes, entry, MAX_IMPORT_UNCOMPRESSED_BYTES);
+    if (data === null || data === "corrupt") return "corrupt";
+    let xml: string;
+    try {
+      xml = strictUtf8Text.decode(data);
+    } catch {
+      return "corrupt";
+    }
+    const result = guard(xml);
+    if (!result.ok) return result.reason;
+    if (result.changed) {
+      replacements.set(entry.name, new TextEncoder().encode(result.xml));
+    }
+  }
+  return replacements;
 }
 
 const MAX_32 = 0xffffffff;
@@ -189,7 +289,9 @@ function checkEntryIdentity(
     if (at + 30 + localLength > bytes.length) return "corrupt";
     const localName = bytes.subarray(at + 30, at + 30 + localLength);
     if (!sameBytes(localName, entry.nameBytes)) return "inconsistent_entries";
-    const key = entry.name.replace(/^\/+/, "");
+    // OPC part names are case-insensitive (images.ts looks parts up that
+    // way), so "XL/WORKBOOK.XML" is the same part as "xl/workbook.xml".
+    const key = entry.name.replace(/^\/+/, "").toLowerCase();
     if (seen.has(key)) return "inconsistent_entries";
     seen.add(key);
   }
@@ -259,7 +361,11 @@ function checkWorkbookType(
   entries: CentralEntry[],
 ): ImportSafetyRejection | null {
   const byName = new Map(entries.map((e) => [e.name, e]));
-  if (byName.has("xl/vbaProject.bin")) return "macro_enabled";
+  // A VBA project by its usual part name, in any case and folder, even when
+  // [Content_Types].xml does not declare it.
+  if (entries.some((e) => /(?:^|\/)vbaproject\.bin$/i.test(e.name))) {
+    return "macro_enabled";
+  }
   const types = byName.get("[Content_Types].xml");
   if (!types || !byName.has("xl/workbook.xml")) return "not_xlsx";
 

@@ -3,7 +3,7 @@
 // per product, a picture shared by two products, variant pictures, other
 // image stores, unsupported formats, size caps, linked and free pictures.
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import ExcelJS from "exceljs";
 import sharp from "sharp";
@@ -17,6 +17,7 @@ import {
   fixturePictures,
   type FixtureOptions,
 } from "../../../test/fixtures/import/build";
+import { checked } from "../../../test/fixtures/import/checked";
 import {
   emfBytes,
   patchZip,
@@ -29,6 +30,7 @@ import {
   readEmbeddedImages,
   type EmbeddedImages,
 } from "./images";
+import type { CheckedImportFile } from "./safety";
 import type { ImportProduct, ImportWarning } from "./types";
 import { readWorkbook } from "./workbook";
 
@@ -48,7 +50,7 @@ interface Analysis {
 
 /* The pipeline up to images: read → clean → group → images → attach. */
 async function analyse(bytes: Uint8Array): Promise<Analysis> {
-  const read = await readWorkbook(bytes);
+  const read = await readWorkbook(await checked(bytes));
   if (!read.ok) throw new Error(JSON.stringify(read.warnings));
   const grouped = groupRows(read.rows.map(cleanRow), {
     categories: [],
@@ -56,7 +58,7 @@ async function analyse(bytes: Uint8Array): Promise<Analysis> {
     defaultCategoryId: "default",
   });
   const embedded = await readEmbeddedImages(
-    bytes,
+    await checked(bytes),
     read.sheets.map((s) => s.name),
   );
   const attached = attachImages(grouped.products, embedded);
@@ -193,6 +195,17 @@ describe("readEmbeddedImages + attachImages on the synthetic client sheet", () =
   });
 });
 
+describe("input", () => {
+  it("never reads bytes that did not come from checkImportFile", async () => {
+    const forged = {
+      bytes: await buildFixture(),
+    } as unknown as CheckedImportFile;
+    await expect(readEmbeddedImages(forged, ["Sheet1"])).rejects.toThrow(
+      /checkImportFile/,
+    );
+  });
+});
+
 describe("other image stores", () => {
   it("warns unsupported_image_store when WPS cellimages.xml is present", async () => {
     const bytes = await patchZip(await buildFixture(), {
@@ -273,7 +286,8 @@ describe("picture checks", () => {
   });
 
   it("flags a picture over 10 MB without reading it", async () => {
-    const big = new Uint8Array(MAX_IMAGE_BYTES + 1);
+    // Random (incompressible) bytes: zeros would trip the zip ratio check.
+    const big = new Uint8Array(randomBytes(MAX_IMAGE_BYTES + 1));
     big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const bytes = await patchZip(await buildFixture(), {
       "xl/media/image4.png": big,
@@ -288,7 +302,7 @@ describe("picture checks", () => {
     ]);
     // Only the three readable pictures reached sharp.
     expect(metadata).toHaveBeenCalledTimes(3);
-  });
+  }, 30_000); // a 10 MB incompressible part: deflate + check take seconds under load
 
   it("flags a picture above the pixel cap", async () => {
     const huge = await sharp({
@@ -360,7 +374,7 @@ describe("picture checks", () => {
         '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaaaaaa">]><xdr:wsDr xmlns:xdr="x">&a;</xdr:wsDr>',
     });
     // exceljs refuses this file too, so the reader is called directly.
-    const embedded = await readEmbeddedImages(bytes, ["Sheet1"]);
+    const embedded = await readEmbeddedImages(await checked(bytes), ["Sheet1"]);
     expect(embedded.anchors).toEqual([]);
     expect(embedded.files.size).toBe(0);
     expect(embedded.warnings.map((w) => [w.code, w.sheet])).toEqual([
@@ -387,7 +401,7 @@ describe("picture checks", () => {
           return `<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="a14">${pic}</mc:Choice><mc:Fallback>${fallback}</mc:Fallback></mc:AlternateContent>`;
         }),
     });
-    const embedded = await readEmbeddedImages(bytes, ["Sheet1"]);
+    const embedded = await readEmbeddedImages(await checked(bytes), ["Sheet1"]);
     // Only the Choice branch counts: the Fallback's picture B is not added.
     expect(
       embedded.anchors.filter((x) => x.row === 3).map((x) => x.sha256),

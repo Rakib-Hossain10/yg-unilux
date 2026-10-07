@@ -10,6 +10,7 @@ import {
 } from "@/lib/constants";
 
 import { buildFixture } from "../../../test/fixtures/import/build";
+import { checked } from "../../../test/fixtures/import/checked";
 import { cleanRow, type CleanedRow } from "./clean";
 import { groupRows, type GroupLookups, type GroupResult } from "./group";
 import type { ColumnKey, ImportProduct } from "./types";
@@ -50,7 +51,7 @@ const LOOKUPS: GroupLookups = {
 };
 
 async function fixtureRows(): Promise<CleanedRow[]> {
-  const read = await readWorkbook(await buildFixture());
+  const read = await readWorkbook(await checked(await buildFixture()));
   if (!read.ok) throw new Error(JSON.stringify(read.warnings));
   return read.rows.map(cleanRow);
 }

@@ -89,13 +89,33 @@ export const REQUIRED_COLUMNS: readonly ColumnKey[] = ["productNo", "modelNo"];
 
 /**
  * The CJK characters the import removes (English only, plan decision 7), as
- * a regex character-class body: Han, Hiragana, Katakana, Hangul, Bopomofo,
- * CJK symbols and punctuation (U+3000–303F), CJK compatibility forms
- * (U+FE30–FE4F) and the full-width forms NFKC leaves (U+FF00–FFEF).
+ * a regex character-class body for a `u` regex. Matched AFTER NFKC, which
+ * already turns full-width ASCII, U+3000 (ideographic space) and the U+33xx
+ * squares (U+338F becomes "kg", U+3300 a katakana word) into what they stand for.
+ *
+ * By script (Han, Hiragana, Katakana, Hangul, Bopomofo, wherever they are
+ * encoded) AND by whole block, because CJK punctuation and symbols are
+ * Script=Common (katakana middle dot U+30FB, prolonged mark U+30FC, strokes,
+ * ideographic description characters, kanbun marks, Yijing hexagrams):
+ * - U+1100–11FF Hangul Jamo; U+2E80–2FFF radicals, Kangxi, IDCs;
+ * - U+3000–33FF symbols and punctuation, kana, bopomofo, compatibility jamo,
+ *   kanbun, strokes, enclosed letters, CJK compatibility;
+ * - U+3400–4DBF extension A; U+4DC0–4DFF Yijing; U+4E00–9FFF;
+ * - U+A960–A97F, U+AC00–D7FF Hangul; U+F900–FAFF compatibility ideographs;
+ * - U+FE10–FE1F vertical forms; U+FE30–FE4F compatibility forms;
+ * - U+FF00–FFEF full-width and half-width forms (half-width katakana and
+ *   Hangul, the half-width middle dot U+FF65);
+ * - U+16FE0–16FFF ideographic symbols; U+1F200–1F2FF enclosed ideographs.
  * Shared by header matching and the cell cleaner (clean.ts).
  */
-export const CJK_CLASS =
-  "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\p{Script=Bopomofo}\\u3000-\\u303F\\uFE30-\\uFE4F\\uFF00-\\uFFEF";
+export const CJK_CLASS = [
+  "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}",
+  "\\p{Script=Hangul}\\p{Script=Bopomofo}",
+  "\\u1100-\\u11FF\\u2E80-\\u2FFF\\u3000-\\u33FF\\u3400-\\u4DBF\\u4DC0-\\u4DFF",
+  "\\u4E00-\\u9FFF\\uA960-\\uA97F\\uAC00-\\uD7FF\\uF900-\\uFAFF",
+  "\\uFE10-\\uFE1F\\uFE30-\\uFE4F\\uFF00-\\uFFEF",
+  "\\u{16FE0}-\\u{16FFF}\\u{1F200}-\\u{1F2FF}",
+].join("");
 
 /* CJK characters, so "Lens 透镜" on one line still matches "Lens". */
 const CJK = new RegExp(`[${CJK_CLASS}]`, "gu");

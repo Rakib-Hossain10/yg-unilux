@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { SPEC_KEYS } from "@/models/spec-columns";
 
+import { checked, digestsOf } from "../../../test/fixtures/import/checked";
 import { checkImportFile } from "./safety";
 import { readWorkbook } from "./workbook";
 
@@ -43,8 +44,16 @@ describe.skipIf(!present)("the client's real sheet", () => {
     expect((await checkImportFile(bytes)).ok).toBe(true);
   });
 
+  it("reaches the parsers unchanged: every part of the checked file is the original's", async () => {
+    // The range guard (gate A M-1) found nothing to strip or refuse, and the
+    // rewritten zip holds the same parts byte for byte, so exceljs and the
+    // image reader read the sheet exactly as before.
+    const guarded = digestsOf((await checked(bytes)).bytes);
+    expect(guarded).toEqual(digestsOf(bytes));
+  });
+
   it("maps all 33 headers on row 1 of Sheet1, with no warnings", async () => {
-    const result = await readWorkbook(bytes);
+    const result = await readWorkbook(await checked(bytes));
     if (!result.ok) throw new Error(JSON.stringify(result.warnings));
     expect(result.sheets).toHaveLength(1);
     const [sheet] = result.sheets;
@@ -66,7 +75,7 @@ describe.skipIf(!present)("the client's real sheet", () => {
   });
 
   it("reads 12 data rows with Excel's row numbers (blank row 2 skipped)", async () => {
-    const result = await readWorkbook(bytes);
+    const result = await readWorkbook(await checked(bytes));
     if (!result.ok) throw new Error(JSON.stringify(result.warnings));
     expect(result.rows.map((r) => r.row)).toEqual([
       3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,

@@ -6,7 +6,8 @@
 // (xl/drawings/drawingN.xml) → each oneCell/twoCell anchor's top-left cell →
 // the picture part (xl/media/*) through the drawing's relationships. Parts
 // are read with the shared zip reader (src/lib/xlsx-signature.ts) and its
-// capped inflate; call this only after safety.ts accepted the bytes. Other
+// capped inflate, from the CheckedImportFile safety.ts made (the only input
+// accepted, so an unchecked upload never reaches this reader). Other
 // picture stores (WPS cell images, Excel "Place in Cell") are reported, not
 // guessed at. Linked pictures are never fetched.
 
@@ -40,6 +41,7 @@ import {
   type Relationship,
   type XmlElement,
 } from "./ooxml";
+import { isCheckedImportFile, type CheckedImportFile } from "./safety";
 import {
   importWarning,
   type ImportImage,
@@ -100,9 +102,13 @@ const MB = 1024 * 1024;
  * read). Never throws for bad content: unreadable parts become warnings.
  */
 export async function readEmbeddedImages(
-  bytes: Uint8Array,
+  file: CheckedImportFile,
   sheetNames: readonly string[],
 ): Promise<EmbeddedImages> {
+  if (!isCheckedImportFile(file)) {
+    throw new TypeError("readEmbeddedImages: run checkImportFile first");
+  }
+  const { bytes } = file;
   const warnings: ImportWarning[] = [];
   const anchors: ImageAnchor[] = [];
   const files = new Map<string, EmbeddedImage>();

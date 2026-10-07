@@ -2,6 +2,8 @@
 // ratio, by total declared size, by lying sizes, by overlapping entries), too
 // many entries, macro workbooks, non-zips and truncated files are refused.
 
+import { crc32 } from "node:zlib";
+
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
@@ -9,10 +11,18 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_IMPORT_BYTES,
   MAX_IMPORT_ENTRIES,
+  MAX_IMPORT_MERGES,
   MAX_IMPORT_UNCOMPRESSED_BYTES,
 } from "@/lib/constants";
+import { readCentralDirectory } from "@/lib/xlsx-signature";
 
 import { buildFixture } from "../../../test/fixtures/import/build";
+import {
+  checked,
+  digestsOf,
+  partsOf,
+} from "../../../test/fixtures/import/checked";
+import { patchZip } from "../../../test/fixtures/import/patch-zip";
 import {
   extraField,
   localRecord,
@@ -25,6 +35,7 @@ import {
   safetyWarning,
   type ImportSafetyRejection,
 } from "./safety";
+import { readWorkbook } from "./workbook";
 
 const WORKBOOK_TYPES =
   '<?xml version="1.0"?><Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>';
@@ -239,6 +250,19 @@ describe("checkImportFile", () => {
     expect(await reasonOf(bytes)).toBe("macro_enabled");
   });
 
+  it("refuses an undeclared VBA project in any case or folder", async () => {
+    for (const name of [
+      "xl/VBAPROJECT.BIN",
+      "xl/VbaProject.bin",
+      "xl/media/vbaProject.bin",
+    ]) {
+      const bytes = await zipOf(
+        workbookParts({ [name]: new Uint8Array([1, 2, 3]) }),
+      );
+      expect(await reasonOf(bytes)).toBe("macro_enabled");
+    }
+  });
+
   it("refuses a zip without the workbook parts", async () => {
     expect(await reasonOf(await zipOf({ "readme.txt": "hi" }))).toBe(
       "not_xlsx",
@@ -282,6 +306,8 @@ describe("safetyWarning", () => {
       size_mismatch: "zip_unsafe",
       overlapping_entries: "zip_unsafe",
       inconsistent_entries: "zip_unsafe",
+      too_many_merged_cells: "sheet_too_complex",
+      sheet_out_of_range: "not_xlsx",
     };
     for (const [reason, code] of Object.entries(expected)) {
       const warning = safetyWarning(reason as ImportSafetyRejection);
@@ -384,5 +410,168 @@ describe("checkImportFile sees what JSZip sees", () => {
       }
     }
     expect(await reasonOf(out)).toBe("inconsistent_entries");
+  });
+});
+
+describe("checkImportFile range guard (gate A M-1)", () => {
+  const sheetPart = "xl/worksheets/sheet1.xml";
+
+  async function checkedBytes(bytes: Uint8Array): Promise<Uint8Array> {
+    return (await checked(bytes)).bytes;
+  }
+
+  it("hands on every part unchanged when nothing needs guarding", async () => {
+    const original = await buildFixture();
+    expect(digestsOf(await checkedBytes(original))).toEqual(
+      digestsOf(original),
+    );
+  });
+
+  it("gives a file that passes the check again, unchanged (a fixed point)", async () => {
+    const plain = await buildFixture({ merged: true });
+    // One file the guard leaves alone, one it has to strip.
+    const stripped = await patchZip(plain, {
+      [sheetPart]: (xml) =>
+        xml.replace(
+          "</sheetData>",
+          '</sheetData><dataValidations count="1"><dataValidation sqref="C3:C1048576"/></dataValidations>',
+        ),
+      "xl/workbook.xml": (xml) =>
+        xml.replace(
+          "</sheets>",
+          '</sheets><definedNames><definedName name="x">Sheet1!$A:$A</definedName></definedNames>',
+        ),
+    });
+    for (const upload of [plain, stripped]) {
+      const once = await checkedBytes(upload);
+      expect(Buffer.compare(await checkedBytes(once), once)).toBe(0);
+    }
+  });
+
+  it("strips honest whole-column dropdowns and print areas; rows read the same, fast", async () => {
+    const plain = await buildFixture();
+    const columns = ["C", "D", "E", "F", "G", "H", "I", "J"];
+    const validations = columns
+      .map(
+        (c) =>
+          `<dataValidation type="list" allowBlank="1" sqref="${c}3:${c}1048576"><formula1>"a,b"</formula1></dataValidation>`,
+      )
+      .join("");
+    const bytes = await patchZip(plain, {
+      [sheetPart]: (xml) =>
+        xml.replace(
+          /<pageMargins/,
+          `<dataValidations count="${columns.length}">${validations}</dataValidations><pageMargins`,
+        ),
+      "xl/workbook.xml": (xml) =>
+        xml.replace(
+          "</sheets>",
+          '</sheets><definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">Sheet1!$A:$AG</definedName></definedNames>',
+        ),
+    });
+    // The payload really is in the upload (a missed anchor would make the
+    // "stripped" assertions below pass vacuously).
+    const injected = partsOf(bytes);
+    const decode = (data: Uint8Array | undefined) =>
+      new TextDecoder().decode(data ?? new Uint8Array());
+    expect(decode(injected.get(sheetPart))).toContain("<dataValidations");
+    expect(decode(injected.get("xl/workbook.xml"))).toContain("<definedNames");
+
+    const checkedFile = await checkedBytes(bytes);
+    const guarded = partsOf(checkedFile);
+    const guardedDigests = digestsOf(checkedFile);
+    const original = digestsOf(plain);
+    // Only the two guarded parts differ from the plain fixture, and only by
+    // the stripped elements.
+    for (const [name, digest] of original) {
+      if (name === sheetPart || name === "xl/workbook.xml") continue;
+      expect(guardedDigests.get(name), name).toBe(digest);
+    }
+    const text = (name: string) =>
+      new TextDecoder().decode(guarded.get(name) ?? new Uint8Array());
+    expect(text(sheetPart)).not.toContain("dataValidation");
+    expect(text("xl/workbook.xml")).not.toContain("definedName");
+
+    const start = performance.now();
+    const read = await readWorkbook(await checked(bytes));
+    expect(performance.now() - start).toBeLessThan(2_000);
+    const reference = await readWorkbook(await checked(plain));
+    if (!read.ok || !reference.ok) throw new Error("expected both to read");
+    expect(read.rows).toEqual(reference.rows);
+  });
+
+  it("writes a standard zip: declared CRCs match, JSZip reads it with CRC checks", async () => {
+    const bytes = await patchZip(await buildFixture(), {
+      [sheetPart]: (xml) =>
+        xml.replace("</sheetData>", '</sheetData><dataValidations count="0"/>'),
+    });
+    const rebuilt = await checkedBytes(bytes);
+    const directory = readCentralDirectory(rebuilt, {
+      maxEntries: 10_000,
+      trailer: "none",
+    });
+    if (!directory.ok) throw new Error(directory.reason);
+    const parts = partsOf(rebuilt);
+    for (const entry of directory.entries) {
+      expect(entry.crc32, entry.name).toBe(
+        crc32(parts.get(entry.name) ?? new Uint8Array()),
+      );
+    }
+    const zip = await JSZip.loadAsync(rebuilt, { checkCRC32: true });
+    expect(await zip.file(sheetPart)?.async("string")).not.toContain(
+      "dataValidations",
+    );
+  });
+
+  it("refuses too many merged ranges, with an admin message", async () => {
+    const merges = Array.from(
+      { length: MAX_IMPORT_MERGES + 1 },
+      (_, i) => `<mergeCell ref="AH${20 + 2 * i}:AH${21 + 2 * i}"/>`,
+    ).join("");
+    const bytes = await patchZip(await buildFixture(), {
+      [sheetPart]: (xml) =>
+        xml.replace(
+          "</sheetData>",
+          `</sheetData><mergeCells>${merges}</mergeCells>`,
+        ),
+    });
+    expect(await reasonOf(bytes)).toBe("too_many_merged_cells");
+    expect(safetyWarning("too_many_merged_cells")).toMatchObject({
+      code: "sheet_too_complex",
+      severity: "fatal",
+    });
+  });
+
+  it("refuses a column range past XFD and a huge sheet id", async () => {
+    const base = await buildFixture();
+    const wideColumns = await patchZip(base, {
+      [sheetPart]: (xml) =>
+        xml.replace(
+          "<sheetData>",
+          '<cols><col min="40" max="10000000" width="3"/></cols><sheetData>',
+        ),
+    });
+    expect(await reasonOf(wideColumns)).toBe("sheet_out_of_range");
+    const bigId = await patchZip(base, {
+      "xl/workbook.xml": (xml) =>
+        xml.replace(/sheetId="1"/, 'sheetId="200000000"'),
+    });
+    expect(await reasonOf(bigId)).toBe("sheet_out_of_range");
+  });
+
+  it("guards every part exceljs would read as a worksheet, not just sheet1", async () => {
+    // exceljs's worksheet pattern is not anchored, so this part is parsed.
+    const bytes = await patchZip(await buildFixture(), {
+      "decoy/xl/worksheets/sheet7.xml":
+        '<worksheet><sheetData/><mergeCells><mergeCell ref="A1:XFD1048576"/></mergeCells></worksheet>',
+    });
+    expect(await reasonOf(bytes)).toBe("too_many_merged_cells");
+  });
+
+  it("refuses a guarded part that is not UTF-8", async () => {
+    const bytes = await patchZip(await buildFixture(), {
+      [sheetPart]: new Uint8Array([0xff, 0xfe, 0x3c, 0x00]),
+    });
+    expect(await reasonOf(bytes)).toBe("corrupt");
   });
 });

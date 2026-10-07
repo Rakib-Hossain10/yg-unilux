@@ -55,6 +55,8 @@ export interface CentralEntry {
   extraFieldIds: number[];
   flags: number;
   method: number;
+  /** The declared CRC-32 of the uncompressed data (not verified here). */
+  crc32: number;
   compressedSize: number;
   uncompressedSize: number;
   localOffset: number;
@@ -162,6 +164,7 @@ export function readCentralDirectory(
       extraFieldIds,
       flags: view.getUint16(at + 8, true),
       method: view.getUint16(at + 10, true),
+      crc32: view.getUint32(at + 16, true),
       compressedSize: view.getUint32(at + 20, true),
       uncompressedSize: view.getUint32(at + 24, true),
       localOffset: view.getUint32(at + 42, true),

@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_RESTRICTED_SPEC_KEYS } from "@/models/spec-columns";
 
+import { checked } from "../../../test/fixtures/import/checked";
 import { cleanRow } from "./clean";
 import { groupRows, type GroupResult } from "./group";
 import type { ImportProduct } from "./types";
@@ -27,7 +28,7 @@ const present = existsSync(fixturePath);
 const RESTRICTED = new Set<string>(DEFAULT_RESTRICTED_SPEC_KEYS);
 
 async function grouped(): Promise<GroupResult> {
-  const read = await readWorkbook(readFileSync(fixturePath));
+  const read = await readWorkbook(await checked(readFileSync(fixturePath)));
   if (!read.ok) throw new Error(JSON.stringify(read.warnings));
   return groupRows(read.rows.map(cleanRow), {
     categories: [],

@@ -39,6 +39,7 @@ export const WARNING_CODES = {
   not_xlsx: "fatal",
   too_large: "fatal",
   zip_unsafe: "fatal",
+  sheet_too_complex: "fatal",
   no_header: "fatal",
   missing_required_column: "fatal",
   // error (blocks that product)

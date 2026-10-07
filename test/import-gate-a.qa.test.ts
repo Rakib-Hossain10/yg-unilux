@@ -29,6 +29,7 @@ import { SLUG_PATTERN } from "@/lib/slug";
 import { checkXlsx } from "@/lib/xlsx-signature";
 
 import { buildFixture } from "./fixtures/import/build";
+import { checked } from "./fixtures/import/checked";
 import { patchZip } from "./fixtures/import/patch-zip";
 import { rawZip } from "./fixtures/import/raw-zip";
 
@@ -71,65 +72,67 @@ describe("gate A: zip safety", () => {
     expect(result).toEqual({ ok: false, reason: "uncompressed_too_large" });
   }, 60_000);
 
-  it.fails(
-    "[Low, T2] refuses two part names that differ only by case (OPC equivalence)",
-    async () => {
-      const fixture = await buildFixture();
-      const workbook = await new JSZip()
-        .loadAsync(fixture)
-        .then((z) => z.file("xl/workbook.xml")?.async("string"));
-      const bytes = await patchZip(fixture, {
-        "XL/WORKBOOK.XML": workbook ?? "<workbook/>",
-      });
-      const result = await checkImportFile(bytes);
-      expect(result.ok).toBe(false);
-    },
-  );
+  it("[Low, T2] refuses two part names that differ only by case (OPC equivalence)", async () => {
+    const fixture = await buildFixture();
+    const workbook = await new JSZip()
+      .loadAsync(fixture)
+      .then((z) => z.file("xl/workbook.xml")?.async("string"));
+    const bytes = await patchZip(fixture, {
+      "XL/WORKBOOK.XML": workbook ?? "<workbook/>",
+    });
+    const result = await checkImportFile(bytes);
+    expect(result.ok).toBe(false);
+  });
 
   // exceljs expands these ranges cell by cell on load (Worksheet
   // _mergeCellsInternal, DataValidationsXform.parseClose, DefinedNames.addEx):
   // a few bytes in the sheet = billions of iterations / GBs of heap, after
   // every zip check passed. Measured: a 6.4 KB file with C3:XFD100 merged
   // takes 4.7 s and 423 MB; C3:XFD1048576 never finishes.
-  it.fails(
-    "[Medium, T2/T7] refuses (or bounds) a merge range covering the whole grid",
-    async () => {
-      const bytes = await patchZip(await buildFixture(), {
-        "xl/worksheets/sheet1.xml": afterSheetData(
-          '<mergeCells count="1"><mergeCell ref="AH20:XFD1048576"/></mergeCells>',
+  it("[Medium, T2/T7] refuses (or bounds) a merge range covering the whole grid", async () => {
+    const bytes = await patchZip(await buildFixture(), {
+      "xl/worksheets/sheet1.xml": afterSheetData(
+        '<mergeCells count="1"><mergeCell ref="AH20:XFD1048576"/></mergeCells>',
+      ),
+    });
+    expect(await checkImportFile(bytes)).toEqual({
+      ok: false,
+      reason: "too_many_merged_cells",
+    });
+  });
+
+  /* Bounded = the check passes, exceljs then reads the guarded file quickly
+   * and gets exactly the rows of the plain fixture. */
+  async function readsLikeThePlainFixture(bytes: Uint8Array): Promise<void> {
+    const plain = await readWorkbook(await checked(await buildFixture()));
+    const start = performance.now();
+    const read = await readWorkbook(await checked(bytes));
+    expect(performance.now() - start).toBeLessThan(3_000);
+    if (!read.ok || !plain.ok) throw new Error("expected both to read");
+    expect(read.rows).toEqual(plain.rows);
+  }
+
+  it("[Medium, T2/T7] refuses (or bounds) a data validation over the whole grid", async () => {
+    const bytes = await patchZip(await buildFixture(), {
+      "xl/worksheets/sheet1.xml": (xml) =>
+        xml.replace(
+          /<pageMargins/,
+          '<dataValidations count="1"><dataValidation type="whole" sqref="A20:XFD1048576"><formula1>1</formula1></dataValidation></dataValidations><pageMargins',
         ),
-      });
-      expect((await checkImportFile(bytes)).ok).toBe(false);
-    },
-  );
+    });
+    await readsLikeThePlainFixture(bytes);
+  });
 
-  it.fails(
-    "[Medium, T2/T7] refuses (or bounds) a data validation over the whole grid",
-    async () => {
-      const bytes = await patchZip(await buildFixture(), {
-        "xl/worksheets/sheet1.xml": (xml) =>
-          xml.replace(
-            /<pageMargins/,
-            '<dataValidations count="1"><dataValidation type="whole" sqref="A20:XFD1048576"><formula1>1</formula1></dataValidation></dataValidations><pageMargins',
-          ),
-      });
-      expect((await checkImportFile(bytes)).ok).toBe(false);
-    },
-  );
-
-  it.fails(
-    "[Medium, T2/T7] refuses (or bounds) a defined name over the whole grid",
-    async () => {
-      const bytes = await patchZip(await buildFixture(), {
-        "xl/workbook.xml": (xml) =>
-          xml.replace(
-            "</sheets>",
-            '</sheets><definedNames><definedName name="x">Sheet1!$A$1:$XFD$1048576</definedName></definedNames>',
-          ),
-      });
-      expect((await checkImportFile(bytes)).ok).toBe(false);
-    },
-  );
+  it("[Medium, T2/T7] refuses (or bounds) a defined name over the whole grid", async () => {
+    const bytes = await patchZip(await buildFixture(), {
+      "xl/workbook.xml": (xml) =>
+        xml.replace(
+          "</sheets>",
+          '</sheets><definedNames><definedName name="x">Sheet1!$A$1:$XFD$1048576</definedName></definedNames>',
+        ),
+    });
+    await readsLikeThePlainFixture(bytes);
+  });
 
   it("datasheet check (checkXlsx) still accepts the synthetic client sheet", async () => {
     // The fixture has deflated parts and pictures: the stricter
@@ -234,7 +237,7 @@ describe("gate A: XML reader", () => {
           'TargetMode="External" Target="http://169.254.169.254/latest/',
         ),
     });
-    const embedded = await readEmbeddedImages(bytes, ["Sheet1"]);
+    const embedded = await readEmbeddedImages(await checked(bytes), ["Sheet1"]);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(embedded.files.size).toBe(0);
     expect(
@@ -283,7 +286,7 @@ async function withPicture(data: Uint8Array) {
   const bytes = await patchZip(await buildFixture(), {
     "xl/media/image1.png": data,
   });
-  return readEmbeddedImages(bytes, ["Sheet1"]);
+  return readEmbeddedImages(await checked(bytes), ["Sheet1"]);
 }
 
 const issuesOf = (embedded: Awaited<ReturnType<typeof withPicture>>) =>
@@ -327,7 +330,10 @@ describe("gate A: images", () => {
   });
 
   it("keys each picture by the sha256 of its exact bytes", async () => {
-    const embedded = await readEmbeddedImages(await buildFixture(), ["Sheet1"]);
+    const embedded = await readEmbeddedImages(
+      await checked(await buildFixture()),
+      ["Sheet1"],
+    );
     const { createHash } = await import("node:crypto");
     for (const [sha, file] of embedded.files) {
       expect(createHash("sha256").update(file.data).digest("hex")).toBe(sha);
@@ -336,9 +342,9 @@ describe("gate A: images", () => {
 
   it("reports pictures on rows of no product and never invents a row", async () => {
     const bytes = await buildFixture();
-    const read = await readWorkbook(bytes);
+    const read = await readWorkbook(await checked(bytes));
     if (!read.ok) throw new Error("fixture unreadable");
-    const embedded = await readEmbeddedImages(bytes, ["Sheet1"]);
+    const embedded = await readEmbeddedImages(await checked(bytes), ["Sheet1"]);
     // No products at all: every anchored picture must be reported, none kept.
     const result = attachImages([], embedded);
     const notOnRow = result.warnings.filter(
@@ -387,28 +393,25 @@ describe("gate A: cleaning", () => {
     expect(leaks).toEqual([]);
   });
 
-  it.fails(
-    "[Low, T3] strips CJK punctuation of Script=Common (katakana middle dot, prolonged mark, strokes, IDCs)",
-    () => {
-      // "白色・黑色" is how a Chinese/Japanese cell may separate two colours;
-      // today it leaves "・" as a stored option. U+30FB, U+30FC, U+31C0,
-      // U+2FF0, U+3190 and half-width U+FF65 all survive the strip.
-      const cells = [
-        "白色・黑色",
-        "Lifud・莱福德",
-        "铝ー",
-        String.fromCodePoint(0x31c0),
-        String.fromCodePoint(0x2ff0),
-        String.fromCodePoint(0x3190),
-        String.fromCodePoint(0xff65),
-        String.fromCodePoint(0x3300), // NFKC: katakana + U+30FC
-      ];
-      for (const cell of cells) {
-        const out = cleanSpecCell("housingFinish", cell, at).values ?? [];
-        expect(out.filter(hasCjk)).toEqual([]);
-      }
-    },
-  );
+  it("[Low, T3] strips CJK punctuation of Script=Common (katakana middle dot, prolonged mark, strokes, IDCs)", () => {
+    // "白色・黑色" is how a Chinese/Japanese cell may separate two colours;
+    // today it leaves "・" as a stored option. U+30FB, U+30FC, U+31C0,
+    // U+2FF0, U+3190 and half-width U+FF65 all survive the strip.
+    const cells = [
+      "白色・黑色",
+      "Lifud・莱福德",
+      "铝ー",
+      String.fromCodePoint(0x31c0),
+      String.fromCodePoint(0x2ff0),
+      String.fromCodePoint(0x3190),
+      String.fromCodePoint(0xff65),
+      String.fromCodePoint(0x3300), // NFKC: katakana + U+30FC
+    ];
+    for (const cell of cells) {
+      const out = cleanSpecCell("housingFinish", cell, at).values ?? [];
+      expect(out.filter(hasCjk)).toEqual([]);
+    }
+  });
 
   it("cleans 400 KB adversarial cells in linear time", () => {
     const n = 100_000;
@@ -508,17 +511,14 @@ describe("gate A: filter parsers", () => {
   // O(numbers x letters^2): 500 chars = ~35 ms, 4000 chars = ~12 s. Values
   // are capped at 500 chars, but one 10 KB cell (20 such options) on each of
   // the 6 filter columns of 2000 rows (one shared string) = hours of CPU.
-  it.fails(
-    "[Medium, T3] parses a letters-then-numbers value in near-linear time",
-    () => {
-      const s = "a".repeat(250) + " 1".repeat(125); // 500 chars, under the cap
-      const total = timed(() => {
-        for (let i = 0; i < 20; i++) for (const parse of PARSERS) parse(s);
-      });
-      // 20 options x 6 filters of one row must stay well under 100 ms.
-      expect(total).toBeLessThan(100);
-    },
-  );
+  it("[Medium, T3] parses a letters-then-numbers value in near-linear time", () => {
+    const s = "a".repeat(250) + " 1".repeat(125); // 500 chars, under the cap
+    const total = timed(() => {
+      for (let i = 0; i < 20; i++) for (const parse of PARSERS) parse(s);
+    });
+    // 20 options x 6 filters of one row must stay well under 100 ms.
+    expect(total).toBeLessThan(100);
+  });
 });
 
 /* ------------------------------------------------------------------------ *
@@ -692,7 +692,7 @@ describe("gate A: restricted columns", () => {
   });
 
   it("no warning of the synthetic client sheet repeats a default-restricted value", async () => {
-    const read = await readWorkbook(await buildFixture());
+    const read = await readWorkbook(await checked(await buildFixture()));
     if (!read.ok) throw new Error("fixture unreadable");
     const cleaned = read.rows.map(cleanRow);
     const restricted = cleaned.flatMap((r) =>
@@ -742,7 +742,7 @@ describe("gate A: resource bounds", () => {
     const bytes = new Uint8Array(await wb.xlsx.writeBuffer());
     const start = performance.now();
     expect((await checkImportFile(bytes)).ok).toBe(true);
-    const read = await readWorkbook(bytes);
+    const read = await readWorkbook(await checked(bytes));
     if (!read.ok) throw new Error("unreadable");
     const { products } = groupRows(read.rows.map(cleanRow), LOOKUPS);
     expect(products).toHaveLength(1500);
@@ -765,11 +765,11 @@ describe("gate A: real client sheet (local only, never committed)", () => {
     }
     const bytes = new Uint8Array(readFileSync(REAL_SHEET));
     expect((await checkImportFile(bytes)).ok).toBe(true);
-    const read = await readWorkbook(bytes);
+    const read = await readWorkbook(await checked(bytes));
     if (!read.ok) throw new Error("unreadable");
     const { products } = groupRows(read.rows.map(cleanRow), LOOKUPS);
     const embedded = await readEmbeddedImages(
-      bytes,
+      await checked(bytes),
       read.sheets.map((s) => s.name),
     );
     const attached = attachImages(products, embedded);

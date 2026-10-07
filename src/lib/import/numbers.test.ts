@@ -104,6 +104,9 @@ describe("parseUgr (0-40)", () => {
     ["19 max", [19]],
     ["50", []],
     ["Low glare", []],
+    // "x" ending the word "max" is not a count marker; "x19" is a count.
+    ["max 19", [19]],
+    ["x19", []],
   ])("%j → %j", (text, expected) => {
     expect(parseUgr(text)).toEqual(expected);
   });
@@ -138,8 +141,25 @@ describe("parseWattage (0.1-2000 W; a tolerance is dropped)", () => {
     ["0W", []],
     ["5000W", []],
     ["Max", []],
+    // Count markers read backwards from the number (no regex over the
+    // prefix): a leading "x", spaces after it, but not across a line break
+    // and not an "x" that ends a word.
+    ["x2 10W", [10]],
+    ["X 2 7W", [7]],
+    ["* 2 7W", [7]],
+    ["box2 10W", [10]],
+    ["x\n2W", [2]],
   ])("%j → %j", (text, expected) => {
     expect(parseWattage(text)).toEqual(expected);
+  });
+
+  it("stays linear on a long value with many numbers", () => {
+    // Unitless numbers, so every token goes through countBefore and
+    // gluedPrefix; a regex over the prefix would take seconds here.
+    const text = "a".repeat(20_000) + " 1".repeat(20_000);
+    const start = performance.now();
+    expect(parseWattage(text)).toEqual([1]);
+    expect(performance.now() - start).toBeLessThan(1_000);
   });
 });
 

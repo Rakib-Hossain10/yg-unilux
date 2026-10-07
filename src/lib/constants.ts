@@ -105,6 +105,17 @@ export const IMPORT_RATIO_MIN_BYTES = 1024 * 1024;
 /** The header row is searched for in the first rows of each sheet. */
 export const IMPORT_HEADER_SCAN_ROWS = 15;
 /*
+ * Range records exceljs expands cell by cell when it loads a sheet
+ * (src/lib/import/sheet-guard.ts, Phase 3 gate A M-1). Merges cost
+ * O(merges^2) (each new merge is checked against all earlier ones: 2,000
+ * take ~0.3 s, 10,000 take ~6 s) plus one cell object per covered cell, so
+ * both are capped. A <sheet sheetId> becomes an array index that exceljs
+ * walks in full (200,000,000 took 27 s); Excel numbers sheets from 1 up.
+ */
+export const MAX_IMPORT_MERGES = 2_000;
+export const MAX_IMPORT_MERGED_CELLS = 100_000;
+export const MAX_IMPORT_SHEET_ID = 10_000;
+/*
  * Embedded pictures (src/lib/import/images.ts). The drawing and relationship
  * parts are read with this output cap (a drawing is ~1 KB per picture, so
  * 16 MB is thousands of pictures). A picture larger than MAX_IMAGE_BYTES is

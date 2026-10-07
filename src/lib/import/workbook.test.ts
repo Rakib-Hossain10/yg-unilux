@@ -12,13 +12,16 @@ import {
   FIXTURE_DATA_ROWS,
   buildFixture,
 } from "../../../test/fixtures/import/build";
+import { checked } from "../../../test/fixtures/import/checked";
+import { patchZip } from "../../../test/fixtures/import/patch-zip";
+import type { CheckedImportFile } from "./safety";
 import type { ImportWarning, SheetRow } from "./types";
 import { readWorkbook, type WorkbookRead } from "./workbook";
 
 type Read = Extract<WorkbookRead, { ok: true }>;
 
 async function read(bytes: Buffer): Promise<Read> {
-  const result = await readWorkbook(bytes);
+  const result = await readWorkbook(await checked(bytes));
   if (!result.ok) {
     throw new Error(`expected ok, got ${JSON.stringify(result.warnings)}`);
   }
@@ -273,7 +276,7 @@ describe("readWorkbook headers and sheets", () => {
 
   it("refuses a sheet without a NO. column (fatal)", async () => {
     const result = await readWorkbook(
-      await buildFixture({ missingColumn: "productNo" }),
+      await checked(await buildFixture({ missingColumn: "productNo" })),
     );
     expect(result.ok).toBe(false);
     expect(result.warnings).toContainEqual(
@@ -288,7 +291,7 @@ describe("readWorkbook headers and sheets", () => {
 
   it("refuses a sheet whose header has no Model No. column (fatal)", async () => {
     const result = await readWorkbook(
-      await buildFixture({ missingColumn: "modelNo" }),
+      await checked(await buildFixture({ missingColumn: "modelNo" })),
     );
     expect(result.ok).toBe(false);
     expect(result.warnings).toContainEqual(
@@ -302,7 +305,7 @@ describe("readWorkbook headers and sheets", () => {
 
   it("refuses a workbook where no sheet has a header (fatal)", async () => {
     const bytes = await tiny([["Price list"], ["Lamp", 12]]);
-    const result = await readWorkbook(bytes);
+    const result = await readWorkbook(await checked(bytes));
     expect(result.ok).toBe(false);
     expect(result.warnings).toContainEqual(
       expect.objectContaining({
@@ -402,17 +405,28 @@ describe("readWorkbook headers and sheets", () => {
       "notes",
     ]);
     rows.push(["NO.", "Model No."], [1, "X-1"]);
-    const result = await readWorkbook(await tiny(rows));
+    const result = await readWorkbook(await checked(await tiny(rows)));
     expect(result.ok).toBe(false);
     expect(codes(result.warnings)).toContain("no_header");
   });
 
-  it("refuses bytes exceljs cannot read (fatal, no throw)", async () => {
-    const result = await readWorkbook(Buffer.from("not a workbook"));
+  it("refuses a checked file exceljs cannot read (fatal, no throw)", async () => {
+    // Passes every zip and range check, but the sheet XML is malformed.
+    const bytes = await patchZip(await buildFixture(), {
+      "xl/worksheets/sheet1.xml": (xml) => xml.replace("</sheetData>", ""),
+    });
+    const result = await readWorkbook(await checked(bytes));
     expect(result.ok).toBe(false);
     expect(result.warnings[0]).toMatchObject({
       code: "not_xlsx",
       severity: "fatal",
     });
+  });
+
+  it("never reads bytes that did not come from checkImportFile", async () => {
+    const forged = {
+      bytes: await buildFixture(),
+    } as unknown as CheckedImportFile;
+    await expect(readWorkbook(forged)).rejects.toThrow(/checkImportFile/);
   });
 });

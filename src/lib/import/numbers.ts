@@ -35,9 +35,31 @@ interface NumberToken {
  */
 const NUMBER_WITH_UNIT = /(\d+(?:\.\d+)?)[^\S\n]*(°|[×*]|[a-zµ]+)?/gi;
 
-/* A count marker right before a number: "×2", "* 2", "x2" (an "x" that does
- * not end a word). Such a number is a count ("10W*2"), not a value. */
-const COUNT_BEFORE = /(?:[×*]|(?:^|[^a-z])x)[^\S\n]*$/i;
+/*
+ * A count marker right before a number: "×2", "* 2", "x2" (an "x" that does
+ * not end a word). Such a number is a count ("10W*2"), not a value.
+ *
+ * Read backwards from the number over the gap since the previous token only
+ * (never a regex over the whole prefix), so a value with many numbers stays
+ * linear: each character is looked at a bounded number of times.
+ */
+function countBefore(source: string, start: number): boolean {
+  let i = start - 1;
+  while (i >= 0 && isGapSpace(source[i] as string)) i--;
+  const marker = source[i];
+  if (marker === "×" || marker === "*") return true;
+  if (marker !== "x" && marker !== "X") return false;
+  return i === 0 || !isAsciiLetter(source[i - 1] as string);
+}
+
+/* Whitespace other than a line break (a regex's [^\S\n]). */
+function isGapSpace(ch: string): boolean {
+  return ch !== "\n" && /\s/.test(ch);
+}
+
+function isAsciiLetter(ch: string): boolean {
+  return /[a-z]/i.test(ch);
+}
 
 /* An "x" / "×" / "*" between a number (with or without its unit) and the
  * next number: "2x10W", "18Wx2", "15x45°". Normalised to "×" so the letter x
@@ -49,9 +71,16 @@ const COUNT = "×";
 
 /* Letters glued to the front of a number make it a code, not a value
  * ("GU10", "MR16", "PAR30"), except these labels ("Ra90", "CRI90", "UGR19",
- * "CCT3000K"). "x" is left to COUNT_BEFORE. */
-const GLUED_PREFIX = /[a-z]+$/i;
+ * "CCT3000K"). "x" is left to countBefore. */
 const VALUE_LABELS = new Set(["ra", "cri", "ugr", "cct", "x"]);
+
+/* The run of ASCII letters glued to the front of the number at `start`,
+ * lowercased, or undefined. A backward scan bounded by that run. */
+function gluedPrefix(source: string, start: number): string | undefined {
+  let i = start;
+  while (i > 0 && isAsciiLetter(source[i - 1] as string)) i--;
+  return i < start ? source.slice(i, start).toLowerCase() : undefined;
+}
 
 /* Text between two numbers that makes them a range or a list sharing the
  * second one's unit: "2700-6500K", "1800~3000K", "3000/4000K", "7 to 10W". */
@@ -85,9 +114,8 @@ function tokens(text: string): NumberToken[] {
     if (unit === "*") unit = COUNT;
     // "to" is a range word ("7 to 10W"), not the unit of the 7.
     if (unit === "to") unit = "";
-    const before = source.slice(0, start);
-    if (unit === "" && COUNT_BEFORE.test(before)) unit = COUNT;
-    const prefix = GLUED_PREFIX.exec(before)?.[0].toLowerCase();
+    if (unit === "" && countBefore(source, start)) unit = COUNT;
+    const prefix = gluedPrefix(source, start);
     if (unit === "" && prefix !== undefined && !VALUE_LABELS.has(prefix)) {
       unit = COUNT;
     }

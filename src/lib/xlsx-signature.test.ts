@@ -292,6 +292,7 @@ describe("readZipBytes / readZipPart", () => {
         extraFieldIds: [],
         flags,
         method,
+        crc32: 0,
         compressedSize: data.length,
         uncompressedSize: declared ?? payload.length,
         localOffset: 0,

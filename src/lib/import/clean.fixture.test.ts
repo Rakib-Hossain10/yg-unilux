@@ -17,15 +17,24 @@ import {
 } from "@/models/spec-columns";
 
 import { buildFixture } from "../../../test/fixtures/import/build";
+import { checked } from "../../../test/fixtures/import/checked";
 import { cleanRow, type CleanedRow } from "./clean";
 import { filtersFromSpecs, parseFilterNumbers } from "./numbers";
 import { readWorkbook } from "./workbook";
 
-/* The check the brief asks for: Han, CJK punctuation, full-width forms. */
-const CJK_CHECK = /\p{Script=Han}|[\u3000-\u303F\uFF00-\uFFEF]/u;
+/*
+ * Zero CJK, checked by whole Unicode block (independent of the cleaner's
+ * CJK_CLASS), so Script=Common CJK punctuation such as the katakana middle
+ * dot U+30FB is caught too: Hangul Jamo, radicals/Kangxi/IDCs, U+3000-4DFF
+ * (punctuation, kana, bopomofo, strokes, CJK compatibility, ext. A, Yijing),
+ * unified ideographs, Hangul, compatibility ideographs, vertical and
+ * compatibility forms, full- and half-width forms, supplementary ideographs.
+ */
+const CJK_CHECK =
+  /[\u1100-\u11FF\u2E80-\u2FFF\u3000-\u4DFF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFFEF\u{16FE0}-\u{16FFF}\u{1F200}-\u{1F2FF}\u{20000}-\u{323AF}]/u;
 
 async function cleanedRows(bytes: Buffer): Promise<CleanedRow[]> {
-  const read = await readWorkbook(bytes);
+  const read = await readWorkbook(await checked(bytes));
   if (!read.ok) throw new Error(JSON.stringify(read.warnings));
   return read.rows.map(cleanRow);
 }

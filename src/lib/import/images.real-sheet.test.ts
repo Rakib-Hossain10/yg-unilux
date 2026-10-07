@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { checked } from "../../../test/fixtures/import/checked";
 import { cleanRow } from "./clean";
 import { groupRows } from "./group";
 import { attachImages, readEmbeddedImages } from "./images";
@@ -37,7 +38,7 @@ describe.skipIf(!present)("images of the client's real sheet", () => {
   it("gives each product one gallery picture, shared pairwise like the sheet", async () => {
     const bytes = readFileSync(fixturePath);
     expect((await checkImportFile(bytes)).ok).toBe(true);
-    const read = await readWorkbook(bytes);
+    const read = await readWorkbook(await checked(bytes));
     if (!read.ok) throw new Error(JSON.stringify(read.warnings));
     const grouped = groupRows(read.rows.map(cleanRow), {
       categories: [],
@@ -45,7 +46,7 @@ describe.skipIf(!present)("images of the client's real sheet", () => {
       defaultCategoryId: "default",
     });
     const embedded = await readEmbeddedImages(
-      bytes,
+      await checked(bytes),
       read.sheets.map((s) => s.name),
     );
 
