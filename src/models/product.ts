@@ -8,6 +8,8 @@ import type { Types } from "mongoose";
 import { mongoose } from "@/lib/db";
 
 import {
+  MODEL_NO_COLLATION,
+  modelNoKey,
   PRODUCT_IMAGE_KINDS,
   PRODUCT_STATUSES,
   TRACK_SIZES,
@@ -32,6 +34,12 @@ export interface ProductImage {
   /** Display order within the product, 0 first. */
   order: number;
   kind: ProductImageKind;
+  /**
+   * sha256 (64 lowercase hex) of the original file, set only by the bulk
+   * import so a re-import never adds the same picture twice. Admin uploads
+   * leave it unset; the images editor keeps an existing value (ADR 0055).
+   */
+  sourceSha256?: string;
 }
 
 /**
@@ -147,6 +155,8 @@ const imageSchema = new Schema<ProductImage>(
       enum: PRODUCT_IMAGE_KINDS,
       default: "gallery",
     },
+    // Exactly as computed by the importer: no trim, no case change.
+    sourceSha256: { type: String, match: /^[0-9a-f]{64}$/ },
   },
   { _id: false, strict: "throw" },
 );
@@ -185,10 +195,16 @@ const publicFileSchema = new Schema<PublicFile>(
   { _id: false, strict: "throw" },
 );
 
-/** True when no two variants of one product share a model no. */
+/**
+ * True when no two variants of one product share a model no., compared like
+ * the unique index's collation ("AR-013A1" = "ar-013a1", ADR 0055).
+ */
 function hasUniqueModelNos(variants: ProductVariant[]): boolean {
-  const modelNos = variants.map((variant) => variant.modelNo);
-  return new Set(modelNos).size === modelNos.length;
+  // A missing model no. is the `required` validator's job, not a repeat.
+  const keys = variants.flatMap((variant) =>
+    typeof variant.modelNo === "string" ? [modelNoKey(variant.modelNo)] : [],
+  );
+  return new Set(keys).size === keys.length;
 }
 
 const productSchema = new Schema<Product>(
@@ -256,13 +272,17 @@ const productSchema = new Schema<Product>(
 // One product page per slug.
 productSchema.index({ slug: 1 }, { unique: true });
 // No model no. may belong to two products: re-import upserts by model no.
-// The partial filter skips products that have no variants yet; without it
-// they would all index as "missing" and collide with each other.
+// The collation (en, strength 2) makes the uniqueness case-insensitive while
+// the text stays as typed (ADR 0055); lookups must pass MODEL_NO_COLLATION to
+// match it and use the index. The partial filter skips products that have no
+// variants yet; without it they would all index as "missing" and collide.
+// Changing these options needs the old index dropped first (db-indexes.ts).
 productSchema.index(
   { "variants.modelNo": 1 },
   {
     unique: true,
     partialFilterExpression: { "variants.modelNo": { $exists: true } },
+    collation: { ...MODEL_NO_COLLATION },
   },
 );
 // Category, area and family pages.

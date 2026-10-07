@@ -26,6 +26,7 @@ interface ExpectedIndex {
   key: Record<string, 1 | -1>;
   unique?: true;
   partialFilterExpression?: Record<string, unknown>;
+  collation?: Record<string, unknown>;
   expireAfterSeconds?: number;
 }
 
@@ -37,6 +38,8 @@ const EXPECTED_INDEXES: Record<string, ExpectedIndex[]> = {
       key: { "variants.modelNo": 1 },
       unique: true,
       partialFilterExpression: { "variants.modelNo": { $exists: true } },
+      // Case-insensitive model nos. (ADR 0055).
+      collation: { locale: "en", strength: 2 },
     },
     { key: { mainCategory: 1 } },
     { key: { extraCategories: 1 } },
@@ -80,6 +83,9 @@ function declaredIndexes(model: RegisteredModel): ExpectedIndex[] {
         string,
         unknown
       >;
+    }
+    if (options.collation) {
+      index.collation = { ...options.collation } as Record<string, unknown>;
     }
     if (options.expireAfterSeconds !== undefined) {
       index.expireAfterSeconds = options.expireAfterSeconds;

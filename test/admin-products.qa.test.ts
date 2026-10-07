@@ -358,16 +358,17 @@ describe("duplicate model numbers across products", () => {
     });
   });
 
-  // Within one product the schema compares case-insensitively; across
-  // products the check and the unique index are case-sensitive, so "zz-9"
-  // and "ZZ-9" can live on two products. Search is case-insensitive, so the
-  // two would both match one query. Marked fails until that is aligned.
-  it.fails("a clash that differs only by case is refused", async () => {
+  // Gate B L-A, closed in Phase 3 T1 (ADR 0055): model nos. are compared
+  // case-insensitively across products too (collation index + lookups).
+  it("a clash that differs only by case is refused", async () => {
     await other("ZZ-9");
     const { values } = await loadedValues({
       variants: [{ modelNo: "zz-9", label: "", imagePublicId: "" }],
     });
-    expect((await updateProduct(ADMIN, productId, values)).ok).toBe(false);
+    expect(await updateProduct(ADMIN, productId, values)).toMatchObject({
+      ok: false,
+      errors: { fieldErrors: { "variants.0.modelNo": expect.any(Array) } },
+    });
   });
 });
 

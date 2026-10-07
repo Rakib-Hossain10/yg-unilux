@@ -76,6 +76,22 @@ async function listIndexNames(
   }
 }
 
+/* The products index whose options changed in Phase 3 T1 (ADR 0055). */
+const MODEL_NO_INDEX = "variants.modelNo_1";
+const MODEL_NO_STEPS =
+  "run `npm run check:model-nos` and fix any case-only duplicates it lists";
+
+/*
+ * The name of the requested index in an 85/86 conflict message ("Requested
+ * index: { ..., name: \"x\", ... }"). Index specs hold no document values,
+ * and only a strict name pattern is taken, so nothing else is echoed.
+ */
+function conflictingIndexName(message: string): string | undefined {
+  return /Requested index: [\s\S]*?\bname: "([\w.$-]{1,128})"/.exec(
+    message,
+  )?.[1];
+}
+
 /*
  * A safe one-line description of an index build error. Server messages are
  * left out on purpose: a duplicate-key error quotes the duplicate value, which
@@ -92,20 +108,28 @@ function describeIndexError(error: unknown): string {
   const parts = [error.name];
   if (typeof details.codeName === "string") parts.push(details.codeName);
   if (typeof details.code === "number") parts.push(`code ${details.code}`);
-  if (details.keyPattern && typeof details.keyPattern === "object") {
-    parts.push(`on ${JSON.stringify(details.keyPattern)}`);
-  }
+  const keyPattern =
+    details.keyPattern && typeof details.keyPattern === "object"
+      ? details.keyPattern
+      : undefined;
+  if (keyPattern) parts.push(`on ${JSON.stringify(keyPattern)}`);
   if (details.code === 11000) {
     parts.push(
-      "(existing documents break a unique index; fix them, then re-run)",
+      keyPattern && "variants.modelNo" in keyPattern
+        ? `(existing products share a model no. that differs only by case; ${MODEL_NO_STEPS}, then re-run)`
+        : "(existing documents break a unique index; fix them, then re-run)",
     );
   }
   // 85 IndexOptionsConflict / 86 IndexKeySpecsConflict: an index changed in a
   // schema (e.g. a new TTL) but the old one still exists. We never drop
   // indexes automatically (ADR 0018), so tell the operator what to do.
   if (details.code === 85 || details.code === 86) {
+    const name = conflictingIndexName(error.message);
+    if (name) parts.push(`on index "${name}"`);
     parts.push(
-      "(an index with the same name or keys already exists with different options; drop the old one in Atlas, then re-run)",
+      name === MODEL_NO_INDEX
+        ? `(the old case-sensitive model no. index is still there; ${MODEL_NO_STEPS}, drop "${MODEL_NO_INDEX}" on the products collection in Atlas, then re-run; ADR 0055)`
+        : "(an index with the same name or keys already exists with different options; drop the old one in Atlas, then re-run)",
     );
   }
   return parts.join(" ");

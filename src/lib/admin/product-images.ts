@@ -1,6 +1,8 @@
 // Admin service for a product's images: saves the images editor's full
 // ordered list (add, remove, reorder, alt text, kind) after verifying every
 // new Cloudinary upload. Audits `product.images.update` with counts only.
+// An imported image's sourceSha256 is kept by the server, never sent by the
+// browser, so the import's dedupe survives every editor save (ADR 0055).
 
 import "server-only";
 
@@ -54,26 +56,49 @@ function fieldErrors(fields: Record<string, string[]>): ServiceResult<never> {
   };
 }
 
-/* The stored form of the list: position = order, alt and kind as given. */
-function toStored(images: ProductImageInput[]): ProductImage[] {
-  return images.map((image, order) => ({
+/* One stored image; sourceSha256 only when there is one (keeps key order). */
+function storedImage(
+  image: Pick<ProductImage, "publicId" | "kind"> & { alt: string },
+  order: number,
+  sourceSha256: string | undefined,
+): ProductImage {
+  return {
     publicId: image.publicId,
     alt: image.alt,
     order,
     kind: image.kind,
-  }));
+    ...(sourceSha256 === undefined ? {} : { sourceSha256 }),
+  };
+}
+
+/*
+ * The stored form of the list: position = order, alt and kind as given.
+ * sourceSha256 is not an editor field: it is copied from the image already
+ * saved under the same publicId (new uploads have none).
+ */
+function toStored(
+  images: ProductImageInput[],
+  saved: ProductImage[],
+): ProductImage[] {
+  const hashes = new Map(
+    saved.map((image) => [image.publicId, image.sourceSha256]),
+  );
+  return images.map((image, order) =>
+    storedImage(image, order, hashes.get(image.publicId)),
+  );
 }
 
 /* Stored images in display order, in a shape that compares 1:1. */
 function normalised(images: ProductImage[]): ProductImage[] {
   return [...images]
     .sort((a, b) => a.order - b.order)
-    .map((image, order) => ({
-      publicId: image.publicId,
-      alt: image.alt ?? "",
-      order,
-      kind: image.kind,
-    }));
+    .map((image, order) =>
+      storedImage(
+        { ...image, alt: image.alt ?? "" },
+        order,
+        image.sourceSha256,
+      ),
+    );
 }
 
 /**
@@ -151,7 +176,7 @@ export async function saveProductImages(
   }
   if (Object.keys(errors).length > 0) return fieldErrors(errors);
 
-  const next = toStored(images);
+  const next = toStored(images, doc.images);
   if (JSON.stringify(next) === JSON.stringify(normalised(doc.images))) {
     return unchanged({ id: productId, images: next });
   }

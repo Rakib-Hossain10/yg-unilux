@@ -30,6 +30,7 @@ import {
   MAX_VARIANTS,
 } from "@/lib/constants";
 import {
+  modelNoKey,
   PRODUCT_IMAGE_KINDS,
   PRODUCT_STATUSES,
   TRACK_SIZES,
@@ -248,10 +249,11 @@ export const productInputSchema = z
   })
   .superRefine((product, ctx) => {
     // The model also rejects this, but the admin should see which row repeats.
-    // Case-insensitive so "ar-013a1" and "AR-013A1" cannot both be saved.
+    // Case-insensitive so "ar-013a1" and "AR-013A1" cannot both be saved;
+    // modelNoKey is the same rule as the unique index's collation (ADR 0055).
     const seen = new Set<string>();
     product.variants.forEach((variant, index) => {
-      const key = variant.modelNo.toLowerCase();
+      const key = modelNoKey(variant.modelNo);
       if (seen.has(key)) {
         ctx.addIssue({
           code: "custom",
