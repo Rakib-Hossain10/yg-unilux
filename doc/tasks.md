@@ -51,43 +51,26 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - **Open from T10a:** reword the `Image` header note (no "Place in Cell"; use floating pictures) before client hand-off; check comment box sizes in Excel/WPS at gate B; `unknown_area` is per row, not per column (optional fix).
   - **T10b done:** `GET /api/admin/import/template` (`src/app/api/admin/import/template/route.ts`; `requireAdminForRoute`, `listCategoryTree`/`listAreas`, attachment, `private, no-store`); 7 tests (401/403 incl. banned + temp-password admin, 200 headers, body passes `checkImportFile`, live areas/categories). 2713 unit green (4 expected-fail, 3 skipped). First admin route handler, sets the pattern. Not run against a real Next runtime yet: smoke it in `next dev` or at gate B.
   - **T6 done** (ADR 0060): `presignImportUpload` (`imports/<uuid v4>.xlsx`, signs xlsx MIME + exact length ≤ 30 MB, 5 min), `getImportBytes(key, {ifMatch?})` (Range + streaming cap, returns ETag), `deleteImportUpload`, `uploadImageBuffer(productId, data)` (signed `upload_stream`, `overwrite:false`, own `sourceSha256`, limit checks on the Upload API answer — deliberately NOT `inspectImage`, see ADR 0060 §3), `sweep:incoming` covers `imports/` > 24 h under the one guard, audit `import.commit` / target `import` (id = staged uuid), `src/lib/schemas/import.ts` (`IMPORT_KEY_PATTERN`, `importKeySchema`, `importIdFromKey`, `presignImportInputSchema`, `defaultCategoryIdSchema`, `importFileInputSchema`). Gate C L-1 closed (escaped dot, two `it.fails` → `it`). 2802 unit green (2 expected-fail, 3 skipped).
-  - **Next: T7** (`import-engineer`, Opus): plan / preview service (`src/lib/import/{plan,index}.ts`) + **ADR 0057**. See the plan's T7 row and every "Carry into T7" / "Record in ADR 0057" item below. Then T8, gate B, T9, T11, gate C. Gate B covers T6–T8 + T10a/T10b.
-  - **Carry into T7 (from T6):** extend `importFileInputSchema` (`{key, defaultCategoryId}`), confirm `defaultCategoryId` exists (I-5); return the ETag from `getImportBytes` in the preview so T8 can pin it.
+  - **T7 done** (ADR 0057): `src/lib/import/plan.ts` (`loadPlanLookups`, `planFromBytes`, `planProducts`, pure `planHash`) + `src/lib/import/index.ts` (`previewImport(input)` → `ServiceResult<ImportPreview>`, `{kind:"plan", etag, plan}` or `{kind:"refused", warnings}`; writes nothing, no tags). Plan types in `types.ts` (`PlanEntry`, `PlanTarget`, `PlanVariant`, `PlanChange`, `ImportPlan`); new error codes `no_slug`, `invalid_record` (merged target fails `productInputSchema`); `trackSizeOf` exported from `group.ts`. `importFileInputSchema` already had `{key, defaultCategoryId}` (T6); the service checks the category exists. Restricted filters: one `withoutRestrictedFilters` probe per plan gates every product. 28 tests in `plan.test.ts` (memory DB; incl. zero-writes via Mongoose debug + other collections unchanged + no `files` in the result, trackSize dropped when the sheet leaves Magnetic Track, conflict across two sheet products, ownership, restricted filters, hash on `updatedAt`/visibility/image sha, real sheet when present: 4 create + 2 blocked, then 4 unchanged). 2830 unit green (2 expected-fail, 3 skipped).
+  - **Next: T8** (`import-engineer`, Opus): commit service `src/lib/import/commit.ts` + `commitImportBatch` / `finishImport` in `index.ts`. Then **QA gate B** (covers T6–T8 + T10a/T10b), T9, T11, gate C.
+  - **Carry into T8 (from T7):**
+    - re-plan with `planFromBytes(bytes, {...await loadPlanLookups(), defaultCategoryId})` from `getImportBytes(key, {ifMatch: previewEtag})`; refuse unless `plan.planHash` equals the previewed hash (the hash covers each matched product's `updatedAt`, the visibility setting and the default category);
+    - write EXACTLY `entry.target` (plan tests' `saveAsCommitWould` shows the shape: optional texts unset when null, variant `specs` omitted when empty, `label` always set), so the next preview is `unchanged`; on update `$set` only sheet-owned paths, never `name`/`slug`/`status`/admin fields; `target.name`/`slug` are written on create only;
+    - `variantsRemoved` only with the acknowledgement; `imagesToAdd` → upload, then push `{publicId, order, kind:"gallery", sourceSha256, alt: product name}`; `PlanVariant.imageSha256` (new variants only) → that upload's `publicId` (or the existing image with that `sourceSha256`);
+    - the slug from the plan can still race: a duplicate-key error on create = product error, not a crash; `filters` are already gated, do not recompute without `withoutRestrictedFilters`.
   - **Carry into T8 (from T6):** `getImportBytes(key, {ifMatch: previewEtag})` (`StorageConditionError` → "file changed, preview again"); pass the `Uint8Array` / `Buffer.from(img.data)` to `uploadImageBuffer` and store `image.publicId` + `image.sourceSha256`; `deleteImportUpload` in `finishImport`; audit target id = `importIdFromKey(key)`.
   - **Carry into T9 (from T6):** presign action = `requireAdmin()` → `presignImportInputSchema` → `presignImportUpload({contentType: XLSX_MIME_TYPE, contentLength: size})`; the browser PUT must send exactly the signed `Content-Type`.
   - **Real-credential smoke (gate B or later):** R2 honours `If-Match` on GET; a signed server `upload_stream` returns `existing` and format/bytes/width/height. Low T6 follow-ups: duplicated 24 h / 300 s literals, uuid v4 regex in four modules, no test for the non-`Uint8Array` chunk branch. `test/phase2-exit.qa.test.ts` `.next/server` walk can time out at 5 s under load (flake, not a bug).
   - **Gate B** now covers T6–T8 + T10a/T10b (template round trip, route guard).
   - **Carry into T9 (ADR 0059):** a "Download template" link in step 1; labels for `invalid_area_flag` and a hint on `unknown_category`/`unknown_area` ("download a fresh template").
   - **Carry into T11:** the exit e2e downloads the template and imports a filled one (the synthetic bilingual fixture stays as the tolerance case).
-  - **Carry into T7 (from gate A):** pass `checkImportFile(...).file` (a `CheckedImportFile`) to `readWorkbook` / `readEmbeddedImages`, never the raw upload; never hand `file.bytes` to anything that writes to it (I-9); Zod-check `defaultCategoryId` and confirm it exists (I-5); `withoutRestrictedFilters` is mandatory, a test pins that `filtersFromSpecs` ignores visibility (I-2); guarding a large worksheet peaks at ~2–3× the part size in memory (I-8, Vercel budget).
   - **Carry into T9 (from gate A):** warning messages repeat cell values, raw header first lines and uncleaned sheet names (may hold Chinese): show them to the admin only, never write warning text to the audit log, server logs or the DB (I-3, I-4). Labels for `sheet_too_complex` ("Sheet too complex: too many merged cells") and the `sheet_out_of_range` message.
-  - **Record in ADR 0057 (T7) from gate A:** sheet guard (strip validations/defined names, cap merges/`col`/`sheetId`, why strip beats refuse, caps measured: 2,000 merges ≈ 0.3 s, 10,000 ≈ 6 s; range records checked and safe: conditional formatting, autoFilter, hyperlinks, tables, shared formulas, selection, dimension); refuse, don't repair, ambiguous XML; one zip path (read `xlsx-signature.ts`, write `zip-rebuild.ts`, output is a fixed point); `CheckedImportFile` brand + WeakSet; part names must already be JSZip-canonical, duplicates case-insensitive (OPC); pictures follow the part exceljs reads; CJK stripped by block + script after NFKC; datasheet `checkXlsx` out of scope (never unzipped/parsed).
-  - **Carry into T7 (from T5):** call `readEmbeddedImages(bytes, read.sheets.map(s => s.name))` after `readWorkbook`, then `attachImages(grouped.products, embedded)`, add its warnings at file level; planHash includes `images[].sha256` and `variants[].imageSha256`, never the `files` map.
   - **Carry into T8 (from T5):** upload only sha256s that a written product references; one Cloudinary copy per product; skip sha256s already in that product's `sourceSha256`; 30-image cap on stored + new; `imageSha256` → `variants[].imagePublicId` only on create or new variant; pass `Buffer.from(img.data)`. The 25 MP cap assumes Cloudinary's free plan — confirm when the plan is known.
   - **Carry into T9 (from T5):** labels `image_too_large` "Picture too large (over 10 MB / 25 MP)", `image_not_on_row` "Picture not on a product row", `unsupported_image` "Picture can't be used", `unsupported_image_store` "Pictures stored in cells (not imported)", `missing_image` "No picture"; alt text comes from the product name (sheet picture names are useless).
-  - **Record in ADR 0057 (T7) from T5:** pictures read from the zip ourselves, not exceljs's image model (it drops absolute anchors, AlternateContent, linked pictures); row = anchor `from` row + 1, any column counts; check order: declared size > 10 MB (never inflated) → magic-byte sniff (only JPEG/PNG/WebP reach sharp) → sharp header only (25 MP, format must match sniff); linked pictures never fetched; only picture parts of `richData` warn; gallery = distinct sha256 in row/column order, cap 30 → `value_truncated`; variant picture only when the variants' lead pictures differ; bytes live only in `EmbeddedImages.files`.
-  - **Carry into T7 (from T4):**
-    - make the slug unique with `uniqueSlug`; `ImportProduct.slug` is only a candidate and can be "";
-    - filters = `withoutRestrictedFilters(filtersFromSpecs([p.specs, ...p.variants.map(v => v.specs)]))`;
-    - honour `mainCategoryFromSheet` / `extraCategoriesFromSheet` / `areasFromSheet` in the ownership merge (false → keep stored value);
-    - `product.blocked` → plan status `blocked`; show `GroupResult.warnings` (orphan rows) at file level;
-    - `NO.` is unique per sheet only: the "different sheet NO." conflict rule must compare grouped products, not a global `productNo`.
   - **Carry into T9:** preview labels for `duplicate_product_no`, `short_base_model_code`, `model_no_has_space`, `invalid_product_no`, `invalid_model_no`.
-  - **Record in ADR 0057 (T7) from T4:**
-    - shared values are decided over rows with a model no. (all rows if none); option lists compare in order;
-    - family/type from the first non-empty value, a different later value → `family_mismatch` on that column;
-    - base code = case-insensitive common prefix, trailing `-_./ ` trimmed, < 3 chars → first model no. + `short_base_model_code`;
-    - labels = the variant's own differing optic values joined with ", "; collisions get ` (<model no.>)`, then the model no.;
-    - category cell: slug, name or `Main > Sub` (also `›`), case-insensitive; an ambiguous bare name → `unknown_category`; extras/areas = union of all rows, main removed from extras; `...FromSheet` only when something resolved/kept;
-    - trackSize: main category first, then extras;
-    - `duplicate_product_no` per sheet; an invalid NO. starts its own blocked product; `duplicate_model_no` on every involved row;
-    - `missing_spec` once per product when no row has it, else per variant row; `unparsed_filter_value` emitted in group.ts.
-  - **Record in ADR 0057 (T7) from T2:**
-    - the 100:1 ratio cap only applies to entries >1 MB;
-    - header fallback: a row with 3+ known headers counts as the header, so a missing Model No. is `missing_required_column`;
-    - new reader warning codes: `duplicate_column`, `sheet_skipped`, `hidden_sheet`, `hidden_row`, `date_cell`, `formula_without_result`, `cell_error`;
-    - the safety refusal reasons map to `not_xlsx` / `too_large` / `zip_unsafe`.
-  - **Carry into T7/T8:**
+  - **Carry into T9 (from T7):** the preview action = `requireAdmin()` → `previewImport(input)` (no revalidation: tags are always `[]`); labels for `model_no_conflict`, `variant_removed` (needs the ack), `no_slug`, `invalid_record`; show `entry.changes` + "+`moreChanges` more"; the response holds restricted spec values (admin only, never cached or logged).
+  - **Gate B should check (T7):** the zero-writes test, that `PlanTarget` has no admin-owned field, the hash inputs (ADR 0057 §5), and the per-plan `withoutRestrictedFilters` probe (ADR 0057 §4).
+  - **Carry into T8 (from T1):**
     - use `modelNoKey` for in-sheet duplicates;
     - pass `{ collation: MODEL_NO_COLLATION }` on every model-no. lookup;
     - set `sourceSha256` on imported images;
@@ -345,6 +328,11 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T2: workbook reader + safety + synthetic fixture (ADR 0047 note: stricter shared zip reader)
 - [x] T3: cleaner + split policies + numeric parsers — ADR 0056
 - [x] T4: grouping (products/variants, shared vs per-variant, base code, slug, labels)
+- [x] T5: embedded images (drawings + rels, sha256, sharp checks); QA gate A PASS
+- [x] T10a / T10b: controlled import template + admin template route — ADR 0059
+- [x] T6: import staging, capped read, server image upload, sweep, audit — ADR 0060
+- [x] T7: plan / preview service (matching, ownership merge, diff, planHash, writes nothing) — ADR 0057
+- [ ] T8: commit service (batches, idempotent) → QA gate B
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -474,3 +462,4 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-07: T10a done (template generator + parser additions, golden round trip). Next: T10b.
 - 2026-10-07: T10b done (admin template route + tests). Next: T6.
 - 2026-10-07: T6 done (ADR 0060): import staging presign + capped read, server image upload, imports sweep, audit vocabulary, import schemas; gate C L-1 closed. Server upload checks the Upload API answer instead of `inspectImage` (Admin API quota). 2802 unit green. Next: T7.
+- 2026-10-07: T7 done (ADR 0057): plan / preview service (`plan.ts`, `index.ts`): case-insensitive matching, cross-product conflicts, ownership merge, Zod on every merged record, restricted filters gated, diff, planHash; preview writes nothing (tested); auto-review Medium (stale trackSize after leaving Magnetic Track) fixed. 2830 unit green. Next: T8, then QA gate B.

@@ -1,8 +1,9 @@
-// Types shared by the bulk import pipeline (Phase 3): the raw sheet row the
-// reader produces and the warning every stage reports. Pure: no runtime
-// imports beyond the spec keys, so the admin UI can import it too.
+// Types shared by the bulk import pipeline (Phase 3): the raw sheet row, the
+// grouped product, the plan (T7) and the warning every stage reports. Pure:
+// type-only imports and plain constants, so the admin UI can import it too.
 
-import type { TrackSize } from "@/models/product-constants";
+import type { ProductFilters } from "@/models/product";
+import type { ProductStatus, TrackSize } from "@/models/product-constants";
 import type { SpecKey, SpecValues } from "@/models/spec-columns";
 
 /** The five sheet columns that are not specs (CLAUDE.md "Sheet columns"). */
@@ -55,6 +56,10 @@ export const WARNING_CODES = {
   duplicate_model_no: "error",
   duplicate_product_no: "error",
   model_no_conflict: "error",
+  // plan (T7): the product cannot be given a URL, or its merged values fail
+  // the product checks (e.g. more than MAX_VARIANTS variants)
+  no_slug: "error",
+  invalid_record: "error",
   // warning (shown, does not block)
   missing_image: "warning",
   missing_spec: "warning",
@@ -195,4 +200,128 @@ export interface ImportProduct {
   blocked: boolean;
   /** Every warning of the product's rows plus grouping's own. */
   warnings: ImportWarning[];
+}
+
+/* ------------------------------------------------------------------------ *
+ * The plan (T7): each sheet product matched against the database.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * create = no saved product owns any of its model nos.; update = exactly one
+ * does and the merge changes something; unchanged = the merge changes
+ * nothing; blocked = an error (sheet or plan), nothing is saved.
+ */
+export type PlanStatus = "create" | "update" | "unchanged" | "blocked";
+
+/** One variant as it will be stored after the merge. */
+export interface PlanVariant {
+  /** As typed in the sheet (the sheet owns the text, ADR 0055). */
+  modelNo: string;
+  /** Kept from the saved variant when it has one, else the sheet's label. */
+  label: string;
+  /** Only the values that differ between the product's variants. */
+  specs: SpecValues;
+  /** Kept from the saved variant; null for a new variant. */
+  imagePublicId: string | null;
+  /**
+   * The sheet picture of a NEW variant (create or added variant); the
+   * commit turns it into `imagePublicId`. Null for a saved variant (its
+   * picture is admin-owned once set) or when the variants share a picture.
+   */
+  imageSha256: string | null;
+  /** Not on the saved product yet. */
+  isNew: boolean;
+}
+
+/**
+ * The product as it will be stored: the sheet-owned fields after the
+ * ownership merge (ADR 0057). `name` and `slug` are written on create only;
+ * on update they are the saved values, for display.
+ */
+export interface PlanTarget {
+  name: string;
+  slug: string;
+  family: string | null;
+  type: string | null;
+  productNo: number | null;
+  modelCode: string;
+  specs: SpecValues;
+  /** Recomputed; restricted columns' filters already removed. */
+  filters: ProductFilters;
+  variants: PlanVariant[];
+  mainCategory: string;
+  extraCategories: string[];
+  areas: string[];
+  trackSize: TrackSize | null;
+}
+
+/** The saved product a sheet product matched. */
+export interface PlanExisting {
+  id: string;
+  slug: string;
+  name: string;
+  status: ProductStatus;
+  /** ISO time; part of the plan hash (a later save changes the hash). */
+  updatedAt: string;
+}
+
+/** One changed sheet-owned field, for the preview's diff (plain text). */
+export interface PlanChange {
+  /** Stable path, e.g. "specs.cct" or "variants.AR-013A1.specs.lumenOutput". */
+  field: string;
+  /** What the admin reads, e.g. "CCT" or "AR-013A1 · Lumen Output". */
+  label: string;
+  /** Null = not set. */
+  before: string | null;
+  after: string | null;
+}
+
+/** The diff shown per product: the first changes, then "+N more". */
+export const MAX_PLAN_CHANGES = 10;
+
+export interface PlanEntry {
+  status: PlanStatus;
+  sheet: string;
+  /** Excel rows of the product, in sheet order. */
+  rows: number[];
+  productNo: number | null;
+  family: string | null;
+  /** The saved name on update, else the name a create would use. */
+  name: string;
+  existing: PlanExisting | null;
+  /** Null when blocked. */
+  target: PlanTarget | null;
+  /** Sheet pictures the product does not hold yet (by `sourceSha256`). */
+  imagesToAdd: ImportImageRef[];
+  /** Saved variants missing from the sheet (removed only with the ack). */
+  variantsRemoved: string[];
+  /** At most MAX_PLAN_CHANGES; empty on create, blocked and unchanged. */
+  changes: PlanChange[];
+  /** How many more changes there are beyond `changes`. */
+  moreChanges: number;
+  /** The product's sheet warnings plus the plan's own. */
+  warnings: ImportWarning[];
+}
+
+export interface ImportPlanSummary {
+  create: number;
+  update: number;
+  unchanged: number;
+  blocked: number;
+  /** Over every create/update entry. */
+  variantsRemoved: number;
+  imagesToAdd: number;
+}
+
+export interface ImportPlan {
+  /** In sheet order, one per grouped product. */
+  entries: PlanEntry[];
+  /** Findings about the file, a sheet, or rows of no product. */
+  warnings: ImportWarning[];
+  summary: ImportPlanSummary;
+  /**
+   * sha256 (hex) of the canonical plan. The commit re-plans from the same
+   * file and refuses unless it gets the same hash (ADR 0057).
+   */
+  planHash: string;
 }

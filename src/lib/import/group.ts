@@ -566,11 +566,12 @@ function findCategory(
   return { id: null, ambiguous: found.length > 1 };
 }
 
-/*
+/**
  * ADR 0041 + plan: a track size only for a subcategory of Magnetic Track whose
  * slug starts with 5mm / 10mm / 20mm. The main category is checked first.
+ * Also used by the plan step on the merged (kept or sheet) categories.
  */
-function trackSizeOf(
+export function trackSizeOf(
   ids: readonly string[],
   byId: ReadonlyMap<string, CategoryLookup>,
 ): TrackSize | null {
