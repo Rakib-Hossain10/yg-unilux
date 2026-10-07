@@ -46,8 +46,13 @@ const CENTRAL_HEADER = 0x02014b50;
 const EOCD_MIN = 22;
 const MAX_COMMENT = 0xffff;
 
-interface CentralEntry {
+/** One entry of the zip's central directory: name and declared sizes. */
+export interface CentralEntry {
   name: string;
+  /** The raw name bytes, to compare with the local header's copy. */
+  nameBytes: Uint8Array;
+  /** Ids of the central-directory extra fields (e.g. 0x7075 Unicode Path). */
+  extraFieldIds: number[];
   flags: number;
   method: number;
   compressedSize: number;
@@ -55,15 +60,41 @@ interface CentralEntry {
   localOffset: number;
 }
 
-type Parsed =
-  { ok: true; entries: CentralEntry[] } | { ok: false; reason: XlsxRejection };
+/** Caps and rules the central-directory reader applies. */
+export interface CentralDirectoryLimits {
+  maxEntries: number;
+  /*
+   * What may sit between the directory and the end record:
+   * - "none": nothing (the import, parsed by JSZip, which would read a gap
+   *   as "extra bytes in front" and shift every offset);
+   * - "zip64-trailer": nothing, or exactly a consistent zip64 end record +
+   *   locator that some Open XML writers add (datasheets are stored, never
+   *   parsed by JSZip on our server).
+   */
+  trailer: "none" | "zip64-trailer";
+}
 
-/*
+export type CentralDirectory =
+  | {
+      ok: true;
+      entries: CentralEntry[];
+      /** Where the directory starts; every entry's data must end before it. */
+      directoryOffset: number;
+    }
+  | { ok: false; reason: "corrupt" | "too_many_entries" };
+
+/**
  * Reads the central directory: finds the End Of Central Directory record in
- * the last 64 KB, checks the entry count BEFORE walking the directory, then
- * reads each entry's name and declared size. Anything out of range = corrupt.
+ * the last 64 KB, checks the entry count against `limits.maxEntries` BEFORE
+ * walking the directory, then reads each entry's name and declared sizes.
+ * Nothing is inflated. Anything out of range = corrupt. Shared by the
+ * datasheet check (below) and the import safety check (ADR 0047).
  */
-function readCentralDirectory(bytes: Uint8Array): Parsed {
+export function readCentralDirectory(
+  bytes: Uint8Array,
+  limits: CentralDirectoryLimits,
+): CentralDirectory {
+  if (bytes.length < EOCD_MIN) return { ok: false, reason: "corrupt" };
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const lowest = Math.max(0, bytes.length - EOCD_MIN - MAX_COMMENT);
   let eocd = -1;
@@ -75,6 +106,9 @@ function readCentralDirectory(bytes: Uint8Array): Parsed {
   }
   if (eocd === -1) return { ok: false, reason: "corrupt" };
 
+  const diskNumber = view.getUint16(eocd + 4, true);
+  const directoryDisk = view.getUint16(eocd + 6, true);
+  const countOnDisk = view.getUint16(eocd + 8, true);
   const count = view.getUint16(eocd + 10, true);
   const size = view.getUint32(eocd + 12, true);
   const offset = view.getUint32(eocd + 16, true);
@@ -82,25 +116,50 @@ function readCentralDirectory(bytes: Uint8Array): Parsed {
   if (count === 0xffff || size === 0xffffffff || offset === 0xffffffff) {
     return { ok: false, reason: "too_many_entries" };
   }
-  if (count > MAX_XLSX_ENTRIES)
+  if (count > limits.maxEntries)
     return { ok: false, reason: "too_many_entries" };
-  if (offset + size > eocd) return { ok: false, reason: "corrupt" };
+  // One disk only. JSZip also switches to a zip64 directory it SEARCHES for
+  // when any disk field is 0xFFFF, so these must be plain zeros.
+  if (diskNumber !== 0 || directoryDisk !== 0 || countOnDisk !== count) {
+    return { ok: false, reason: "corrupt" };
+  }
+  // The end record's comment must reach exactly to the end of the file, so
+  // no other bytes trail the record we picked.
+  if (eocd + EOCD_MIN + view.getUint16(eocd + 20, true) !== bytes.length) {
+    return { ok: false, reason: "corrupt" };
+  }
+  // The directory must end where the end record starts (or, for datasheets,
+  // at a valid zip64 trailer just before it). Any other gap is how a decoy
+  // zip in front of a bomb makes two readers see two different directories.
+  const directoryEnd = offset + size;
+  const gapAllowed =
+    directoryEnd === eocd ||
+    (limits.trailer === "zip64-trailer" &&
+      isZip64Trailer(view, directoryEnd, eocd, offset, size));
+  if (!gapAllowed) return { ok: false, reason: "corrupt" };
 
   const entries: CentralEntry[] = [];
   let at = offset;
   for (let n = 0; n < count; n++) {
-    if (at + 46 > eocd || view.getUint32(at, true) !== CENTRAL_HEADER) {
+    if (at + 46 > directoryEnd || view.getUint32(at, true) !== CENTRAL_HEADER) {
       return { ok: false, reason: "corrupt" };
     }
     const nameLength = view.getUint16(at + 28, true);
     const extraLength = view.getUint16(at + 30, true);
     const commentLength = view.getUint16(at + 32, true);
     const end = at + 46 + nameLength + extraLength + commentLength;
-    if (end > eocd) return { ok: false, reason: "corrupt" };
+    if (end > directoryEnd) return { ok: false, reason: "corrupt" };
+    const nameBytes = bytes.subarray(at + 46, at + 46 + nameLength);
+    const extraFieldIds = readExtraFieldIds(
+      view,
+      at + 46 + nameLength,
+      extraLength,
+    );
+    if (extraFieldIds === null) return { ok: false, reason: "corrupt" };
     entries.push({
-      name: new TextDecoder().decode(
-        bytes.subarray(at + 46, at + 46 + nameLength),
-      ),
+      name: new TextDecoder().decode(nameBytes),
+      nameBytes,
+      extraFieldIds,
       flags: view.getUint16(at + 8, true),
       method: view.getUint16(at + 10, true),
       compressedSize: view.getUint32(at + 20, true),
@@ -109,7 +168,55 @@ function readCentralDirectory(bytes: Uint8Array): Parsed {
     });
     at = end;
   }
-  return { ok: true, entries };
+  // JSZip keeps reading headers while the signature matches, whatever the
+  // count says; so the counted entries must fill the directory exactly.
+  if (at !== directoryEnd) return { ok: false, reason: "corrupt" };
+  return { ok: true, entries, directoryOffset: offset };
+}
+
+/* The ids of an entry's extra fields; null when the block is malformed. */
+function readExtraFieldIds(
+  view: DataView,
+  start: number,
+  length: number,
+): number[] | null {
+  const ids: number[] = [];
+  let at = start;
+  const end = start + length;
+  while (at < end) {
+    if (at + 4 > end) return null;
+    ids.push(view.getUint16(at, true));
+    at += 4 + view.getUint16(at + 2, true);
+  }
+  return at === end ? ids : null;
+}
+
+const ZIP64_EOCD = 0x06064b50;
+const ZIP64_LOCATOR = 0x07064b50;
+const ZIP64_TRAILER_BYTES = 56 + 20;
+
+/*
+ * Exactly a zip64 end record (56 bytes) + locator (20 bytes) between the
+ * directory and the end record, both pointing at the same directory as the
+ * 32-bit fields. Anything else in that gap is refused.
+ */
+function isZip64Trailer(
+  view: DataView,
+  record: number,
+  eocd: number,
+  offset: number,
+  size: number,
+): boolean {
+  if (eocd - record !== ZIP64_TRAILER_BYTES) return false;
+  const locator = eocd - 20;
+  return (
+    view.getUint32(record, true) === ZIP64_EOCD &&
+    view.getBigUint64(record + 4, true) === BigInt(44) &&
+    view.getBigUint64(record + 40, true) === BigInt(size) &&
+    view.getBigUint64(record + 48, true) === BigInt(offset) &&
+    view.getUint32(locator, true) === ZIP64_LOCATOR &&
+    view.getBigUint64(locator + 8, true) === BigInt(record)
+  );
 }
 
 /**
@@ -133,7 +240,10 @@ export async function checkXlsx(bytes: Uint8Array): Promise<XlsxCheck> {
     return { ok: false, reason: "not_zip" };
   }
 
-  const parsed = readCentralDirectory(bytes);
+  const parsed = readCentralDirectory(bytes, {
+    maxEntries: MAX_XLSX_ENTRIES,
+    trailer: "zip64-trailer",
+  });
   if (!parsed.ok) return parsed;
 
   const byName = new Map(parsed.entries.map((e) => [e.name, e]));
@@ -143,7 +253,7 @@ export async function checkXlsx(bytes: Uint8Array): Promise<XlsxCheck> {
   const types = byName.get("[Content_Types].xml");
   if (types === undefined) return { ok: false, reason: "not_xlsx" };
 
-  const text = readPart(bytes, types);
+  const text = readZipPart(bytes, types, MAX_XLSX_PART_BYTES);
   if (text === "corrupt") return { ok: false, reason: "corrupt" };
   if (text === null || !text.includes(WORKBOOK_CONTENT_TYPE)) {
     return { ok: false, reason: "not_xlsx" };
@@ -151,14 +261,25 @@ export async function checkXlsx(bytes: Uint8Array): Promise<XlsxCheck> {
   return { ok: true };
 }
 
-/*
- * The text of one small zip part. null = refused (encrypted, too big, an
- * unknown compression method); "corrupt" = the bytes do not match the
- * directory. Output is capped at MAX_XLSX_PART_BYTES while inflating.
+/** Does the byte array start with a zip local-file header ("PK\x03\x04")? */
+export function hasZipMagic(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 4 &&
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
+      0,
+      true,
+    ) === LOCAL_HEADER
+  );
+}
+
+/**
+ * The compressed bytes of one entry, located through its local header.
+ * "corrupt" = the local header or the data lies outside the file.
  */
-function readPart(bytes: Uint8Array, entry: CentralEntry): string | null {
-  if ((entry.flags & 1) !== 0) return null; // encrypted
-  if (entry.uncompressedSize > MAX_XLSX_PART_BYTES) return null;
+export function entryData(
+  bytes: Uint8Array,
+  entry: CentralEntry,
+): Uint8Array | "corrupt" {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const at = entry.localOffset;
   if (at + 30 > bytes.length || view.getUint32(at, true) !== LOCAL_HEADER) {
@@ -168,12 +289,32 @@ function readPart(bytes: Uint8Array, entry: CentralEntry): string | null {
     at + 30 + view.getUint16(at + 26, true) + view.getUint16(at + 28, true);
   const end = start + entry.compressedSize;
   if (end > bytes.length) return "corrupt";
-  const data = bytes.subarray(start, end);
+  return bytes.subarray(start, end);
+}
+
+/**
+ * The text of one small zip part. null = refused (encrypted, larger than
+ * `maxBytes`, an unknown compression method); "corrupt" = the bytes do not
+ * match the directory. Output is capped at `maxBytes` while inflating.
+ */
+export function readZipPart(
+  bytes: Uint8Array,
+  entry: CentralEntry,
+  maxBytes: number,
+): string | null {
+  if ((entry.flags & 1) !== 0) return null; // encrypted
+  if (entry.uncompressedSize > maxBytes) return null;
+  const data = entryData(bytes, entry);
+  if (data === "corrupt") return "corrupt";
   try {
-    if (entry.method === 0) return new TextDecoder().decode(data);
+    if (entry.method === 0) {
+      // Stored: the bytes ARE the part, so they must match the declared size.
+      if (data.length !== entry.uncompressedSize) return "corrupt";
+      return new TextDecoder().decode(data);
+    }
     if (entry.method !== 8) return null;
     return new TextDecoder().decode(
-      inflateRawSync(data, { maxOutputLength: MAX_XLSX_PART_BYTES }),
+      inflateRawSync(data, { maxOutputLength: maxBytes }),
     );
   } catch {
     // Damaged stream, or it inflated past the cap: either way not a workbook.

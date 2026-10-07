@@ -82,3 +82,25 @@ export const MAX_PUBLIC_FILE_URL_LENGTH = 2048;
  */
 export const MAX_XLSX_ENTRIES = 2000;
 export const MAX_XLSX_PART_BYTES = 1024 * 1024;
+
+/*
+ * Bulk import (Phase 3). The client's sheet is uploaded as-is, so the import
+ * file has its own, larger caps than a datasheet. src/lib/import/safety.ts
+ * checks all of them on the zip directory (and a counting inflate) before
+ * exceljs inflates anything, so a zip bomb never reaches the parser.
+ */
+/** Largest import file: 30 MB (Phase 3 decision 5). */
+export const MAX_IMPORT_BYTES = 30 * 1024 * 1024;
+/** Most zip entries an import file may have (the client's sheet has 28). */
+export const MAX_IMPORT_ENTRIES = 5000;
+/** Most bytes all entries of an import file may inflate to, in total. */
+export const MAX_IMPORT_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
+/** Highest uncompressed:compressed ratio one entry may have. */
+export const MAX_IMPORT_COMPRESSION_RATIO = 100;
+/*
+ * The ratio cap applies only to entries that inflate past this size: a tiny
+ * XML part can compress 200:1 and is harmless; a bomb needs volume.
+ */
+export const IMPORT_RATIO_MIN_BYTES = 1024 * 1024;
+/** The header row is searched for in the first rows of each sheet. */
+export const IMPORT_HEADER_SCAN_ROWS = 15;

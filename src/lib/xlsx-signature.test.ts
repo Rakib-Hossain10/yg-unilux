@@ -7,7 +7,7 @@ import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 
 import { MAX_DATASHEET_BYTES, MAX_XLSX_ENTRIES } from "./constants";
-import { checkXlsx } from "./xlsx-signature";
+import { checkXlsx, readCentralDirectory } from "./xlsx-signature";
 
 async function realWorkbook(): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
@@ -126,5 +126,131 @@ describe("checkXlsx", () => {
       }
     }
     expect(await checkXlsx(broken)).toEqual({ ok: false, reason: "corrupt" });
+  });
+});
+
+/*
+ * The central-directory reader is shared with the import safety check
+ * (src/lib/import/safety.ts), which needs its own entry cap.
+ */
+describe("readCentralDirectory", () => {
+  it("lists entry names and declared sizes without inflating", async () => {
+    const bytes = await zipOf({ "a.txt": "x".repeat(1000), "b/c.xml": "<c/>" });
+    const parsed = readCentralDirectory(bytes, {
+      maxEntries: 10,
+      trailer: "none",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.entries.map((e) => e.name)).toEqual([
+      "a.txt",
+      "b/",
+      "b/c.xml",
+    ]);
+    expect(parsed.entries[0]?.uncompressedSize).toBe(1000);
+    expect(parsed.entries[0]?.method).toBe(8);
+    expect(parsed.entries[0]?.compressedSize).toBeLessThan(1000);
+  });
+
+  it("applies the caller's entry cap", async () => {
+    const bytes = await zipOf({ a: "1", b: "2", c: "3" }, "STORE");
+    expect(
+      readCentralDirectory(bytes, { maxEntries: 2, trailer: "none" }),
+    ).toEqual({
+      ok: false,
+      reason: "too_many_entries",
+    });
+    expect(
+      readCentralDirectory(bytes, { maxEntries: 3, trailer: "none" }).ok,
+    ).toBe(true);
+  });
+
+  it("calls a file with no end record corrupt", () => {
+    expect(
+      readCentralDirectory(new Uint8Array(100), {
+        maxEntries: 10,
+        trailer: "none",
+      }),
+    ).toEqual({ ok: false, reason: "corrupt" });
+  });
+});
+
+/*
+ * Inserts `gap` bytes between the central directory and the end record of a
+ * zip and returns the result. With `zip64`, the gap is a consistent zip64 end
+ * record + locator, as some Open XML writers emit for small files.
+ */
+function withGap(bytes: Uint8Array, kind: "zip64" | "junk"): Uint8Array {
+  const eocd = bytes.length - 22;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const size = view.getUint32(eocd + 12, true);
+  const offset = view.getUint32(eocd + 16, true);
+  const gap = new Uint8Array(76);
+  if (kind === "zip64") {
+    const g = new DataView(gap.buffer);
+    g.setUint32(0, 0x06064b50, true);
+    g.setBigUint64(4, BigInt(44), true);
+    g.setBigUint64(40, BigInt(size), true);
+    g.setBigUint64(48, BigInt(offset), true);
+    g.setUint32(56, 0x07064b50, true);
+    g.setBigUint64(64, BigInt(eocd), true);
+    g.setUint32(72, 1, true);
+  }
+  const out = new Uint8Array(bytes.length + gap.length);
+  out.set(bytes.subarray(0, eocd));
+  out.set(gap, eocd);
+  out.set(bytes.subarray(eocd), eocd + gap.length);
+  return out;
+}
+
+describe("readCentralDirectory trailer rule", () => {
+  it("accepts a consistent zip64 trailer only when allowed", async () => {
+    const bytes = withGap(await realWorkbook(), "zip64");
+    expect(
+      readCentralDirectory(bytes, {
+        maxEntries: 1000,
+        trailer: "zip64-trailer",
+      }).ok,
+    ).toBe(true);
+    expect(
+      readCentralDirectory(bytes, { maxEntries: 100, trailer: "none" }),
+    ).toEqual({ ok: false, reason: "corrupt" });
+  });
+
+  it("refuses any other gap before the end record", async () => {
+    const bytes = withGap(await realWorkbook(), "junk");
+    expect(
+      readCentralDirectory(bytes, {
+        maxEntries: 1000,
+        trailer: "zip64-trailer",
+      }),
+    ).toEqual({ ok: false, reason: "corrupt" });
+  });
+
+  it("keeps accepting datasheets that carry a zip64 trailer", async () => {
+    expect(await checkXlsx(withGap(await realWorkbook(), "zip64"))).toEqual({
+      ok: true,
+    });
+  });
+
+  it("refuses a stored content-types part whose size does not match", async () => {
+    const bytes = await zipOf(
+      { "[Content_Types].xml": WORKBOOK_TYPES, "xl/workbook.xml": "<w/>" },
+      "STORE",
+    );
+    const out = new Uint8Array(bytes);
+    const view = new DataView(out.buffer);
+    for (let at = out.length - 22; at >= 0; at--) {
+      if (view.getUint32(at, true) !== 0x02014b50) continue;
+      const nameLength = view.getUint16(at + 28, true);
+      const name = new TextDecoder().decode(
+        out.subarray(at + 46, at + 46 + nameLength),
+      );
+      if (name === "[Content_Types].xml") {
+        view.setUint32(at + 24, 10, true);
+        break;
+      }
+    }
+    expect(await checkXlsx(out)).toEqual({ ok: false, reason: "corrupt" });
   });
 });
