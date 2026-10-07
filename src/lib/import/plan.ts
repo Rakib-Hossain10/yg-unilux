@@ -74,6 +74,11 @@ export type PlanFromBytes =
       kind: "plan";
       plan: ImportPlan;
       /**
+       * The sheet side of `plan.planHash` (see `sheetHash`): the commit
+       * checks the preview's entry hashes against it (ADR 0061).
+       */
+      sheetHash: string;
+      /**
        * The pictures' bytes by sha256, for the commit's upload (T8). Never
        * hashed, never sent to the browser.
        */
@@ -181,12 +186,12 @@ export async function planFromBytes(
     read.sheets.map((sheet) => sheet.name),
   );
   const attached = attachImages(grouped.products, embedded);
-  const plan = await planProducts(
+  const built = await buildPlan(
     attached.products,
     [...read.warnings, ...grouped.warnings, ...attached.warnings],
     options,
   );
-  return { kind: "plan", plan, files: embedded.files };
+  return { kind: "plan", ...built, files: embedded.files };
 }
 
 /**
@@ -198,6 +203,17 @@ export async function planProducts(
   fileWarnings: readonly ImportWarning[],
   options: PlanOptions,
 ): Promise<ImportPlan> {
+  return (await buildPlan(products, fileWarnings, options)).plan;
+}
+
+/* An entry before its hash is added. */
+type UnhashedEntry = Omit<PlanEntry, "hash">;
+
+async function buildPlan(
+  products: readonly ImportProduct[],
+  fileWarnings: readonly ImportWarning[],
+  options: PlanOptions,
+): Promise<{ plan: ImportPlan; sheetHash: string }> {
   await connectDb();
   const keepFilters = await restrictedFilterGate();
   const categoryById = new Map(options.categories.map((c) => [c.id, c]));
@@ -215,7 +231,7 @@ export async function planProducts(
   });
 
   const reservedSlugs = new Set<string>();
-  const entries: PlanEntry[] = [];
+  const entries: UnhashedEntry[] = [];
   for (const [index, product] of products.entries()) {
     const ids = matches[index] as string[];
     const conflict = conflictWarnings(
@@ -243,11 +259,22 @@ export async function planProducts(
     );
   }
 
+  const hashed: PlanEntry[] = entries.map((entry) => ({
+    ...entry,
+    hash: entryHash(entry),
+  }));
+  const sheet = sheetHash(options.defaultCategoryId, products);
   return {
-    entries,
-    warnings: [...fileWarnings],
-    summary: summarise(entries),
-    planHash: planHash(options.defaultCategoryId, products, entries),
+    plan: {
+      entries: hashed,
+      warnings: [...fileWarnings],
+      summary: summarise(hashed),
+      planHash: combinePlanHash(
+        sheet,
+        hashed.map((entry) => entry.hash),
+      ),
+    },
+    sheetHash: sheet,
   };
 }
 
@@ -363,7 +390,7 @@ function conflictWarnings(
 
 function baseEntry(
   product: ImportProduct,
-): Omit<PlanEntry, "status" | "target" | "existing" | "name"> {
+): Omit<UnhashedEntry, "status" | "target" | "existing" | "name"> {
   return {
     sheet: product.sheet,
     rows: [...product.rows],
@@ -380,7 +407,7 @@ function baseEntry(
 function blockedEntry(
   product: ImportProduct,
   extra: readonly ImportWarning[],
-): PlanEntry {
+): UnhashedEntry {
   const base = baseEntry(product);
   return {
     ...base,
@@ -432,7 +459,7 @@ async function createEntry(
   categoryById: ReadonlyMap<string, CategoryLookup>,
   reserved: Set<string>,
   takenRoots: ReadonlySet<string>,
-): Promise<PlanEntry> {
+): Promise<UnhashedEntry> {
   const base = baseEntry(product);
   const root = product.slug !== "" ? product.slug : product.baseModelCode;
   let slug: string;
@@ -503,7 +530,7 @@ function updateEntry(
   keep: FilterGate,
   categoryById: ReadonlyMap<string, CategoryLookup>,
   options: PlanOptions,
-): PlanEntry {
+): UnhashedEntry {
   const base = baseEntry(product);
   const warnings = [...base.warnings];
   const at = { sheet: product.sheet, row: product.rows[0] };
@@ -900,7 +927,7 @@ function categoryNames(
  * Summary and hash.
  * ------------------------------------------------------------------------ */
 
-function summarise(entries: readonly PlanEntry[]): ImportPlan["summary"] {
+function summarise(entries: readonly UnhashedEntry[]): ImportPlan["summary"] {
   const summary = {
     create: 0,
     update: 0,
@@ -917,8 +944,11 @@ function summarise(entries: readonly PlanEntry[]): ImportPlan["summary"] {
   return summary;
 }
 
-/* Bumped when the hashed shape changes, so an old preview cannot commit. */
-const PLAN_HASH_VERSION = 1;
+/*
+ * Bumped when the hashed shape changes, so an old preview cannot commit.
+ * 2: the plan hash is built from per-entry hashes (T8, ADR 0061).
+ */
+const PLAN_HASH_VERSION = 2;
 
 /*
  * JSON with object keys sorted, so equal plans hash equal. Arrays keep their
@@ -935,24 +965,19 @@ function stableJson(value: unknown): string {
   );
 }
 
+const sha256Hex = (text: string): string =>
+  createHash("sha256").update(text).digest("hex");
+
 /**
- * sha256 (hex) of the canonical plan: the default category, every grouped
- * product as the sheet gave it (its pictures by `images[].sha256` and
- * `variants[].imageSha256`, never the picture bytes), and every entry
- * (status, the matched product's id and `updatedAt`, the merged target,
- * pictures to add, removals). A change to the file, the database or the
- * visibility setting between preview and commit changes the hash.
+ * sha256 (hex) of one entry: what the commit would do for that product
+ * (status, rows, the matched product's id and `updatedAt`, the merged
+ * target, pictures to add, removals). Warnings and the diff text are not
+ * part of it: they describe the entry, they are not written.
  */
-export function planHash(
-  defaultCategoryId: string,
-  products: readonly ImportProduct[],
-  entries: readonly PlanEntry[],
-): string {
-  const canonical = stableJson({
-    version: PLAN_HASH_VERSION,
-    defaultCategoryId,
-    products,
-    entries: entries.map((entry) => ({
+export function entryHash(entry: Omit<PlanEntry, "hash">): string {
+  return sha256Hex(
+    stableJson({
+      version: PLAN_HASH_VERSION,
       status: entry.status,
       sheet: entry.sheet,
       rows: entry.rows,
@@ -960,7 +985,50 @@ export function planHash(
       target: entry.target,
       imagesToAdd: entry.imagesToAdd,
       variantsRemoved: entry.variantsRemoved,
-    })),
-  });
-  return createHash("sha256").update(canonical).digest("hex");
+    }),
+  );
+}
+
+/**
+ * sha256 (hex) of the sheet side of a plan: the default category and every
+ * grouped product as the sheet gave it (its pictures by `images[].sha256`
+ * and `variants[].imageSha256`, never the picture bytes). It does not
+ * depend on the database, so it stays the same while the commit writes.
+ */
+export function sheetHash(
+  defaultCategoryId: string,
+  products: readonly ImportProduct[],
+): string {
+  return sha256Hex(
+    stableJson({ version: PLAN_HASH_VERSION, defaultCategoryId, products }),
+  );
+}
+
+/** The plan hash from its sheet hash and its entry hashes, in sheet order. */
+export function combinePlanHash(
+  sheet: string,
+  entryHashes: readonly string[],
+): string {
+  return sha256Hex(
+    stableJson({ version: PLAN_HASH_VERSION, sheet, entries: entryHashes }),
+  );
+}
+
+/**
+ * sha256 (hex) of the canonical plan: the sheet hash plus every entry hash.
+ * A change to the file, the database (a matched product's `updatedAt`) or
+ * the visibility setting between preview and commit changes it. The commit
+ * (ADR 0061) re-plans, proves the preview's entry hashes against it, then
+ * compares each product of its batch on its own entry hash, so batches
+ * already written do not invalidate the ones still to come.
+ */
+export function planHash(
+  defaultCategoryId: string,
+  products: readonly ImportProduct[],
+  entries: readonly Omit<PlanEntry, "hash">[],
+): string {
+  return combinePlanHash(
+    sheetHash(defaultCategoryId, products),
+    entries.map(entryHash),
+  );
 }

@@ -301,6 +301,14 @@ export interface PlanEntry {
   moreChanges: number;
   /** The product's sheet warnings plus the plan's own. */
   warnings: ImportWarning[];
+  /**
+   * sha256 (hex) of what the commit would do for this product (see
+   * `entryHash` in plan.ts: status, sheet + rows, the matched product incl.
+   * its `updatedAt`, target, pictures to add, removals; never warnings or
+   * the diff text). It depends on this product only. The commit sends the
+   * preview's entry hashes back; `planHash` proves they belong together.
+   */
+  hash: string;
 }
 
 export interface ImportPlanSummary {

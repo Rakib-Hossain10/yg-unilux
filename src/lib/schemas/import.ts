@@ -5,7 +5,9 @@
 import { z } from "zod";
 
 import {
+  IMPORT_BATCH_SIZE,
   MAX_IMPORT_BYTES,
+  MAX_IMPORT_PLAN_ENTRIES,
   R2_IMPORTS_PREFIX,
   XLSX_MIME_TYPE,
 } from "@/lib/constants";
@@ -82,3 +84,46 @@ export const importFileInputSchema = z.strictObject({
   defaultCategoryId: defaultCategoryIdSchema,
 });
 export type ImportFileInput = z.infer<typeof importFileInputSchema>;
+
+/** A sha256 in lowercase hex, as the plan reports its hashes. */
+const sha256HexSchema = z
+  .string()
+  .regex(/^[0-9a-f]{64}$/, "Preview the file again");
+
+/**
+ * One commit batch (ADR 0061): the staged file, the default category and
+ * what the preview returned (the file's ETag, `plan.planHash` and every
+ * entry's `hash`, in plan order), which batch of IMPORT_BATCH_SIZE entries
+ * to save, and whether the admin confirmed the variant removals.
+ */
+export const commitImportInputSchema = z
+  .strictObject({
+    key: importKeySchema,
+    defaultCategoryId: defaultCategoryIdSchema,
+    /** The preview's `etag`; null when storage reported none. */
+    etag: z.string().min(1).max(200).nullable(),
+    planHash: sha256HexSchema,
+    entryHashes: z
+      .array(sha256HexSchema)
+      .min(1, "Preview the file again")
+      .max(MAX_IMPORT_PLAN_ENTRIES, "This file has too many products"),
+    batch: z
+      .number()
+      .int()
+      .min(0)
+      .max(Math.ceil(MAX_IMPORT_PLAN_ENTRIES / IMPORT_BATCH_SIZE) - 1),
+    acknowledgeRemovals: z.boolean(),
+  })
+  // The batch must exist in the previewed plan (the service re-checks it
+  // against the plan it rebuilds).
+  .refine(
+    (input) => input.batch * IMPORT_BATCH_SIZE < input.entryHashes.length,
+    {
+      path: ["batch"],
+      message: "Preview the file again",
+    },
+  );
+export type CommitImportInput = z.infer<typeof commitImportInputSchema>;
+
+/** The last step: delete the staged file. */
+export const finishImportInputSchema = z.strictObject({ key: importKeySchema });

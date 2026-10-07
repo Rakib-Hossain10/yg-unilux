@@ -1,12 +1,20 @@
 // Tests for the bulk import Zod schemas: the staged key shape (escaped dot,
 // no lookalikes), the uuid taken from it, the presign request and the
-// preview input with its default category id.
+// preview input with its default category id, and the commit / finish
+// inputs (T8, ADR 0061).
 
 import { describe, expect, it } from "vitest";
 
-import { MAX_IMPORT_BYTES, XLSX_MIME_TYPE } from "@/lib/constants";
+import {
+  IMPORT_BATCH_SIZE,
+  MAX_IMPORT_BYTES,
+  MAX_IMPORT_PLAN_ENTRIES,
+  XLSX_MIME_TYPE,
+} from "@/lib/constants";
 
 import {
+  commitImportInputSchema,
+  finishImportInputSchema,
   IMPORT_KEY_PATTERN,
   importFileInputSchema,
   importIdFromKey,
@@ -125,6 +133,78 @@ describe("importFileInputSchema", () => {
         defaultCategoryId: ID,
         ...override,
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe("commitImportInputSchema", () => {
+  const HASH = "a".repeat(64);
+  const valid = {
+    key: KEY,
+    defaultCategoryId: ID,
+    etag: '"etag-1"',
+    planHash: HASH,
+    entryHashes: [HASH, HASH],
+    batch: 0,
+    acknowledgeRemovals: false,
+  };
+  const ok = (input: unknown) =>
+    commitImportInputSchema.safeParse(input).success;
+
+  it("accepts what the preview returned, also without an ETag", () => {
+    expect(ok(valid)).toBe(true);
+    expect(ok({ ...valid, etag: null })).toBe(true);
+  });
+
+  it("refuses unknown fields, an empty ETag and a foreign key", () => {
+    expect(ok({ ...valid, extra: 1 })).toBe(false);
+    expect(ok({ ...valid, etag: "" })).toBe(false);
+    expect(ok({ ...valid, key: "datasheets/x.xlsx" })).toBe(false);
+  });
+
+  it("takes lowercase sha256 hex only", () => {
+    expect(ok({ ...valid, planHash: "A".repeat(64) })).toBe(false);
+    expect(ok({ ...valid, planHash: "a".repeat(63) })).toBe(false);
+    expect(ok({ ...valid, entryHashes: [HASH, "g".repeat(64)] })).toBe(false);
+  });
+
+  it("bounds the entry hashes", () => {
+    expect(ok({ ...valid, entryHashes: [] })).toBe(false);
+    const many = Array.from(
+      { length: MAX_IMPORT_PLAN_ENTRIES + 1 },
+      () => HASH,
+    );
+    expect(ok({ ...valid, entryHashes: many })).toBe(false);
+  });
+
+  it("takes only a batch that exists in the plan", () => {
+    expect(ok({ ...valid, batch: -1 })).toBe(false);
+    expect(ok({ ...valid, batch: 0.5 })).toBe(false);
+    expect(ok({ ...valid, batch: 1 })).toBe(false);
+    const twoBatches = Array.from(
+      { length: IMPORT_BATCH_SIZE + 1 },
+      () => HASH,
+    );
+    expect(ok({ ...valid, entryHashes: twoBatches, batch: 1 })).toBe(true);
+    expect(ok({ ...valid, entryHashes: twoBatches, batch: 2 })).toBe(false);
+  });
+
+  it("needs an explicit removal acknowledgement flag", () => {
+    const without: Record<string, unknown> = { ...valid };
+    delete without.acknowledgeRemovals;
+    expect(ok(without)).toBe(false);
+    expect(ok({ ...valid, acknowledgeRemovals: "yes" })).toBe(false);
+  });
+});
+
+describe("finishImportInputSchema", () => {
+  it("takes a staged key only, and nothing else", () => {
+    expect(finishImportInputSchema.safeParse({ key: KEY }).success).toBe(true);
+    expect(
+      finishImportInputSchema.safeParse({ key: "imports/../x.xlsx" }).success,
+    ).toBe(false);
+    expect(
+      finishImportInputSchema.safeParse({ key: KEY, extra: 1 }).success,
     ).toBe(false);
   });
 });

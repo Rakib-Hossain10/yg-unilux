@@ -28,7 +28,13 @@ import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 import { DEFAULT_CATEGORY_GONE, previewImport, type ImportPreview } from ".";
 import { filtersFromSpecs } from "./numbers";
-import { planHash, planProducts } from "./plan";
+import {
+  combinePlanHash,
+  loadPlanLookups,
+  planFromBytes,
+  planHash,
+  planProducts,
+} from "./plan";
 import type { ImportProduct, PlanEntry, PlanTarget } from "./types";
 
 vi.mock("@/lib/storage", () => ({
@@ -712,6 +718,60 @@ describe("plan hash", () => {
       base,
     );
     expect(planHash(defaultCategory, products, data.plan.entries)).toBe(base);
+  });
+});
+
+describe("entry hashes and the sheet hash (ADR 0061)", () => {
+  async function planned() {
+    const result = await planFromBytes(new Uint8Array(templateBytes), {
+      ...(await loadPlanLookups()),
+      defaultCategoryId: defaultCategory,
+    });
+    if (result.kind !== "plan") throw new Error("refused");
+    return result;
+  }
+
+  it("a save changes that product's entry hash only, never the sheet hash", async () => {
+    const first = await planned();
+    for (const entry of first.plan.entries) {
+      expect(entry.hash).toMatch(/^[0-9a-f]{64}$/);
+    }
+    // Save No. 76 only, as the commit's first batch would.
+    await saveAsCommitWould(
+      first.plan.entries.find((e) => e.productNo === 76)!,
+    );
+    const second = await planned();
+
+    expect(second.sheetHash).toBe(first.sheetHash);
+    second.plan.entries.forEach((entry, i) => {
+      const before = first.plan.entries[i]!;
+      if (entry.productNo === 76) {
+        expect(entry.status).toBe("unchanged");
+        expect(entry.hash).not.toBe(before.hash);
+      } else {
+        expect(entry.hash).toBe(before.hash);
+      }
+    });
+    expect(second.plan.planHash).not.toBe(first.plan.planHash);
+  });
+
+  it("the plan hash is exactly the sheet hash plus the entry hashes, in order", async () => {
+    const { plan, sheetHash } = await planned();
+    const hashes = plan.entries.map((e) => e.hash);
+    expect(combinePlanHash(sheetHash, hashes)).toBe(plan.planHash);
+    const swapped = [hashes[1]!, hashes[0]!, ...hashes.slice(2)];
+    expect(combinePlanHash(sheetHash, swapped)).not.toBe(plan.planHash);
+    expect(combinePlanHash(sheetHash, hashes.slice(1))).not.toBe(plan.planHash);
+  });
+
+  it("the sheet hash follows the default category", async () => {
+    const a = await planned();
+    const b = await planFromBytes(new Uint8Array(templateBytes), {
+      ...(await loadPlanLookups()),
+      defaultCategoryId: spotRecessed,
+    });
+    if (b.kind !== "plan") throw new Error("refused");
+    expect(b.sheetHash).not.toBe(a.sheetHash);
   });
 });
 

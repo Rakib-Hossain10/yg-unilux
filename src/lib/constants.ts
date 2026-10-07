@@ -59,6 +59,16 @@ export const R2_IMPORTS_PREFIX = "imports/";
 export const IMPORT_UPLOAD_TTL_SECONDS = 300;
 /** Staged import files older than 24 h are deleted by `sweep:incoming`. */
 export const IMPORT_STAGED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/*
+ * The import commit (ADR 0061) saves the plan's entries in batches of this
+ * many products per call (one Server Action call each), uploading at most
+ * IMPORT_UPLOAD_CONCURRENCY pictures at a time. Entry i is in batch
+ * floor(i / IMPORT_BATCH_SIZE). A file may hold at most
+ * MAX_IMPORT_PLAN_ENTRIES products (the commit carries one hash per entry).
+ */
+export const IMPORT_BATCH_SIZE = 20;
+export const IMPORT_UPLOAD_CONCURRENCY = 4;
+export const MAX_IMPORT_PLAN_ENTRIES = 5000;
 
 /*
  * Product form caps. String lengths mirror the maxlength values in
