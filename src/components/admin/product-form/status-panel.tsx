@@ -27,7 +27,12 @@ import { callAction, type ServiceErrors } from "../action-result";
 import { useClearNotice } from "../clear-notice";
 
 /** The publish-check fields; their messages are the reasons to list. */
-const PROBLEM_FIELDS = ["variants", "mainCategory", "images"] as const;
+const PROBLEM_FIELDS = [
+  "variants",
+  "mainCategory",
+  "images",
+  "datasheetId",
+] as const;
 
 /**
  * A failed publish/unpublish as a title and a list. The title follows
@@ -77,6 +82,7 @@ export function StatusPanel({
   status,
   problems,
   dirty,
+  onFieldErrors,
 }: {
   productId: string;
   /** The saved product's updatedAt; a newer write refuses the change. */
@@ -86,6 +92,8 @@ export function StatusPanel({
   problems: string[];
   /** The form has unsaved edits. */
   dirty: boolean;
+  /** Told a failed publish's field errors, to mark inputs in the form. */
+  onFieldErrors?: (errors: Record<string, string[]>) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [failure, setFailure] = useState<{
@@ -124,6 +132,7 @@ export function StatusPanel({
           return;
         }
         setFailure(statusFailure(result.errors, publishing, result.saved));
+        if (publishing) onFieldErrors?.(result.errors.fieldErrors);
       } finally {
         inFlight.current = false;
       }

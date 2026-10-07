@@ -46,6 +46,7 @@ export function isRowList(name: string | undefined): name is RowList {
 const ALWAYS = new Set<string>([
   ...BASICS_FIELDS,
   ...CATEGORY_FIELDS,
+  "datasheetId",
   // Section (b): every product-level spec has an input.
   ...SPEC_KEYS.map((key) => `specs.${key}`),
   // Each row list shows a list-level message (e.g. "At most 200 variants").

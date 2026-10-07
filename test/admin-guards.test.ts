@@ -485,6 +485,10 @@ describe("admin Server Actions call requireAdmin() first", () => {
     expect(files).toContain("src/app/admin/products/actions.ts");
   });
 
+  it("finds the datasheets actions", () => {
+    expect(files).toContain("src/app/admin/datasheets/actions.ts");
+  });
+
   it.each(files)("%s", (file) => {
     expect(actionProblems(readSource(file))).toEqual([]);
   });

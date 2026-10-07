@@ -36,6 +36,7 @@ import { useClearNotice } from "../clear-notice";
 import { PRODUCTS_PATH } from "../product-paths";
 import { BasicsSection } from "./basics-section";
 import { CategoriesSection, type PickerOption } from "./categories-section";
+import { DatasheetPicker } from "./datasheet-picker";
 import { DeleteProduct } from "./delete-product";
 import { ExtraSpecsSection, PublicFilesSection } from "./extra-info-sections";
 import {
@@ -83,6 +84,7 @@ export function ProductEditForm({
   magneticTrackIds,
   publishProblems,
   savedImages,
+  datasheets,
   children,
 }: {
   product: EditedProduct;
@@ -95,6 +97,8 @@ export function ProductEditForm({
   publishProblems: string[];
   /** The product's SAVED images, offered in each variant's image select. */
   savedImages: StoredImage[];
+  /** Every stored datasheet (id and file name only, never a key or URL). */
+  datasheets: PickerOption[];
   /** Shown between the form and Delete (the images editor). */
   children?: ReactNode;
 }) {
@@ -235,6 +239,15 @@ export function ProductEditForm({
         status={product.status}
         problems={publishProblems}
         dirty={form.formState.isDirty}
+        onFieldErrors={(errors) => {
+          // A publish refusal about these fields also marks the input.
+          for (const field of ["mainCategory", "datasheetId"] as const) {
+            const message = errors[field]?.[0];
+            if (message !== undefined) {
+              form.setError(field, { type: "server", message });
+            }
+          }
+        }}
       />
 
       <FormProvider {...form}>
@@ -282,6 +295,7 @@ export function ProductEditForm({
             <VariantsEditor />
           </SavedImagesContext>
           <ExtraSpecsSection />
+          <DatasheetPicker datasheets={datasheets} />
           <PublicFilesSection />
 
           <div className="flex flex-wrap items-center gap-3">

@@ -365,6 +365,25 @@ describe("statusFailure", () => {
     });
   });
 
+  it("lists the missing main category and datasheet reasons too", () => {
+    expect(
+      statusFailure(
+        {
+          formErrors: [],
+          fieldErrors: {
+            mainCategory: ["This category no longer exists"],
+            datasheetId: ["This datasheet no longer exists"],
+          },
+        },
+        true,
+        false,
+      ).items,
+    ).toEqual([
+      "This category no longer exists",
+      "This datasheet no longer exists",
+    ]);
+  });
+
   it("shows other failures plainly", () => {
     expect(
       statusFailure(
@@ -407,6 +426,7 @@ describe("ProductEditForm", () => {
           updatedAt: "2026-10-06T12:00:00.000Z",
         },
         savedImages: [],
+        datasheets: [],
         categories: [
           { id: MAIN, label: "Spot Lights" },
           { id: TRACK, label: "Magnetic Track" },
@@ -416,6 +436,55 @@ describe("ProductEditForm", () => {
         publishProblems: problems,
       }),
     );
+
+  it("renders the datasheet picker with a label, none selected and the stored files", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProductEditForm, {
+        product: {
+          id: P,
+          status: "draft",
+          values: { ...stored, datasheetId: "sheet2" },
+          updatedAt: "2026-10-06T12:00:00.000Z",
+        },
+        savedImages: [],
+        datasheets: [
+          { id: "sheet1", label: "Arc <family>.xlsx" },
+          { id: "sheet2", label: "Spot.xlsx" },
+        ],
+        categories: [{ id: MAIN, label: "Spot Lights" }],
+        areas: [],
+        magneticTrackIds: [],
+        publishProblems: [],
+      }),
+    );
+    expect(html).toContain('for="product-datasheetId"');
+    expect(html).toContain('id="product-datasheetId"');
+    expect(html).toContain("Arc &lt;family&gt;.xlsx");
+    expect(html).toMatch(/<option value="sheet2" selected/);
+    expect(html).toContain("Datasheet coming soon");
+    // Never a storage key or a URL.
+    expect(html).not.toMatch(/datasheets\/|incoming\/|r2\./);
+  });
+
+  it("shows a stored datasheet id that no longer exists, so it can be detached", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProductEditForm, {
+        product: {
+          id: P,
+          status: "draft",
+          values: { ...stored, datasheetId: "gone" },
+          updatedAt: "2026-10-06T12:00:00.000Z",
+        },
+        savedImages: [],
+        datasheets: [],
+        categories: [{ id: MAIN, label: "Spot Lights" }],
+        areas: [],
+        magneticTrackIds: [],
+        publishProblems: [],
+      }),
+    );
+    expect(html).toContain("This datasheet no longer exists");
+  });
 
   it("labels every input of section (a) and ties help text to it", () => {
     const html = render();
@@ -813,6 +882,7 @@ describe("section (b) markup", () => {
           updatedAt: "2026-10-06T12:00:00.000Z",
         },
         savedImages: [],
+        datasheets: [],
         categories: [{ id: MAIN, label: "Spot Lights" }],
         areas: [{ id: AREA, label: "Office" }],
         magneticTrackIds: [],

@@ -128,8 +128,7 @@ export function textsToSpecs(texts: SpecOverrideTexts): StoredSpecs {
 /**
  * What React Hook Form holds. Section (a) edits the text, category, area,
  * track-size and filter fields; section (b) the specs, variants, extra specs
- * and public files. `datasheetId` has no input yet (T13): it is loaded and
- * sent back unchanged, so a save never wipes it.
+ * and public files. `datasheetId` is the Datasheet picker's value (null = none).
  * `status` is not form state: it comes from the server on every render, so a
  * Save after Publish can never send the old status back.
  */

@@ -17,6 +17,7 @@ import { NOTICE_PARAM, readNotice } from "@/components/admin/save-notice";
 import { SaveNoticeAlert } from "@/components/admin/save-notice-alert";
 import { listAreas } from "@/lib/admin/areas";
 import { listCategoryTree } from "@/lib/admin/categories";
+import { listDatasheets } from "@/lib/admin/datasheets";
 import { getProductForEdit } from "@/lib/admin/products";
 import { requireAdmin } from "@/lib/permissions";
 import { publishCheck } from "@/lib/schemas/product";
@@ -40,10 +41,11 @@ export default async function EditProductPage({
   await requireAdmin();
   const [{ id }, query] = await Promise.all([params, searchParams]);
   // The service validates the id; a bad one is simply "not found".
-  const [product, tree, areas] = await Promise.all([
+  const [product, tree, areas, datasheets] = await Promise.all([
     getProductForEdit(id),
     listCategoryTree(),
     listAreas(),
+    listDatasheets(),
   ]);
   if (!product) notFound();
 
@@ -81,6 +83,11 @@ export default async function EditProductPage({
         magneticTrackIds={magneticTrackIds(tree)}
         publishProblems={problems}
         savedImages={product.images}
+        // Only ids and file names cross to the browser, never a storage key.
+        datasheets={datasheets.map((sheet) => ({
+          id: sheet.id,
+          label: sheet.fileName,
+        }))}
       >
         {/*
          * Rendered after the details form, before Delete, with its own Save:
