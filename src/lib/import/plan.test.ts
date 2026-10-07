@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MAX_IMPORT_PLAN_ENTRIES } from "@/lib/constants";
 import { mongoose } from "@/lib/db";
 import {
   DEFAULT_COLUMN_VISIBILITY,
@@ -23,11 +24,16 @@ import {
 import { AuditLogModel } from "@/models/audit-log";
 
 import { buildFixture } from "../../../test/fixtures/import/build";
-import { goldenTemplateFile } from "../../../test/fixtures/import/template-fixture";
+import {
+  fillTemplate,
+  goldenTemplateFile,
+  TEMPLATE_INPUT,
+} from "../../../test/fixtures/import/template-fixture";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 import { DEFAULT_CATEGORY_GONE, previewImport, type ImportPreview } from ".";
 import { filtersFromSpecs } from "./numbers";
+import { buildImportTemplate } from "./template";
 import {
   combinePlanHash,
   loadPlanLookups,
@@ -605,6 +611,24 @@ describe("previewImport: blocked", () => {
 });
 
 describe("plan guards", () => {
+  it("refuses a file with more products than one commit accepts (too_many_products)", async () => {
+    const file = await fillTemplate(
+      await buildImportTemplate(TEMPLATE_INPUT),
+      Array.from({ length: MAX_IMPORT_PLAN_ENTRIES + 1 }, (_, i) => ({
+        row: { "NO.": i + 1, "Model No.": `TM-${i + 1}` },
+      })),
+    );
+    const result = await planFromBytes(new Uint8Array(file), {
+      categories: [],
+      areas: [],
+      defaultCategoryId: defaultCategory,
+    });
+    if (result.kind !== "refused") throw new Error("not refused");
+    expect(result.warnings.map((w) => [w.code, w.severity])).toEqual([
+      ["too_many_products", "fatal"],
+    ]);
+  }, 120_000);
+
   it("blocks a merged record that fails the product schema (invalid_record)", async () => {
     useFile(fixtureBytes); // no Category column: saved extras are kept
     const entry = entryOf(await preview(), 76);

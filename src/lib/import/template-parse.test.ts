@@ -197,7 +197,9 @@ describe("template columns through the reader and grouping", () => {
       [dataRow(1, "ARC-101", ["Yes"])],
     );
     expect(read.warnings).toEqual([]);
-    expect(codes(group.products[0]?.warnings ?? [])).toEqual(["unknown_area"]);
+    // One finding about the column (file level), none on the product.
+    expect(codes(group.warnings)).toEqual(["unknown_area"]);
+    expect(codes(group.products[0]?.warnings ?? [])).toEqual([]);
     expect(group.products[0]?.blocked).toBe(false);
   });
 

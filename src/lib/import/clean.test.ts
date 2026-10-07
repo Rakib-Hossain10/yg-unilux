@@ -452,6 +452,7 @@ describe("cleanRow", () => {
       category: null,
       extraCategories: [],
       areas: ["Retail", "Office"],
+      areaFlags: [],
       warnings: [
         expect.objectContaining({
           code: "cjk_only_cell",

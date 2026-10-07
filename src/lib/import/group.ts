@@ -55,6 +55,20 @@ export interface GroupLookups {
   areas: readonly AreaLookup[];
   /** The main category the admin picked in the upload step. */
   defaultCategoryId: string;
+  /**
+   * The template's `Area: <name>` columns, from the header rows. Optional:
+   * with them an unknown area column is reported at its header even when no
+   * row says Yes; without them, at the first row that says Yes.
+   */
+  areaColumns?: readonly AreaColumn[];
+}
+
+/** One `Area: <name>` header cell. */
+export interface AreaColumn {
+  sheet: string;
+  /** The header's Excel row number. */
+  row: number;
+  name: string;
 }
 
 export interface GroupResult {
@@ -139,7 +153,11 @@ export function groupRows(
     groups.push(current);
   }
 
-  const products = groups.map((group) => buildProduct(group, lookups));
+  const unknownFlags = unknownAreaColumns(rows, lookups);
+  warnings.push(...unknownFlags.warnings);
+  const products = groups.map((group) =>
+    buildProduct(group, lookups, unknownFlags.keys),
+  );
   flagDuplicateModelNos(products);
   flagDuplicateProductNos(products);
   for (const product of products) {
@@ -148,7 +166,53 @@ export function groupRows(
   return { products, warnings };
 }
 
-function buildProduct(group: RowGroup, lookups: GroupLookups): ImportProduct {
+/*
+ * An `Area: <name>` column whose name matches no area (renamed or deleted
+ * since the template was downloaded) is one problem with the column, so it
+ * is reported once, not on every row that says Yes. Returns the folded names
+ * so the per-product pass skips them.
+ */
+function unknownAreaColumns(
+  rows: readonly CleanedRow[],
+  lookups: GroupLookups,
+): { keys: ReadonlySet<string>; warnings: ImportWarning[] } {
+  const keys = new Set<string>();
+  const warnings: ImportWarning[] = [];
+  const check = (sheet: string, row: number, name: string) => {
+    const key = fold(name);
+    if (keys.has(key) || findArea(name, lookups.areas) !== undefined) return;
+    keys.add(key);
+    warnings.push(
+      importWarning("unknown_area", {
+        sheet,
+        row,
+        column: "areaFlag",
+        detail: `The column "Area: ${name}" matches no area, so it is skipped on every row. Download a fresh template.`,
+      }),
+    );
+  };
+  for (const column of lookups.areaColumns ?? []) {
+    check(column.sheet, column.row, column.name);
+  }
+  for (const row of rows) {
+    for (const name of row.areaFlags) check(row.sheet, row.row, name);
+  }
+  return { keys, warnings };
+}
+
+function findArea(
+  name: string,
+  areas: readonly AreaLookup[],
+): AreaLookup | undefined {
+  const key = fold(name);
+  return areas.find((a) => fold(a.name) === key || a.slug === key);
+}
+
+function buildProduct(
+  group: RowGroup,
+  lookups: GroupLookups,
+  unknownAreaFlags: ReadonlySet<string>,
+): ImportProduct {
   const { sheet, rows } = group;
   const first = rows[0] as CleanedRow;
   const warnings: ImportWarning[] = rows.flatMap((row) => row.warnings);
@@ -211,7 +275,7 @@ function buildProduct(group: RowGroup, lookups: GroupLookups): ImportProduct {
   const name = cutCodePoints(title.join(" "), MAX_PRODUCT_NAME_LENGTH);
 
   checkSpecs(shared, variants, sheet, first.row, warnings);
-  const templates = resolveTemplates(rows, lookups, warnings);
+  const templates = resolveTemplates(rows, lookups, unknownAreaFlags, warnings);
 
   return {
     sheet,
@@ -431,6 +495,7 @@ const fold = (s: string) =>
 function resolveTemplates(
   rows: readonly CleanedRow[],
   lookups: GroupLookups,
+  unknownAreaFlags: ReadonlySet<string>,
   warnings: ImportWarning[],
 ): Templates {
   const byId = new Map(lookups.categories.map((c) => [c.id, c]));
@@ -480,11 +545,12 @@ function resolveTemplates(
   let areasFromSheet = false;
   for (const row of rows) {
     for (const name of row.areas) {
-      const key = fold(name);
-      const area = lookups.areas.find(
-        (a) => fold(a.name) === key || a.slug === key,
-      );
+      const area = findArea(name, lookups.areas);
       if (area === undefined) {
+        // An unknown `Area:` column was reported once by groupRows.
+        if (row.areaFlags.includes(name) && unknownAreaFlags.has(fold(name))) {
+          continue;
+        }
         warnings.push(
           importWarning("unknown_area", {
             sheet: row.sheet,

@@ -551,6 +551,11 @@ export interface CleanedRow {
   category: string | null;
   extraCategories: string[];
   areas: string[];
+  /**
+   * The `Area: <name>` column headers this row says Yes to (also in
+   * `areas`). Grouping reports an unknown one once per column, not per row.
+   */
+  areaFlags: string[];
   /** Every cleaning warning of the row, the NO. error included. */
   warnings: ImportWarning[];
 }
@@ -581,9 +586,12 @@ export function cleanRow(row: SheetRow): CleanedRow {
   }
 
   const areas = [...take(cleanNameList("areas", cells.areas, at)).values];
+  const areaFlags: string[] = [];
   for (const flag of row.areaFlags ?? []) {
     const { selected } = take(cleanAreaFlag(flag.text, flag.name, at));
-    if (selected && !areas.includes(flag.name)) areas.push(flag.name);
+    if (!selected) continue;
+    if (!areaFlags.includes(flag.name)) areaFlags.push(flag.name);
+    if (!areas.includes(flag.name)) areas.push(flag.name);
   }
 
   return {
@@ -600,6 +608,7 @@ export function cleanRow(row: SheetRow): CleanedRow {
       cleanNameList("extraCategories", cells.extraCategories, at),
     ).values,
     areas: areas,
+    areaFlags,
     warnings,
   };
 }

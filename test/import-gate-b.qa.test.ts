@@ -834,29 +834,25 @@ describe("gate B: plan size caps (DoS)", () => {
     );
   }, 120_000);
 
-  it.fails(
-    "M-1: the preview refuses a file with more products than a commit accepts",
-    async () => {
-      stageFile(big);
-      const started = Date.now();
-      const result = await previewImport({
-        key: KEY,
-        defaultCategoryId: defaultCategory,
-      });
-      console.info(
-        `[gate B] preview of ${COUNT} products: ${Date.now() - started} ms, ${big.byteLength} bytes`,
+  it("M-1: the preview refuses a file with more products than a commit accepts", async () => {
+    stageFile(big);
+    const started = Date.now();
+    const result = await previewImport({
+      key: KEY,
+      defaultCategoryId: defaultCategory,
+    });
+    console.info(
+      `[gate B] preview of ${COUNT} products: ${Date.now() - started} ms, ${big.byteLength} bytes`,
+    );
+    // Either refused outright, or a plan the commit can take.
+    if (result.ok && result.data.kind === "plan") {
+      expect(result.data.plan.entries.length).toBeLessThanOrEqual(
+        MAX_IMPORT_PLAN_ENTRIES,
       );
-      // Either refused outright, or a plan the commit can take.
-      if (result.ok && result.data.kind === "plan") {
-        expect(result.data.plan.entries.length).toBeLessThanOrEqual(
-          MAX_IMPORT_PLAN_ENTRIES,
-        );
-      } else {
-        expect(result.ok).toBe(true);
-      }
-    },
-    180_000,
-  );
+    } else {
+      expect(result.ok).toBe(true);
+    }
+  }, 180_000);
 
   it("each commit batch re-parses the whole file (cost per batch, for the report)", async () => {
     const rows = Array.from({ length: 500 }, (_, i) => ({
@@ -896,67 +892,58 @@ describe("gate B: controlled template open items (ADR 0059)", () => {
     return out;
   }
 
-  it.fails(
-    "L-1: the Image note does not suggest Place in Cell (stored as richData, not imported)",
-    async () => {
-      const notes = [...(await comments()).values()].join("\n");
-      expect(notes).not.toMatch(/place in cell/i);
-    },
-  );
+  it("L-1: the Image note does not suggest Place in Cell (stored as richData, not imported)", async () => {
+    const notes = [...(await comments()).values()].join("\n");
+    expect(notes).not.toMatch(/place in cell/i);
+  });
 
-  it.fails(
-    "L-2: every header note fits its comment box (no clipped text on hover)",
-    async () => {
-      const zip = await JSZip.loadAsync(
-        await buildImportTemplate(TEMPLATE_INPUT),
-      );
-      const vml = await zip.file(/vmlDrawing\d+\.vml$/)[0]!.async("string");
-      const sizes = [
-        ...vml.matchAll(/width:([\d.]+)pt;height:([\d.]+)pt/g),
-      ].map((m) => ({ width: Number(m[1]), height: Number(m[2]) }));
-      const longest = Math.max(
-        ...[...(await comments()).values()].map((t) => t.length),
-      );
-      // Excel/WPS comment default: ~9pt Tahoma, ~5pt per character, ~12pt a line.
-      for (const { width, height } of sizes) {
-        const capacity = Math.floor(width / 5) * Math.floor(height / 12);
-        expect(capacity).toBeGreaterThanOrEqual(longest);
-      }
-    },
-  );
+  it("L-2: every header note fits its comment box (no clipped text on hover)", async () => {
+    const zip = await JSZip.loadAsync(
+      await buildImportTemplate(TEMPLATE_INPUT),
+    );
+    const vml = await zip.file(/vmlDrawing\d+\.vml$/)[0]!.async("string");
+    const sizes = [...vml.matchAll(/width:([\d.]+)pt;height:([\d.]+)pt/g)].map(
+      (m) => ({ width: Number(m[1]), height: Number(m[2]) }),
+    );
+    const longest = Math.max(
+      ...[...(await comments()).values()].map((t) => t.length),
+    );
+    // Excel/WPS comment default: ~9pt Tahoma, ~5pt per character, ~12pt a line.
+    for (const { width, height } of sizes) {
+      const capacity = Math.floor(width / 5) * Math.floor(height / 12);
+      expect(capacity).toBeGreaterThanOrEqual(longest);
+    }
+  });
 
-  it.fails(
-    "L-3: a renamed area column warns once (unknown_area), not once per row",
-    async () => {
-      const template = await buildImportTemplate({
-        ...TEMPLATE_INPUT,
-        areas: [...TEMPLATE_INPUT.areas, { name: "Gone Area" }],
-      });
-      const rows = Array.from({ length: 5 }, (_, i) => ({
-        row: {
-          "NO.": i + 1,
-          "Model Name": "Beam",
-          "Model No.": `UA-${i + 1}`,
-          "Area: Gone Area": "Yes",
-        } as TemplateRow,
-      }));
-      const file = await fillTemplate(template, rows);
-      const check = await checkImportFile(new Uint8Array(file));
-      if (!check.ok) throw new Error(check.reason);
-      const read = await readWorkbook(check.file);
-      if (!read.ok) throw new Error("not read");
-      const grouped = groupRows(read.rows.map(cleanRow), {
-        categories: TEMPLATE_INPUT.categories,
-        areas: TEMPLATE_INPUT.areas,
-        defaultCategoryId: "c-spot",
-      });
-      const all = [
-        ...grouped.warnings,
-        ...grouped.products.flatMap((p) => p.warnings),
-      ].filter((w) => w.code === "unknown_area");
-      expect(all).toHaveLength(1);
-    },
-  );
+  it("L-3: a renamed area column warns once (unknown_area), not once per row", async () => {
+    const template = await buildImportTemplate({
+      ...TEMPLATE_INPUT,
+      areas: [...TEMPLATE_INPUT.areas, { name: "Gone Area" }],
+    });
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      row: {
+        "NO.": i + 1,
+        "Model Name": "Beam",
+        "Model No.": `UA-${i + 1}`,
+        "Area: Gone Area": "Yes",
+      } as TemplateRow,
+    }));
+    const file = await fillTemplate(template, rows);
+    const check = await checkImportFile(new Uint8Array(file));
+    if (!check.ok) throw new Error(check.reason);
+    const read = await readWorkbook(check.file);
+    if (!read.ok) throw new Error("not read");
+    const grouped = groupRows(read.rows.map(cleanRow), {
+      categories: TEMPLATE_INPUT.categories,
+      areas: TEMPLATE_INPUT.areas,
+      defaultCategoryId: "c-spot",
+    });
+    const all = [
+      ...grouped.warnings,
+      ...grouped.products.flatMap((p) => p.warnings),
+    ].filter((w) => w.code === "unknown_area");
+    expect(all).toHaveLength(1);
+  });
 
   it("names that look like formulas stay plain text in the template", async () => {
     const zip = await JSZip.loadAsync(

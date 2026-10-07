@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import type { Types } from "mongoose";
 
 import { withoutRestrictedFilters } from "@/lib/admin/products";
-import { MAX_PRODUCT_IMAGES } from "@/lib/constants";
+import { MAX_IMPORT_PLAN_ENTRIES, MAX_PRODUCT_IMAGES } from "@/lib/constants";
 import { connectDb } from "@/lib/db";
 import { productInputSchema } from "@/lib/schemas/product";
 import { uniqueSlug, UniqueSlugError } from "@/lib/slug";
@@ -180,7 +180,36 @@ export async function planFromBytes(
   const read = await readWorkbook(check.file);
   if (!read.ok) return { kind: "refused", warnings: read.warnings };
 
-  const grouped = groupRows(read.rows.map(cleanRow), options);
+  const grouped = groupRows(read.rows.map(cleanRow), {
+    ...options,
+    areaColumns: read.sheets.flatMap((sheet) =>
+      sheet.columns.flatMap((column) =>
+        column.areaName === undefined
+          ? []
+          : [
+              {
+                sheet: sheet.name,
+                row: sheet.headerRow,
+                name: column.areaName,
+              },
+            ],
+      ),
+    ),
+  });
+  // The commit carries one hash per entry and accepts at most this many, so
+  // a bigger plan could be previewed but never saved: refuse it now, before
+  // the pictures and the database are touched.
+  if (grouped.products.length > MAX_IMPORT_PLAN_ENTRIES) {
+    return {
+      kind: "refused",
+      warnings: [
+        importWarning("too_many_products", {
+          sheet: null,
+          detail: `This file has ${grouped.products.length} products; one import takes at most ${MAX_IMPORT_PLAN_ENTRIES}. Split it into smaller files.`,
+        }),
+      ],
+    };
+  }
   const embedded = await readEmbeddedImages(
     check.file,
     read.sheets.map((sheet) => sheet.name),

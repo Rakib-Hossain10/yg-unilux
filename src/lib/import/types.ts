@@ -48,6 +48,8 @@ export const WARNING_CODES = {
   sheet_too_complex: "fatal",
   no_header: "fatal",
   missing_required_column: "fatal",
+  // plan (gate B M-1): more products than one commit accepts
+  too_many_products: "fatal",
   // error (blocks that product)
   invalid_product_no: "error",
   invalid_model_no: "error",

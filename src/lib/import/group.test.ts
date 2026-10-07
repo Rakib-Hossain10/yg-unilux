@@ -682,6 +682,81 @@ describe("template columns", () => {
     ]);
   });
 
+  describe("unknown `Area:` columns warn once per column, not per row", () => {
+    const flagged = (excelRow: number, no: string, text: string) =>
+      cleanRow({
+        sheet: "Sheet1",
+        row: excelRow,
+        hidden: false,
+        cells: {
+          productNo: no,
+          family: "Arc",
+          modelNo: `AR-0${no}`,
+          cct: "3000K",
+        },
+        areaFlags: [
+          { name: "Retail", text: "Yes" },
+          { name: "Moon", text },
+        ],
+      });
+
+    it("reports a selected unknown area column once, at its first row", () => {
+      const result = groupRows(
+        [
+          flagged(2, "1", "Yes"),
+          flagged(3, "2", "Yes"),
+          flagged(4, "3", "Yes"),
+        ],
+        LOOKUPS,
+      );
+      const all = [
+        ...result.warnings,
+        ...result.products.flatMap((p) => p.warnings),
+      ].filter((w) => w.code === "unknown_area");
+      expect(all.map((w) => [w.sheet, w.row, w.column])).toEqual([
+        ["Sheet1", 2, "areaFlag"],
+      ]);
+      expect(result.products.map((p) => p.areas)).toEqual([
+        ["a2"],
+        ["a2"],
+        ["a2"],
+      ]);
+    });
+
+    it("with the header names passed, reports the column at its header row even when no row says Yes", () => {
+      const result = groupRows([flagged(2, "1", "No"), flagged(3, "2", "No")], {
+        ...LOOKUPS,
+        areaColumns: [
+          { sheet: "Sheet1", row: 1, name: "Retail" },
+          { sheet: "Sheet1", row: 1, name: "Moon" },
+        ],
+      });
+      expect(
+        result.warnings
+          .filter((w) => w.code === "unknown_area")
+          .map((w) => [w.sheet, w.row, w.column]),
+      ).toEqual([["Sheet1", 1, "areaFlag"]]);
+      expect(
+        result.products.flatMap((p) => p.warnings).map((w) => w.code),
+      ).not.toContain("unknown_area");
+    });
+
+    it("still warns per row for a name typed in the free-text Areas column", () => {
+      const result = groupRows(
+        [
+          row(2, { productNo: "1", modelNo: "A-1", areas: "Moon" }),
+          row(3, { productNo: "2", modelNo: "A-2", areas: "Moon" }),
+        ],
+        LOOKUPS,
+      );
+      expect(
+        result.products.flatMap((p) =>
+          p.warnings.filter((w) => w.code === "unknown_area").map((w) => w.row),
+        ),
+      ).toEqual([2, 3]);
+    });
+  });
+
   it("does not mark extra categories as from the sheet when the cell only repeats the main category", () => {
     const p = product({
       category: "Spot Lights",
