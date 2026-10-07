@@ -6,7 +6,9 @@
 import {
   CLOUDINARY_AREA_FOLDER,
   CLOUDINARY_PRODUCT_FOLDER,
+  IMPORT_STAGED_MAX_AGE_MS,
   R2_DATASHEETS_PREFIX,
+  R2_IMPORTS_PREFIX,
   R2_INCOMING_PREFIX,
 } from "./constants";
 import { isPublicId } from "./cloudinary-ids";
@@ -54,20 +56,42 @@ export function isOlderThan(
   return now.getTime() - time > maxAgeMs;
 }
 
+/* Keys strictly under `prefix` (not the bare prefix) older than `maxAgeMs`. */
+function selectStaleUnder(
+  prefix: string,
+  objects: readonly StoredObject[],
+  now: Date,
+  maxAgeMs: number,
+): string[] {
+  return objects
+    .filter(
+      (object) =>
+        object.key.startsWith(prefix) &&
+        object.key.length > prefix.length &&
+        isOlderThan(object.lastModified, now, maxAgeMs),
+    )
+    .map((object) => object.key);
+}
+
 /** Keys under `incoming/` older than 24 h (abandoned presigned uploads). */
 export function selectStaleIncoming(
   objects: readonly StoredObject[],
   now: Date,
   maxAgeMs: number = INCOMING_MAX_AGE_MS,
 ): string[] {
-  return objects
-    .filter(
-      (object) =>
-        object.key.startsWith(R2_INCOMING_PREFIX) &&
-        object.key.length > R2_INCOMING_PREFIX.length &&
-        isOlderThan(object.lastModified, now, maxAgeMs),
-    )
-    .map((object) => object.key);
+  return selectStaleUnder(R2_INCOMING_PREFIX, objects, now, maxAgeMs);
+}
+
+/**
+ * Keys under `imports/` older than 24 h: staged bulk import files that were
+ * never finished (Phase 3). Like `incoming/`, nothing else lives there.
+ */
+export function selectStaleImports(
+  objects: readonly StoredObject[],
+  now: Date,
+  maxAgeMs: number = IMPORT_STAGED_MAX_AGE_MS,
+): string[] {
+  return selectStaleUnder(R2_IMPORTS_PREFIX, objects, now, maxAgeMs);
 }
 
 /**
@@ -222,8 +246,9 @@ export function parseSweepArgs(
 /** Cloudinary: refuse to delete more than this share of the listed assets. */
 export const MAX_UNGUARDED_IMAGE_SHARE = 0.2;
 /**
- * R2 `incoming/`: every object there older than 24 h is junk, so a share
- * makes no sense; an absolute count catches a prefix or listing bug instead.
+ * R2 `incoming/` + `imports/` (one combined run): every object there older
+ * than 24 h is junk, so a share makes no sense; an absolute count catches a
+ * prefix or listing bug instead.
  */
 export const MAX_UNGUARDED_INCOMING_COUNT = 100;
 

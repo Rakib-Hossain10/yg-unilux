@@ -173,13 +173,12 @@ describe("R2 key shapes", () => {
     expect(INCOMING_KEY_PATTERN.test(key)).toBe(false);
   });
 
-  // The pattern is built in a template literal, where `\.` is just `.`, so the
-  // dot before xlsx matches any character (finding L-1). Not exploitable (the
-  // key can't leave incoming/), but the shape is looser than documented.
-  it.fails("incoming pattern requires a literal dot before xlsx", () => {
+  // Finding L-1 (fixed in Phase 3 T6): the pattern is built in a template
+  // literal, where `\.` is just `.`; it now writes `\\.` so the dot is literal.
+  it("incoming pattern requires a literal dot before xlsx", () => {
     expect(INCOMING_KEY_PATTERN.test(`incoming/${UUID_A}Xxlsx`)).toBe(false);
   });
-  it.fails("datasheet pattern requires a literal dot before xlsx", () => {
+  it("datasheet pattern requires a literal dot before xlsx", () => {
     expect(DATASHEET_KEY_PATTERN.test(`datasheets/${UUID_A}_xlsx`)).toBe(false);
   });
 });

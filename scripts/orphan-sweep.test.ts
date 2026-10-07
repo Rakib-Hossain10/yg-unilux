@@ -11,6 +11,7 @@ import {
   parseSweepArgs,
   selectOrphanDatasheetObjects,
   selectOrphanImages,
+  selectStaleImports,
   selectStaleIncoming,
 } from "../src/lib/orphan-sweep";
 
@@ -64,6 +65,49 @@ describe("selectStaleIncoming", () => {
       "incoming/a",
       "incoming/b",
     ]);
+  });
+});
+
+describe("selectStaleImports", () => {
+  const key = (u: string) => `imports/${u}.xlsx`;
+
+  it("selects staged import files strictly older than 24 h, keeps newer ones", () => {
+    const keys = selectStaleImports(
+      [
+        { key: key(UUID_1), lastModified: ago(24 * HOUR) },
+        { key: key(UUID_2), lastModified: ago(24 * HOUR + 1) },
+        { key: key(UUID_3), lastModified: ago(23 * HOUR) },
+        { key: "imports/old-junk", lastModified: ago(100 * HOUR) },
+      ],
+      NOW,
+    );
+    expect(keys).toEqual([key(UUID_2), "imports/old-junk"]);
+  });
+
+  it("never selects keys outside imports/ or without a known age", () => {
+    const keys = selectStaleImports(
+      [
+        { key: `incoming/${UUID_1}.xlsx`, lastModified: ago(100 * HOUR) },
+        { key: `datasheets/${UUID_1}.xlsx`, lastModified: ago(100 * HOUR) },
+        { key: `importsX${UUID_1}.xlsx`, lastModified: ago(100 * HOUR) },
+        { key: "imports-old/x", lastModified: ago(100 * HOUR) },
+        { key: "imports/", lastModified: ago(100 * HOUR) },
+        { key: key(UUID_1), lastModified: undefined },
+        { key: key(UUID_2), lastModified: new Date("nope") },
+        { key: key(UUID_3), lastModified: ago(100 * HOUR) },
+      ],
+      NOW,
+    );
+    expect(keys).toEqual([key(UUID_3)]);
+  });
+
+  it("the incoming selection never takes imports/ keys", () => {
+    expect(
+      selectStaleIncoming(
+        [{ key: key(UUID_1), lastModified: ago(100 * HOUR) }],
+        NOW,
+      ),
+    ).toEqual([]);
   });
 });
 

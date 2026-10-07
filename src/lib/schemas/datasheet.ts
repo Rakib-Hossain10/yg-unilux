@@ -16,14 +16,19 @@ import { objectIdSchema } from "./common";
 const UUID_V4 =
   "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
+/*
+ * In a template literal `\.` is just `.`, so the dot is written `\\.` to
+ * reach the RegExp as an escaped, literal dot (Phase 2 gate C L-1).
+ */
+
 /** `incoming/<uuid v4>.xlsx`: where the browser's presigned PUT lands. */
 export const INCOMING_KEY_PATTERN = new RegExp(
-  `^${R2_INCOMING_PREFIX}${UUID_V4}\.xlsx$`,
+  `^${R2_INCOMING_PREFIX}${UUID_V4}\\.xlsx$`,
 );
 
 /** `datasheets/<uuid v4>.xlsx`: where a verified datasheet is stored. */
 export const DATASHEET_KEY_PATTERN = new RegExp(
-  `^${R2_DATASHEETS_PREFIX}${UUID_V4}\.xlsx$`,
+  `^${R2_DATASHEETS_PREFIX}${UUID_V4}\\.xlsx$`,
 );
 
 export const MAX_DATASHEET_FILE_NAME_LENGTH = 255;

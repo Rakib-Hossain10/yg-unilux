@@ -8,7 +8,13 @@ import { mongoose } from "@/lib/db";
 import { AuditLogModel, MAX_AUDIT_META_BYTES } from "@/models/audit-log";
 import { setupMemoryDb } from "../../test/helpers/memory-db";
 
-import { AuditInputError, recordAudit, type AuditInput } from "./audit";
+import {
+  ADMIN_AUDIT_ACTIONS,
+  AUDIT_TARGET_TYPES,
+  AuditInputError,
+  recordAudit,
+  type AuditInput,
+} from "./audit";
 
 setupMemoryDb("yg_audit_test");
 
@@ -63,6 +69,35 @@ describe("recordAudit", () => {
     const entry = await AuditLogModel.findOne({}).lean();
     expect(entry).toMatchObject({ action: "settings.columns.update" });
     expect(entry?.meta).toBeUndefined();
+  });
+
+  it("accepts an import batch addressed by its staged file's uuid, with count/id meta", async () => {
+    const uuid = "3f1c2a4e-9b7d-4c1e-8a2b-5d6e7f809a1b";
+    // The plan's meta at batch size 20: counts plus 20 product ids.
+    const productIds = Array.from({ length: 20 }, () =>
+      new mongoose.Types.ObjectId().toHexString(),
+    );
+    await recordAudit(
+      input({
+        action: "import.commit",
+        target: { type: "import", id: uuid },
+        meta: {
+          batch: 0,
+          created: 12,
+          updated: 6,
+          unchanged: 2,
+          blocked: 0,
+          imagesAdded: 14,
+          variantsRemoved: 0,
+          productIds,
+        },
+      }),
+    );
+    const entry = await AuditLogModel.findOne({}).lean();
+    expect(entry).toMatchObject({
+      action: "import.commit",
+      target: { type: "import", id: uuid },
+    });
   });
 
   it("accepts meta of exactly 4096 bytes and rejects 4097", async () => {
@@ -123,6 +158,40 @@ describe("recordAudit", () => {
           target: { type: "settings", id: "+85291234567" },
         },
       ],
+      [
+        "an import target addressed by an ObjectId",
+        { action: "import.commit", target: { type: "import", id: PRODUCT } },
+      ],
+      [
+        "an import target that is the whole staged key",
+        {
+          action: "import.commit",
+          target: {
+            type: "import",
+            id: "imports/3f1c2a4e-9b7d-4c1e-8a2b-5d6e7f809a1b.xlsx",
+          },
+        },
+      ],
+      [
+        "an import target with an upper-case uuid",
+        {
+          action: "import.commit",
+          target: {
+            type: "import",
+            id: "3F1C2A4E-9B7D-4C1E-8A2B-5D6E7F809A1B",
+          },
+        },
+      ],
+      ["an import action on a product target", { action: "import.commit" }],
+      [
+        "a product action on an import target",
+        {
+          target: {
+            type: "import",
+            id: "3f1c2a4e-9b7d-4c1e-8a2b-5d6e7f809a1b",
+          },
+        },
+      ],
       ["a meta key that is a Mongo operator", { meta: { $where: 1 } }],
       ["a meta key with a dot", { meta: { "a.b": 1 } }],
       [
@@ -167,5 +236,19 @@ describe("recordAudit", () => {
       expect((error as Error).message).not.toContain("sss");
       expect(await AuditLogModel.countDocuments({})).toBe(0);
     });
+  });
+});
+
+describe("audit vocabulary", () => {
+  it("has the import action and target type (Phase 3)", () => {
+    expect(ADMIN_AUDIT_ACTIONS).toContain("import.commit");
+    expect(AUDIT_TARGET_TYPES).toContain("import");
+  });
+
+  it("every admin action starts with a target type, so each one can be recorded", () => {
+    const types: readonly string[] = AUDIT_TARGET_TYPES;
+    for (const action of ADMIN_AUDIT_ACTIONS) {
+      expect(types).toContain(action.split(".")[0]);
+    }
   });
 });

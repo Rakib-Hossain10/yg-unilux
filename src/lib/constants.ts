@@ -48,6 +48,19 @@ export const R2_INCOMING_PREFIX = "incoming/";
 export const R2_DATASHEETS_PREFIX = "datasheets/";
 
 /*
+ * Bulk import staging (Phase 3, T6). The browser PUTs the admin's .xlsx to a
+ * server-chosen `imports/<uuid v4>.xlsx` with a presigned URL (the file can
+ * be larger than Vercel's request body cap). Preview and commit re-read it
+ * from there; nothing else ever lives under this prefix, so anything older
+ * than IMPORT_STAGED_MAX_AGE_MS is an abandoned import and is swept.
+ */
+export const R2_IMPORTS_PREFIX = "imports/";
+/** A presigned import PUT is valid for 5 minutes, like the datasheet one. */
+export const IMPORT_UPLOAD_TTL_SECONDS = 300;
+/** Staged import files older than 24 h are deleted by `sweep:incoming`. */
+export const IMPORT_STAGED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/*
  * Product form caps. String lengths mirror the maxlength values in
  * src/models/product.ts (a longer value would be rejected by Mongoose anyway);
  * the array caps are ours, so one request cannot carry an unbounded document.
