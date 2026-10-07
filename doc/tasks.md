@@ -5,8 +5,21 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
 ## ▶ Resume here (next session)
 - **Branch:** `phase-3` (from `main`). **Phase 2 is merged** (PR #11, `b689cb7`, 2026-10-07; QA gates A–E passed, real-credential smoke passed). Phase 1 merged earlier (PR #9).
-- **Next: PLAN Phase 3 (bulk import) in plan mode** — write `doc/phase-3-plan.md` (tasks, owners, models, tests, QA gates, risks, ADRs from 0054), ask the user to approve, then build. Owner for import logic: `import-engineer`. Read the Phase 3 checklist below, CLAUDE.md "Bulk import rules", and the client's Arc sheet if provided.
-- **Phase 3 must-dos (do first or plan them in):**
+- **Phase 3 plan APPROVED** (2026-10-07, all six defaults accepted): `doc/phase-3-plan.md` (T0–T11; QA gates A after T5, B after T8, C at exit; ADRs 0055–0058).
+  - **T0 done:**
+    - the client sheet is at `doc/reference/client-sample-sheet.xlsx`, LOCAL ONLY, gitignored (`/doc/reference/*.xlsx`), never commit it;
+    - studied: plan section "Fixture findings";
+    - fixture path fixed in `import-engineer.md`;
+    - ADR 0054 written (product page layout).
+  - **Next: T1** (`backend-architect`, Opus): case-insensitive unique index on `variants.modelNo` (collation en/2) with case-insensitive lookups, `ProductImage.sourceSha256`, script `check:model-nos`, and ADR 0055 text. Then T2 (`import-engineer`: reader + synthetic fixture).
+  - **English only (user, 2026-10-07):**
+    - no Chinese is ever stored;
+    - the sheet puts English first, then a blank line, then Chinese; the blank-line cut + CJK strip handle it;
+    - multi-line cells use a per-column split policy (options / options+slash / join), not always options.
+  - **User must do before T1 hits the real DB:** run `npm run check:model-nos`, then drop the index `variants.modelNo_1` in Atlas, then `npm run db:indexes`.
+  - **Ask the client:** Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, and the "High Effciency Reflector" typo.
+  - Subagents: `import-engineer`, `backend-architect`, `admin-panel-builder`, `qa-security-reviewer`. No new subagent. All on Opus.
+- **Phase 3 must-dos (all planned in, see the plan's last section):**
   - Fix gate B **L-A**: model numbers are case-insensitive within a product but case-sensitive across products (unique index on `variants.modelNo`); import upserts by model no., so fix with a collation or normalised case. The `it.fails` in `test/admin-products.qa.test.ts` becomes a plain `it`.
   - The import MUST call `withoutRestrictedFilters` (`src/lib/admin/products.ts`) so restricted columns never get filter numbers.
   - Import-preview images uploaded to Cloudinary and not confirmed within 24 h would be swept by `sweep:cloudinary`; design the preview step with this in mind (or confirm in the same sitting / track pending ids).
@@ -143,7 +156,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 3 — Bulk import — planning (Phase 2 merged 2026-10-07)
+**Current focus:** Phase 3 — Bulk import — plan approved, T0 done, next T1 (Phase 2 merged 2026-10-07)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -240,8 +253,11 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Tests: Zod schemas, file signature, auth guard on every admin action
 - **Exit:** full product built by hand with images and attached datasheet
 
-## Phase 3 — Bulk import
-- [ ] Get client's Arc sheet as fixture
+## Phase 3 — Bulk import — plan: `doc/phase-3-plan.md` (T0–T11, draft awaiting approval)
+- [x] Plan drafted (2026-10-07)
+- [x] Plan approved by the user (Q1–Q6: all defaults, 2026-10-07)
+- [x] T0: client sheet received (local only, gitignored), studied, ADR 0054 (product page layout)
+- [ ] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -254,6 +270,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Mega-menu (icon strip + subcategories)
 - [ ] Listing pages + URL filters, sort, pagination; area pages
 - [ ] Product page: gallery/zoom, variant switch, public specs, family strip, related
+- [ ] Product page layout (client, ADR 0054): pink columns (Model Name, Model No., Housing Material, Housing Color/Finish, Reflector Color, Cut-out Size, CCT) in a right-side quick-spec panel; green columns in a full spec table below. Add `placement` to `SPEC_COLUMNS`. Restricted columns stay in the dynamic block. The user called this "Phase 6"; in our roadmap the product page is Phase 4.
 - [ ] Dynamic `<Suspense>` block: restricted specs + datasheet button states
 - [ ] Search overlay: Atlas Search + regex fallback — ADR 0006
 - [ ] Playwright: restricted-leak check, filters, search by variant model no.
@@ -301,14 +318,16 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 ---
 
 ## Needed from user / client
-- [ ] Client's Arc spec sheet (.xlsx) — before Phase 3
+- [x] Client's Arc spec sheet (.xlsx), received 2026-10-07, at `doc/reference/` (local only)
 - [ ] MongoDB Atlas, Cloudinary, Cloudflare R2, Resend, Vercel accounts — before Phases 1–5
 - [ ] Company email (whistleblower + request alerts)
 - [ ] Logo files (SVG preferred) — Phase 1
 - [ ] Categories 8–10; empty subcategories (Hanging 3rd, Track Light, Motorized)
-- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
+- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07: Phase 3 plan approved (all six defaults). T0: client sheet received (WPS file; drawing-anchored PNGs; no merges; English before Chinese; Nos. 80/81 lack model nos.), gitignored, studied into the plan. ADR 0054 logs the client's pink/green product page layout for Phase 4. Next: T1.
+- 2026-10-07 — Phase 3 planned: `doc/phase-3-plan.md` (stateless preview + planHash, idempotent commit batches, images uploaded at commit with sha256 dedupe, field-ownership table, 6 questions for the user). `/find-skills`: only the installed `xlsx` skill applies. Existing subagents reused. Awaiting review; nothing built.
 - 2026-10-07 — Phase 2 merged to `main` (PR #11, `b689cb7`). `phase-3` branched. Next: plan Phase 3 in plan mode.
 - 2026-10-07 — Real-credential smoke PASS (R2 conditional read/copy, Cloudinary upload, sweep dry runs); PR #11 CI green. Awaiting the user's merge approval.
 - 2026-10-07 — Gate E fixes (ADR 0053): sweep guard + ETag-pinned datasheet finalize. 2094 unit + 133 e2e green. Next: push, PR.

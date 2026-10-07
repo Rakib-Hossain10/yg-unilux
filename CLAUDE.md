@@ -57,7 +57,7 @@ doc/                 tasks.md (tracker) + decisions/ (ADRs)
 
 ### Bulk import rules (admin uploads the client's sheet as-is)
 - English only: keep text before the first blank line in a cell; strip CJK characters from mixed cells ("Lifud 莱福德" → "Lifud").
-- Multi-line cells → option arrays (CCT "3000K\n4000K", beam "20°\n30°\n40°\n60°", finish "White/Black").
+- Multi-line cells → option arrays (CCT "3000K\n4000K", beam "20°\n30°\n40°\n60°", finish "White/Black"), but the split is per column: some columns join their lines into one value ("Die Casting\nAluminium + PC"). See `doc/phase-3-plan.md` and ADR 0056.
 - Values equal across a product's rows → product-level specs; values that differ → variant fields.
 - "-" and blank = not applicable → hidden.
 - Extract embedded images by row anchor (xl/drawings) and upload to Cloudinary; admin adds more images later.
