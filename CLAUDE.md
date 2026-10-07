@@ -55,13 +55,13 @@ doc/                 tasks.md (tracker) + decisions/ (ADRs)
 - Filters: CCT, CRI, Beam Angle, UGR, Wattage, IP Rating (+ trackSize for Magnetic Track). Store parsed numeric values alongside display strings for filtering.
 - Extra product info outside the sheet goes in `extraSpecs: {group, label, value}[]`.
 
-### Bulk import rules (admin uploads the client's sheet as-is)
+### Bulk import rules (the client fills our controlled template — ADR 0059; the tolerant rules below stay as the safety net)
 - English only: keep text before the first blank line in a cell; strip CJK characters from mixed cells ("Lifud 莱福德" → "Lifud").
 - Multi-line cells → option arrays (CCT "3000K\n4000K", beam "20°\n30°\n40°\n60°", finish "White/Black"), but the split is per column: some columns join their lines into one value ("Die Casting\nAluminium + PC"). See `doc/phase-3-plan.md` and ADR 0056.
 - Values equal across a product's rows → product-level specs; values that differ → variant fields.
 - "-" and blank = not applicable → hidden.
 - Extract embedded images by row anchor (xl/drawings) and upload to Cloudinary; admin adds more images later.
-- Category and areas are not in the sheet → optional extra template columns, else assigned after import.
+- Category, Extra Category 1–2 and one Yes/No column per area come from strict dropdowns in the downloadable template (`/api/admin/import/template`); a missing value → the default category / assigned after import.
 - Always a preview step with per-row warnings (missing specs, no image, duplicate model no.) before saving. Re-import upserts by model no.; never duplicates.
 - All text is plain English strings.
 - Datasheets are their own collection (ADR 0001): `datasheets` = storage key, file name, size, mime type, updatedAt, uploadedBy. Products reference it with `datasheetId`; one file can be attached to many products (e.g. a whole family sheet). Replacing a file keeps the storage key. Deleting a datasheet still used by products is blocked. Same file for every approved customer. Accept .xlsx only (check file signature, not just extension), max 10 MB. No `datasheetId` → show "Datasheet coming soon".
