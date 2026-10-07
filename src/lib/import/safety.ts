@@ -289,6 +289,15 @@ function checkEntryIdentity(
     if (at + 30 + localLength > bytes.length) return "corrupt";
     const localName = bytes.subarray(at + 30, at + 30 + localLength);
     if (!sameBytes(localName, entry.nameBytes)) return "inconsistent_entries";
+    // JSZip stores each entry under utils.resolve(name): "." and empty
+    // segments dropped, ".." applied. A name that resolve changes would be
+    // read by exceljs as another part than the one we checked and guarded
+    // ("xl/./worksheets/sheet1.xml", "xl/a/../workbook.xml"), so only
+    // canonical names pass. Backslashes are not separators to JSZip but are
+    // never in an OPC part name either: refused too.
+    if (entry.name.includes("\\") || jszipResolve(entry.name) !== entry.name) {
+      return "inconsistent_entries";
+    }
     // OPC part names are case-insensitive (images.ts looks parts up that
     // way), so "XL/WORKBOOK.XML" is the same part as "xl/workbook.xml".
     const key = entry.name.replace(/^\/+/, "").toLowerCase();
@@ -296,6 +305,28 @@ function checkEntryIdentity(
     seen.add(key);
   }
   return null;
+}
+
+/*
+ * JSZip's utils.resolve (jszip/lib/utils.js), which load.js applies to every
+ * entry name: "." and empty segments are dropped (an empty first or last
+ * segment is kept: a leading "/" or a folder's trailing "/"), ".." removes
+ * the segment before it.
+ */
+function jszipResolve(path: string): string {
+  const parts = path.split("/");
+  const result: string[] = [];
+  parts.forEach((part, index) => {
+    if (
+      part === "." ||
+      (part === "" && index !== 0 && index !== parts.length - 1)
+    ) {
+      return;
+    }
+    if (part === "..") result.pop();
+    else result.push(part);
+  });
+  return result.join("/");
 }
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {

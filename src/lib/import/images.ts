@@ -250,7 +250,13 @@ function storeWarning(sheet: string | null, detail: string): ImportWarning {
   return importWarning("unsupported_image_store", { sheet, detail });
 }
 
+/* The part exceljs 4.4 reads for a workbook relationship target. */
+function exceljsSheetPart(target: string): string {
+  return `xl/${target.replace(/^(\s|\/xl\/)+/, "")}`;
+}
+
 /* Sheet name → its worksheet part path, from the workbook and its rels. */
+
 function sheetPartsByName(pkg: Package): Map<string, string> | null {
   const workbook = pkg.xml("xl/workbook.xml");
   const rels = pkg.relationships("xl/workbook.xml");
@@ -263,6 +269,11 @@ function sheetPartsByName(pkg: Package): Map<string, string> | null {
     const rel = id === undefined ? undefined : rels.get(id);
     if (name === undefined || rel === undefined || rel.external) continue;
     if (!RELATIONSHIP_WORKSHEET.test(rel.type)) continue;
+    // exceljs finds the sheet's part by plain string splicing, not by
+    // resolving the target (workbook-xform.js reconcile). Where the two
+    // differ, rows and pictures could come from different parts, so the
+    // sheet's pictures are not read (reported as not found).
+    if (exceljsSheetPart(rel.rawTarget) !== rel.target) continue;
     if (!parts.has(name)) parts.set(name, rel.target);
   }
   return parts;

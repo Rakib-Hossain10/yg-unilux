@@ -123,10 +123,23 @@ describe("relationships", () => {
     );
     const map = readRelationships(rels!, "xl/drawings/drawing1.xml");
     expect([...map.entries()]).toEqual([
-      ["rId1", { type: "t/image", target: "xl/media/a.png", external: false }],
+      [
+        "rId1",
+        {
+          type: "t/image",
+          target: "xl/media/a.png",
+          rawTarget: "../media/a.png",
+          external: false,
+        },
+      ],
       [
         "rId2",
-        { type: "t/image", target: "https://x.test/a.png", external: true },
+        {
+          type: "t/image",
+          target: "https://x.test/a.png",
+          rawTarget: "https://x.test/a.png",
+          external: true,
+        },
       ],
     ]);
   });

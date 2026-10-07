@@ -213,6 +213,8 @@ export interface Relationship {
   type: string;
   /** Package path (no leading "/") for an internal target; the raw URL for an external one. */
   target: string;
+  /** The Target attribute's value (XML entities decoded), unresolved. */
+  rawTarget: string;
   external: boolean;
 }
 
@@ -238,11 +240,13 @@ export function readRelationships(
     if (id === undefined || target === undefined || out.has(id)) continue;
     const type = rel.attrs.Type ?? "";
     if (rel.attrs.TargetMode === "External") {
-      out.set(id, { type, target, external: true });
+      out.set(id, { type, target, rawTarget: target, external: true });
       continue;
     }
     const path = resolveTarget(sourcePart, target);
-    if (path !== null) out.set(id, { type, target: path, external: false });
+    if (path !== null) {
+      out.set(id, { type, target: path, rawTarget: target, external: false });
+    }
   }
   return out;
 }

@@ -282,50 +282,42 @@ describe("gate A re-check: entry names JSZip resolves", () => {
     expect(outcome).toBeLessThan(2000);
   }, 60_000);
 
-  it.fails(
-    "[Medium, T2] guards a worksheet whose name has a '.' segment (xl/./worksheets/sheet1.xml)",
-    async () => {
-      // 220,000 merged cells: over the 100,000 cap, so a guarded sheet is
-      // refused. Today it is accepted and exceljs applies the merge (the
-      // sheet reads 98+ extra rows from a range like C3:XFD100).
-      const bytes = await rawFixture((parts) =>
-        [...parts].map(([name, data]): [string, Uint8Array] =>
-          name === SHEET
-            ? [
-                "xl/./worksheets/sheet1.xml",
-                bytesOf(
-                  afterSheetData(
-                    '<mergeCells count="1"><mergeCell ref="AH20:AH220020"/></mergeCells>',
-                  )(text(data)),
-                ),
-              ]
-            : [name, data],
-        ),
-      );
-      expect(await safeOutcome(bytes)).toBe("refused");
-    },
-    60_000,
-  );
+  it("[Medium, T2] guards a worksheet whose name has a '.' segment (xl/./worksheets/sheet1.xml)", async () => {
+    // 220,000 merged cells: over the 100,000 cap, so a guarded sheet is
+    // refused. Today it is accepted and exceljs applies the merge (the
+    // sheet reads 98+ extra rows from a range like C3:XFD100).
+    const bytes = await rawFixture((parts) =>
+      [...parts].map(([name, data]): [string, Uint8Array] =>
+        name === SHEET
+          ? [
+              "xl/./worksheets/sheet1.xml",
+              bytesOf(
+                afterSheetData(
+                  '<mergeCells count="1"><mergeCell ref="AH20:AH220020"/></mergeCells>',
+                )(text(data)),
+              ),
+            ]
+          : [name, data],
+      ),
+    );
+    expect(await safeOutcome(bytes)).toBe("refused");
+  }, 60_000);
 
-  it.fails(
-    "[Medium, T2] refuses a second workbook part that resolves onto xl/workbook.xml",
-    async () => {
-      const bytes = await rawFixture((parts) => {
-        const workbook = text(parts.get("xl/workbook.xml"));
-        const evil = workbook.replace(
-          "</sheets>",
-          '</sheets><definedNames><definedName name="x">Sheet1!$A$1:$B$2</definedName></definedNames>',
-        );
-        return [...parts, ["xl/a/../workbook.xml", bytesOf(evil)]];
-      });
-      const result = await checkImportFile(bytes);
-      if (!result.ok) return; // refused: fixed
-      const read = await readWorkbook(result.file);
-      // The guard strips every <definedNames>; exceljs must see none.
-      expect(read.ok && read.workbook.definedNames.model).toEqual([]);
-    },
-    60_000,
-  );
+  it("[Medium, T2] refuses a second workbook part that resolves onto xl/workbook.xml", async () => {
+    const bytes = await rawFixture((parts) => {
+      const workbook = text(parts.get("xl/workbook.xml"));
+      const evil = workbook.replace(
+        "</sheets>",
+        '</sheets><definedNames><definedName name="x">Sheet1!$A$1:$B$2</definedName></definedNames>',
+      );
+      return [...parts, ["xl/a/../workbook.xml", bytesOf(evil)]];
+    });
+    const result = await checkImportFile(bytes);
+    if (!result.ok) return; // refused: fixed
+    const read = await readWorkbook(result.file);
+    // The guard strips every <definedNames>; exceljs must see none.
+    expect(read.ok && read.workbook.definedNames.model).toEqual([]);
+  }, 60_000);
 });
 
 const REAL_SHEET =

@@ -196,6 +196,24 @@ describe("readEmbeddedImages + attachImages on the synthetic client sheet", () =
 });
 
 describe("input", () => {
+  it("reads no pictures for a sheet whose part exceljs would resolve differently", async () => {
+    // We resolve "worksheets/../worksheets/sheet1.xml" to the real sheet;
+    // exceljs splices it literally and finds no part. Rows and pictures must
+    // never come from different parts, so the pictures are not read.
+    const bytes = await patchZip(await buildFixture(), {
+      "xl/_rels/workbook.xml.rels": (xml) =>
+        xml.replace(
+          'Target="worksheets/sheet1.xml"',
+          'Target="worksheets/../worksheets/sheet1.xml"',
+        ),
+    });
+    const embedded = await readEmbeddedImages(await checked(bytes), ["Sheet1"]);
+    expect(embedded.anchors).toEqual([]);
+    expect(embedded.warnings.map((w) => [w.code, w.sheet])).toEqual([
+      ["unsupported_image_store", "Sheet1"],
+    ]);
+  });
+
   it("never reads bytes that did not come from checkImportFile", async () => {
     const forged = {
       bytes: await buildFixture(),

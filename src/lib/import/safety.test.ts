@@ -371,6 +371,31 @@ describe("checkImportFile sees what JSZip sees", () => {
     expect(await reasonOf(rawZip(entries))).toBe("inconsistent_entries");
   });
 
+  it("refuses a name JSZip would resolve to another part", async () => {
+    for (const name of [
+      "xl/./worksheets/sheet1.xml",
+      "xl/a/../workbook.xml",
+      "xl//worksheets/sheet1.xml",
+      "./xl/a.xml",
+      "xl/../../a.xml",
+      "xl\\worksheets\\sheet1.xml",
+    ]) {
+      const entries = [...base(), { name, data: enc.encode("<b/>") }];
+      expect(await reasonOf(rawZip(entries)), name).toBe(
+        "inconsistent_entries",
+      );
+    }
+  });
+
+  it("still accepts folder entries and a leading slash JSZip keeps", async () => {
+    const entries = [
+      ...base(),
+      { name: "xl/media/", data: new Uint8Array() },
+      { name: "/docProps/app.xml", data: enc.encode("<b/>") },
+    ];
+    expect(await reasonOf(rawZip(entries))).toBe("ok");
+  });
+
   it("refuses a Unicode Path extra field (JSZip would use that name)", async () => {
     const entries = base();
     entries[2] = {
