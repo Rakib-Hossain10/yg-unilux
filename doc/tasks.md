@@ -23,7 +23,19 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - synthetic fixture `test/fixtures/import/build.ts` + `raw-zip.ts`;
     - the real-sheet test passes locally (33 headers, 12 rows, 0 warnings) and is skipped in CI;
     - 2237 unit green (4 expected-fail, 1 skipped).
-  - **Next: T3** (`import-engineer`, Opus): `clean.ts`, split policies in `columns.ts`, `numbers.ts` (pure, table-driven), plus ADR 0056 text. Then T4 (grouping + golden No. 76).
+  - **T3 done** (`4c9821f`, ADR 0056):
+    - `clean.ts` (`cleanRow` → `CleanedRow`), `SPLIT_POLICY` in `columns.ts`, `numbers.ts` (`parseFilterNumbers`, `filtersFromSpecs`);
+    - `FILTER_KEY_BY_SPEC` moved to `src/models/spec-columns.ts`;
+    - the property test proves zero CJK on the real sheet;
+    - 2452 unit green (4 expected-fail, 1 skipped).
+  - **Next: T4** (`import-engineer`, Opus): `src/lib/import/group.ts`.
+    - Group rows into products by `NO.` (blank = continuation; blank rows were already skipped).
+    - Shared vs per-variant values (blank and "-" are already equal: not-applicable keys are absent).
+    - Base model code, slug, name, variant labels, template category/area resolution (lookups passed in), trackSize rule, row warnings.
+    - Block a product on `invalid_model_no` / `invalid_product_no` / `missing_model_no` / `duplicate_model_no` (use `modelNoKey`) / `orphan_row`.
+    - Optionally warn when a model no. contains a space.
+    - The golden No. 76 test runs on the synthetic fixture and on the real sheet.
+    - Then T5 (images) → QA gate A (T1–T5).
   - **Carry into T4:** blank and "-" both mean not applicable and must compare equal for shared vs per-variant (No. 78 uses blanks, No. 76 uses "-").
   - **Record in ADR 0057 (T7) from T2:**
     - the 100:1 ratio cap only applies to entries >1 MB;
@@ -183,7 +195,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 3 — Bulk import — plan approved, T0–T2 done, next T3 (Phase 2 merged 2026-10-07)
+**Current focus:** Phase 3 — Bulk import — plan approved, T0–T3 done, next T4 (Phase 2 merged 2026-10-07)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -286,7 +298,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] T0: client sheet received (local only, gitignored), studied, ADR 0054 (product page layout)
 - [x] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
 - [x] T2: workbook reader + safety + synthetic fixture (ADR 0047 note: stricter shared zip reader)
-- [ ] T3: cleaner + split policies + numeric parsers — ADR 0056
+- [x] T3: cleaner + split policies + numeric parsers — ADR 0056
+- [ ] T4: grouping (products/variants, shared vs per-variant, base code, slug, labels)
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -352,9 +365,10 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Company email (whistleblower + request alerts)
 - [ ] Logo files (SVG preferred) — Phase 1
 - [ ] Categories 8–10; empty subcategories (Hanging 3rd, Track Light, Motorized)
-- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, empty columns, public/restricted split)
+- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (blank vs "-" the same?; comma lists like `100,150W`?; Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07: T3 done (`4c9821f`, ADR 0056): cell cleaner, per-column split policy, filter parsers. The auto-review caught wattage count and comma-list parsing bugs during test-first steps; all fixed. The real sheet cleans with zero warnings and zero CJK. 2452 unit green. Next: T4. The user is clearing the session here.
 - 2026-10-07: T2 done (`be96922`): import safety pre-check, workbook reader, synthetic fixture, real-sheet test. The auto-review found 3 zip parser-difference bypasses (decoy directory, hidden entries past `count`, name or extra-field tricks); all fixed. The shared reader also hardens the datasheet check (note on ADR 0047). 2237 unit green. Next: T3.
 - 2026-10-07: T1 done (`bfbfa6f`, ADR 0055): case-insensitive model nos. via a collated unique index, shared `modelNoKey`, `sourceSha256`, `check:model-nos`. The auto-review caught a broken regex in the migration message (lost backslash); it was fixed before the commit. 2149 unit green. Next: T2.
 - 2026-10-07: Phase 3 plan approved (all six defaults). T0: client sheet received (WPS file; drawing-anchored PNGs; no merges; English before Chinese; Nos. 80/81 lack model nos.), gitignored, studied into the plan. ADR 0054 logs the client's pink/green product page layout for Phase 4. Next: T1.
