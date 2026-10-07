@@ -32,8 +32,16 @@ test.describe("admin access", () => {
   }) => {
     await signIn(page, E2E_ADMIN.email, E2E_ADMIN.password);
     await expect(page).toHaveURL(/\/admin$/);
-    await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Dashboard" }),
+    ).toBeVisible();
     await expect(page.getByText(E2E_ADMIN.email)).toBeVisible();
+    // Positive twin of the customer test's "no Admin nav" check, so renaming
+    // the landmark breaks this test instead of silently weakening that one.
+    // .first(): the nav is rendered for the sidebar and the mobile menu.
+    await expect(
+      page.getByRole("navigation", { name: "Admin" }).first(),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/$/);
@@ -49,7 +57,15 @@ test.describe("admin access", () => {
     await expect(
       page.getByRole("heading", { name: "No access" }),
     ).toBeVisible();
+    // None of the admin shell or dashboard reached the customer.
     await expect(page.getByText("Admin", { exact: true })).toHaveCount(0);
+    // includeHidden: the mobile copy of the nav is display:none on desktop.
+    await expect(
+      page.getByRole("heading", { name: "Dashboard", includeHidden: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("navigation", { name: "Admin", includeHidden: true }),
+    ).toHaveCount(0);
   });
 
   test("a wrong password gets the generic message", async ({ page }) => {

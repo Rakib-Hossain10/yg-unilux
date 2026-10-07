@@ -7,25 +7,23 @@ import type { Types } from "mongoose";
 
 import { mongoose } from "@/lib/db";
 
+import {
+  PRODUCT_IMAGE_KINDS,
+  PRODUCT_STATUSES,
+  TRACK_SIZES,
+  type ProductImageKind,
+  type ProductStatus,
+  type TrackSize,
+} from "./product-constants";
 import { defineModel, publicIdField, shortText, slugField } from "./shared";
 import { SPEC_KEYS, type SpecKey, type SpecValues } from "./spec-columns";
 
 const { Schema } = mongoose;
 const { ObjectId } = Schema.Types;
 
-export const PRODUCT_STATUSES = ["draft", "published"] as const;
-export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
-
-/** Magnetic Track sizes in mm; a listing filter for that category only. */
-export const TRACK_SIZES = [5, 10, 20] as const;
-export type TrackSize = (typeof TRACK_SIZES)[number];
-
-export const PRODUCT_IMAGE_KINDS = [
-  "gallery",
-  "dimension",
-  "installation",
-] as const;
-export type ProductImageKind = (typeof PRODUCT_IMAGE_KINDS)[number];
+// Re-exported so existing imports from "@/models/product" keep working.
+export { PRODUCT_IMAGE_KINDS, PRODUCT_STATUSES, TRACK_SIZES };
+export type { ProductImageKind, ProductStatus, TrackSize };
 
 /** A public product photo or drawing stored in Cloudinary. */
 export interface ProductImage {
@@ -275,5 +273,8 @@ productSchema.index({ family: 1 });
 productSchema.index({ status: 1 });
 // Published products of one main category: the main listing query.
 productSchema.index({ status: 1, mainCategory: 1 });
+// "Which products use this datasheet": the in-use count on the datasheets
+// list and the check that blocks deleting a datasheet still attached.
+productSchema.index({ datasheetId: 1 });
 
 export const ProductModel = defineModel<Product>("Product", productSchema);

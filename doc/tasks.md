@@ -4,15 +4,112 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-1`. **Tasks 1–12 and wrap-up steps 1, 2, 2b and 3 are committed**, but only tasks 1–5 have been pushed. The Phase 1 exit criteria pass locally (QA PASS, 2026-10-04): the seeded admin signs in; `/admin` gives non-admins a real 403 on the server; a fake CN header gets 403. "On preview" waits for the client's Vercel account.
-- **Next: Phase 1 wrap-up, before the merge to `main`.** Do these in order, one commit each:
-  1. ~~Task-12 QA Lows~~ — done (ADR 0030): session tokens removed from every `/api/auth` JSON body, client aborts answered with a quiet 499, the e2e server blanks every `.env.example` variable, sign-out stays on the page if it fails, the login comment is fixed, and a signal crash exits 1.
-  2. ~~Task-5 QA L1~~ — done (ADR 0031): `/change-password` allows 5 attempts per user per 15 minutes, counted in the before-hook before the password check (HMAC'd user id, generic 429, audit `user-pw-change`).
-  2b. ~~"Keep me signed in"~~ — done (ADR 0032): the checkbox on `/login` is off by default for every role. Unchecked gives a browser-session cookie with a hard 24 h server cap; checked gives 7 days.
-  3. ~~Task-5 QA L2~~ — done (ADR 0033): `npm run audit` is blocking in CI and allows only GHSA-vfj7-8cjw-p6xm, with a review date of **2027-01-05**.
-  4. **Next →** run lint, typecheck, `npm test`, `npm run build`, `npm run test:e2e`, the audit and gitleaks.
-  5. Push `phase-1`, check CI is green on GitHub, open a PR to `main`, merge, and tick Phase 1.
-  6. Then **Phase 2 (Admin core)**: plan first (plan mode), on a `phase-2` branch.
+- **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, `5fff0bb`, 2026-10-06).
+- **Phase 2 is PLANNED and APPROVED. Read `doc/phase-2-plan.md` first** — it holds the architecture, 18 ordered tasks (T1–T18, one commit each), owners, models, tests, QA gates A–E, risks and ADR list. The user's decisions are in it: direct browser uploads with server-side verification (amends ADR 0009), and the ADR 0019 product defaults.
+- **Done:**
+  - T1 (shadcn + tokens, ADR 0034).
+  - T2 (shared helpers + `products.datasheetId` index, ADR 0035):
+    - `src/lib/revalidate.ts`, `audit.ts`, `slug.ts` and `constants.ts`;
+    - the audit vocabulary in `src/models/audit-actions.ts`.
+
+  - T3 (admin shell + dashboard, ADR 0036).
+  - T4 (category schemas + service, ADR 0037): `src/lib/schemas/{common,category}.ts`, `src/lib/admin/{write-result,categories}.ts`; 991 tests green.
+  - T5 (categories UI, ADR 0038): `/admin/categories` (tree, new, edit, move, delete), reusable `callAction`/`ActionResult` pattern, action guard rules in `test/admin-guards.test.ts`; 1062 tests green, build OK.
+
+  - T6 (areas, ADR 0039): schemas + service + UI; 1141 tests green. Built with Sonnet 5.5 subagents because the user asked for it.
+
+  The review hook is on.
+- **QA gate A: PASS** (T1–T6, 2026-10-06). Added `e2e/admin-catalog.qa.spec.ts` (19), `test/admin-write-path.qa.test.ts` (30), `e2e/fixtures/database.ts`. 1171 unit + 61 e2e green, build OK.
+- T7 done (product schema, ADR 0040), 1209 tests green.
+- T8 done (product service, ADR 0041), 1248 tests green.
+- T9 done (products list + new draft UI, ADR 0042; gate A's L-4 and L-5 fixed), 1282 unit + 69 e2e green.
+- T10a done (product edit form section (a), ADR 0043), 1364 unit + 74 e2e green.
+  - Status changes only through publish/unpublish.
+  - Optimistic concurrency on `updatedAt`.
+  - A published product stays publishable.
+  - Route groups `admin/(dashboard)` and `products/(list)` give a real 404.
+- T10b done (ADR 0044): specs editor, variants, extra specs, public files. 1429 unit + 80 e2e green.
+- **QA gate B: PASS** (T7–T10b, 2026-10-06; run on Sonnet 5.5 at the user's request). No Critical, High or Medium findings. Added `test/admin-products.qa.test.ts` (48) and `e2e/admin-products-gate-b.qa.spec.ts` (4). 1476 unit + 84 e2e green, build OK, audit ok. Firefox and WebKit are not installed, so focus after a move is checked in Chromium only.
+- T11a done (ADR 0045, note on 0027): `src/lib/{cloudinary,cloudinary-ids}.ts`, `src/lib/admin/{uploads,product-images}.ts`, `setAreaImage` in `areas.ts`, `/admin/:path*` CSP. 1605 unit green, build OK. Gate A L-2 and gate B L-C are closed: publicId shape is enforced in Zod and Mongoose, and a variant image must be one of the product's own images.
+- T11b done (ADR 0046): product images editor (own section + Save, XHR upload with progress, alt text, kind, reorder), variant image select over saved images, area black-and-white uploader, 4 actions with customer/visitor tests; gate A I-1 closed. 1670 unit + 84 e2e green, build OK. Built on Opus (the user wants good-looking UI; a Sonnet run was stopped).
+- T12 done (ADR 0047, built on Sonnet 5.5 at the user's request): `src/lib/{storage,xlsx-signature}.ts`, `src/lib/schemas/datasheet.ts`, `src/lib/admin/datasheets.ts` (`listDatasheets`, `presignDatasheetUpload`, `finalizeDatasheet`, `renameDatasheet`, `deleteDatasheet`), `datasheet.rename` audit action, gate B I-2 re-check in `setStatus` (publish returns `fieldErrors.datasheetId`/`mainCategory`). 1736 unit green; fixed the T11b `NEXT_PUBLIC_` comment test failure.
+- T13 done (ADR 0048, Sonnet 5.5 at the user's request): `/admin/datasheets` (list, search, paging, upload new/replace, rename, delete with in-use refusal), `datasheet-picker.tsx` in the product form, 5 actions with customer/visitor/banned tests; publish errors map `datasheetId`/`mainCategory`. 1787 unit green, build OK. NOT yet seen in a browser.
+- **QA gate C: PASS** (T11a–T13, 2026-10-07, Sonnet 5.5 at the user's request). No Critical/High; 1 Medium (test infra) + 4 Low. Added `test/admin-uploads.qa.test.ts` (76, 3 `it.fails`) and `e2e/admin-datasheets-gate-c.qa.spec.ts` (16). 1860 unit + e2e green (see M-1), build OK, audit ok. User applied the R2 CORS rule 2026-10-07.
+- T14 done (ADR 0049, Sonnet 5.5 at the user's request): `src/lib/schemas/settings.ts`, `src/lib/admin/settings.ts` (column visibility, WhatsApp, company email; filter cleanup runs on every save so a retry repairs; clearing deletes the siteContent doc). 1901 unit green (5 expected-fail), typecheck + lint OK.
+- T15 done (ADR 0050, Sonnet 5.5 at the user's request): `/admin/settings` (28 column switches, WhatsApp, company email), 3 actions with customer/visitor/banned tests, static guard now requires revalidate + service call, T14 open item closed (`withoutRestrictedFilters` in `products.ts`). 1933 unit green (5 expected-fail), typecheck + lint + build OK. NOT yet seen in a browser.
+- **QA gate D: PASS** (T14–T15, 2026-10-07, Sonnet 5.5 at the user's request). No Critical/High/Medium; 3 Low + info. Added `test/admin-settings.qa.test.ts` (90) and `e2e/admin-settings-gate-d.qa.spec.ts` (15, own Playwright project `settings-gate-d`, depends on chromium; it wipes `filters.cctK` so it must not overlap other specs). 2023 unit green (5 expected-fail), gate D e2e 15/15, build OK, audit ok. The settings page was seen in a browser (axe clean, 375 px OK).
+- T16 done (no ADR, Sonnet 5.5 at the user's request): most already existed from T10a; added reason links (each publish reason links to its section/control and moves focus; `status-links.ts`) and `src/app/admin/not-found.tsx`. Root `admin/error.tsx` already covers all segments. 2025 unit green (5 expected-fail), typecheck/lint/build OK. NOT seen in a browser (link focus, not-found page); add e2e in T18.
+- T17 done (ADR 0051, Sonnet 5.5 at the user's request): `src/lib/orphan-sweep.ts`, `scripts/{sweep-incoming,sweep-cloudinary-orphans,report-orphan-datasheets}.ts`, `listImages` in `cloudinary.ts`, npm scripts `sweep:incoming`, `sweep:cloudinary`, `report:datasheets`. 2039 unit green (5 expected-fail). NOT run against real R2/Cloudinary: do a dry-run smoke with real credentials. Never schedule `--apply` in cron without a mass-delete guard.
+- T18 done (ADR 0052, Sonnet 5.5 at the user's request): `e2e/admin-product.spec.ts` (10 tests), in-memory R2/Cloudinary fakes (`e2e/fake-providers/`), shared sign-in (`e2e/global-setup.ts`, closes M-1), `workers: 1`. 2039 unit + 125 e2e green. Watch for a repeat of one unreproduced alt-text save flake.
+- **QA gate E: PASS** (Phase 2 exit, 2026-10-07, Opus). No Critical/High. 2060 unit (6 expected-fail) + 133 e2e green, build/audit OK, gitleaks clean, db:indexes OK on a scratch DB. Added `test/phase2-exit.qa.test.ts` (22) and `e2e/admin-gate-e.qa.spec.ts` (8).
+    - **M-1 and L-1 FIXED** (ADR 0053): sweep mass-delete guard + ETag-pinned finalize. 2094 unit (5 expected-fail) + 133 e2e green. Open: per-environment Cloudinary folder prefix; real-credential smoke must confirm R2 honours `If-Match` / `CopySourceIfMatch`.
+- Still open, not blocking: gate B L-A (case-insensitive model no., **fix before Phase 3 import**), gate C L-1/L-2/L-3/L-4, gate D L-1/L-2/L-3, gate A L-1 ([id] pages 200 for unknown id) and L-3. Phase 3: import preview images uploaded >24 h before confirm would be swept.
+- **Next: Phase 2 PR** (push `phase-2`, `gh pr create`, wait for CI, **ask the user before merging**). Then Phase 3 (bulk import; plan first). **Real-credential smoke DONE 2026-10-07** (R2 presigned PUT, HEAD ETag, GET `If-Match` and `CopySourceIfMatch` match + stale 412, Cloudinary signed upload/inspect/destroy, all three sweep dry runs; test objects cleaned up; dev bucket and Cloudinary were empty). CI green on PR #11. **User must do:** nothing before merge except approve; rebuild before any local `npm start`. **Phase 3 must-dos:** call `withoutRestrictedFilters`; fix gate B L-A (case-insensitive model no.) first; import preview images older than 24 h would be swept.
+- **Open items from gate D:**
+  - **L-1:** `updateProduct` reads the visibility setting then writes; a save racing a column restriction can re-write restricted filter numbers (repaired by saving the column setting again). Fix with a version/`updatedAt` check or a second cleanup pass.
+  - **L-2:** a retry whose setting is unchanged but cleanup modified products writes no audit entry.
+  - **L-3:** `parseStoredColumnVisibility` (`src/lib/schemas/settings.ts` ~50-58) reads `raw[key]` through the prototype chain; use `Object.hasOwn`.
+  - **Info (T18, extends M-1):** full `npx playwright test` is flaky because of the per-email login limiter and parallel workers; use `workers: 1` in CI, shared `storageState`, or separate emails per spec.
+- ~~T14 open item~~ (closed in T15): the product form can type `filters.*` for a restricted column, so a restricted filter can reappear after a later product edit. Fix in `src/lib/admin/products.ts` (drop `filters.<x>` for restricted columns on save via `getColumnVisibility()`), or ignore them in the Phase 4 public filter query. Also: making a column public again does not restore its filters (next import/save recomputes).
+- **Open items from gate C:**
+  - **M-1 (T18):** e2e sporadically hits the sign-in rate limit (10/15 min per email, ADR 0022; success doesn't reset). Sign in once in Playwright global setup and share `storageState`.
+  - **L-1:** `INCOMING_KEY_PATTERN`/`DATASHEET_KEY_PATTERN` in `src/lib/schemas/datasheet.ts:22-30` have an unescaped dot (use `\.xlsx` in the template literal); two `it.fails` become `it`.
+  - **L-2:** delete racing replace can orphan an R2 object: re-delete the key after `deleteOne`, or re-check the row after the copy (`it.fails`).
+  - **L-3:** product attached mid-delete dangles `datasheetId`; publish re-check refuses it. Accept or narrow window.
+  - **L-4:** hidden file input duplicates the button name: add `aria-hidden="true"` in `datasheet-uploader.tsx` HiddenFileInput and `image-drop-zone.tsx`.
+  - **I-1:** Replace file picker unchecked in Firefox/WebKit. **I-2 (Phase 5):** encode file names in `Content-Disposition` (RFC 5987). **I-3:** key patterns ship in the client bundle via `datasheet-list.tsx`; move to a client-safe module if desired.
+- **T13 follow-ups:** add uploader name/email to `listDatasheets()` and delete `src/app/admin/datasheets/uploader-names.ts`; optional service-side filter/paging. **T18 must-do:** `e2e/test-server.ts` env switch swapping `@/lib/storage` for an in-memory fake (PUT handler writes bytes so headObject/getObjectBytes/copyObject see them), exceljs .xlsx fixture; selectors "Choose Excel file", `#product-datasheetId`, per-row Replace/Rename/Delete.
+- **T18 must-do (from T11b):** add a Cloudinary fake switch to `e2e/test-server.ts` and upload e2e tests: images editor (upload, alt, reorder, save, `PRODUCT_CHANGED`, variant-in-use refusal) and area uploader (set, replace, remove, plus axe on `/admin/areas/[id]`). The area uploader has not been seen in a browser yet, and real uploads have not been tried against Cloudinary: do a manual smoke once with the real credentials.
+- **Low follow-ups from T11b:**
+  - Backend: add `cloudinaryCloudName(): string | null` to `src/lib/cloudinary.ts` and delete `src/app/admin/cloudinary-cloud-name.ts`. Optionally return the new `updatedAt` from `saveProductImages`.
+  - `applyServerErrors` is duplicated in `area-form.tsx` and `category-form.tsx`: make one shared helper.
+  - `saveProductImagesAction` repeats the tail of `statusResult`.
+  - Nice to have: a thumbnail column in the products list (`previewUrl`).
+- **User must do before T13 runs against the real bucket:** apply the R2 CORS rule (plan, "Things the user must do"). Reminded 2026-10-06.
+- **T17 must-do:** the orphan report also covers Cloudinary:
+  - `yg/products/*` and `yg/areas/*` assets that nothing references;
+  - images of deleted products;
+  - signed but never-saved uploads.
+
+  Removed images are never deleted at save time (ADR 0045).
+- **Follow-up (low):** `scripts/check-services.ts` configures Cloudinary inline; it could reuse `src/lib/cloudinary.ts`.
+- **Open items from gate B:**
+  - **L-A:** model numbers are case-insensitive within a product but case-sensitive across products (`takenModelNos`, unique index), so `ZZ-9` and `zz-9` can coexist. Fix with a collation on the index or normalised case, before Phase 3 import (upsert by model no.). The `it.fails` test in `admin-products.qa.test.ts` turns into a plain `it` once fixed.
+  - **L-B:** same as gate A L-1, below.
+  - ~~L-C~~: fixed in T11a.
+  - **L-D:** same as gate A L-3, below.
+  - **L-E (Phase 4):** changing a published product's slug leaves no redirect.
+  - **I-1:** area, category and new-draft forms still give inputs a `name` (low value, admin-only, no-store). Drop it when those forms are next touched.
+  - **I-2:** publish doesn't re-check that `mainCategory` / `datasheetId` still exist. Re-check it in T13 when datasheets land.
+- **Backend follow-ups from T10a (ADR 0043, not blocking):**
+  - `invalidInput` should key nested Zod issues by the full dotted path.
+  - Add a shared `isMagneticTrackCategory` helper, to remove the duplicate in `product-category-options.ts`.
+  - Export the createDraft schema, and move `MAX_PRODUCT_SEARCH_LENGTH` to `constants.ts`.
+  - Add a `group` field to `SPEC_COLUMNS` (ADR 0044).
+  - When the column-visibility setting lands, pass the effective restricted keys to the edit form.
+- **Open items from gate A:**
+  - **P-1:** covered. `scripts/audit.mjs` allows GHSA-vfj7-8cjw-p6xm until 2027-01-05 (ADR 0033), and gate B ran it: "audit: ok". Before the merge, check that CI uses the script; add an `overrides` entry once a patch exists.
+  - L-1: categories and areas `[id]` pages still answer 200 on not-found because of their `[id]/loading.tsx`. Products is fixed (ADR 0043); apply the same fix, or accept it in an ADR note.
+  - ~~L-2~~: fixed in T11a.
+  - L-3: add the planned ESLint rule (no `"use client"` import of `server-only`/`src/lib/admin/*`); a static test covers it now.
+  - L-4 and L-5: fixed in T9.
+
+- **Admin guards (ADR 0036):**
+  - The layout's `requireAdmin()` gives the real 403; `loading.tsx` doesn't wrap the layout.
+  - Pages still guard first, because client navigation skips the layout.
+  - Admin metadata is static only.
+  - `test/admin-guards.test.ts` enforces this. T5 adds its Server Action `describe` block: `requireAdmin` first, plus the customer and visitor behavioural tests (QA L2, task 6).
+- **Nav:** the module list lives in `src/components/admin/admin-sections.ts`. Its links 404 until each module exists; don't add placeholder pages.
+- **Write path (ADR 0035), applies from T4 on:**
+  - Services run `connectDb` → Zod → write → `recordAudit` → return `{ok, data|errors, tags}`. When the audit write fails, they still return the tags.
+  - Actions run `requireAdmin()` first → the service → `revalidateCatalogInAction(tags)` → `redirect` outside any `try`.
+  - T14 should tie each `settings.*` audit action to its exact siteContent key.
+- **Exit check:** `npm run db:indexes` builds the new `products.datasheetId` index on the real database.
+- **Model guidance (user rule, 2026-10-06; overrides the plan's model column):** every subagent runs on **Opus**. UI work always goes to the frontend subagents (`admin-panel-builder`, `site-frontend`, `motion-engineer`) with `model: "opus"`. Never build UI in the main session.
+- **shadcn adds:** every later `npx shadcn add` gets the ADR 0034 strip pass (header line, no animation, no `dark:`, tokens instead of raw colours). `design-shell.qa.test.ts` enforces it. Admin forms will probably need `field`, `alert`, `pagination` and `empty`.
+- **GitHub:** use `gh` (push, PR, CI, merge); always ask the user before merging into `main`.
+- **Verified 2026-10-06:** `npm run check:services` passes for MongoDB (non-SRV `mongodb://` string in `.env.local`, database `yg_unilux_db`), Cloudinary (upload + delete + Admin API) and R2 (write + delete). The `mongodb+srv://` form fails on the user's machine because a VPN DNS proxy (`127.0.0.1`) drops SRV lookups, so keep the non-SRV string.
+- **Admin account:** the user still needs to run `npm run seed:admin -- --email <email> --name "<name>"` in PowerShell against `yg_unilux_db` before they can sign in at `/login`.
 - **QA after:** each Phase 2 feature plus the Phase 2 exit (`qa-security-reviewer`). Every changed file also gets the automatic per-file review.
 - **Per task:** typecheck, lint and tests, then a tasks.md update and exactly one commit. Every file starts with a 2–3 line header comment and has "what and why" comments.
 - **User must add to `.env.local`:**
@@ -21,7 +118,6 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - a database name in `MONGODB_URI` (`…mongodb.net/yg_unilux?…`).
 - **User should try once:**
   - `npm run seed:admin -- --email <admin email> --name "<name>"` from **PowerShell** (hidden prompt; Git Bash needs `winpty`). QA could not test a real Windows console.
-  - From this machine Atlas currently times out (`querySrv ETIMEOUT`): check the Atlas IP access list / network.
 - **Local dev:** use `http://localhost`, not `127.0.0.1`, because the `__Host-` device cookie needs it. `npm run test:e2e` needs port 3000 free (it never reuses a running server) and runs on a seeded in-memory MongoDB (ADR 0029).
 - **Open QA Lows from task 5:**
   - L3 (Phase 5): sign-in and reset must post to `/api/auth/*`, never through server actions (`/login` already does). The change-password UI sends `revokeOtherSessions: true`.
@@ -38,7 +134,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 1 — Foundations — in progress (tasks 1–12 done; exit met locally; wrap-up + merge pending)
+**Current focus:** Phase 2 — Admin core — T1–T18 done, QA gate E PASS, PR pending (Phase 1 merged 2026-10-06)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -84,7 +180,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] `CLOUDINARY_URL` replaces the three Cloudinary variables; next/image limited to our cloud — ADR 0016 (branch `chore/cloudinary-url`)
 - [x] Direct `mongodb` dependency: needed by Better Auth's adapter; pinned to Mongoose's range `~7.6` so npm dedupes to one copy (test + Dependabot ignore) — ADR 0017
 
-## Phase 1 — Foundations
+## Phase 1 — Foundations ✅ (merged 2026-10-06, PR #9)
 - [x] Task 1: `lib/db.ts`, one shared `MongoClient` for Mongoose and Better Auth, strict Mongoose, `MONGODB_URI` must name the database — ADR 0018
 - [x] Task 2: 11 Mongoose models + read-only `users` + `loginAttempts` (TTL), `spec-columns.ts`, `npm run db:indexes` — ADR 0019 (8 open questions listed there)
 - [ ] Task 5 must also apply ADR 0022's 'Required in task 5' list (issue a device token on password reset, token epoch, path passed to clearSignIn, wider guard, Better Auth limiter storage, reset hardening)
@@ -113,17 +209,25 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Task 12: `/login` (posts to `/api/auth`, method=post), `/admin` placeholder guarded in layout + page, sign-out; e2e on a seeded in-memory replica set (admin login, customer real 403, visitor/forged cookie → /login, CN 403, HK/MO/TW 200); QA PASS — ADR 0029
 - [x] Tests: permissions matrix, rate limiter, proxy country matrix, env validation (773 unit + 34 e2e)
 - **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview — **met locally on `next start` (2026-10-04); preview pending the Vercel account**
-- [ ] Phase 1 wrap-up: ~~task-12 Lows~~ (done, ADR 0030), ~~task-5 L1~~ (done, ADR 0031), ~~"Keep me signed in"~~ (done, ADR 0032), ~~task-5 L2~~ (done, ADR 0033), push, CI green, PR, merge to `main`
+- [x] Phase 1 wrap-up: task-12 Lows (ADR 0030), task-5 L1 (ADR 0031), "Keep me signed in" (ADR 0032), task-5 L2 (ADR 0033); CI green; PR #9 merged to `main` 2026-10-06
 
-## Phase 2 — Admin core
-- [ ] shadcn init; admin layout with `requireAdmin()` everywhere
-- [ ] Dashboard counts
-- [ ] Categories tree editor
-- [ ] Areas module
+## Phase 2 — Admin core — plan: `doc/phase-2-plan.md` (T1–T18)
+- [x] T1: shadcn init (radix-nova, 16 ui components), tokens mapped, animation and dark mode stripped, contrast pairs tested — ADR 0034
+- [x] T3: admin layout with `requireAdmin()` everywhere (static guard test), sidebar + mobile nav, loading/error — ADR 0036
+- [x] T3: dashboard counts (`src/lib/admin/dashboard.ts`, uncached)
+- [x] T4/T5: categories schemas, service and tree editor UI — ADR 0037, 0038
+- [x] T6: areas module (service + UI) — ADR 0039
+- [x] T7: product Zod schema + `publishCheck` — ADR 0040
+- [x] T8: product service — ADR 0041
+- [x] T9: products list + new draft, gate A L-4/L-5 fixes — ADR 0042
+- [x] T10a: product edit form section (a), status card, delete, optimistic concurrency — ADR 0043
+- [x] T10b: specs, variants, extra specs, public files — ADR 0044
+- [x] QA gate B (T7–T10): PASS, Lows L-A to L-E recorded
 - [ ] Products CRUD + Cloudinary upload/reorder
 - [ ] Datasheets module (R2, signature check, ≤10 MB, attach to many, block delete in use) — ADR 0001, 0009
 - [ ] Settings: column visibility, WhatsApp number, company email
-- [ ] auditLog on every write; tag revalidation on every save — ADR 0008
+- [x] T2: shared helpers (revalidate, audit, slug, constants), audit vocabulary as schema enum, `products.datasheetId` index — ADR 0035
+- [ ] auditLog on every write; tag revalidation on every save — ADR 0008, 0035
 - [ ] Tests: Zod schemas, file signature, auth guard on every admin action
 - **Exit:** full product built by hand with images and attached datasheet
 
@@ -196,6 +300,28 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07 — Real-credential smoke PASS (R2 conditional read/copy, Cloudinary upload, sweep dry runs); PR #11 CI green. Awaiting the user's merge approval.
+- 2026-10-07 — Gate E fixes (ADR 0053): sweep guard + ETag-pinned datasheet finalize. 2094 unit + 133 e2e green. Next: push, PR.
+- 2026-10-07 — QA gate E PASS (Phase 2 exit) on Opus: 1 Medium (sweep guard), 1 new Low (datasheet copy race). 30 QA tests added.
+- 2026-10-07 — T18 done (ADR 0052): exit e2e, provider fakes, shared sign-in. 2039 unit + 125 e2e green. Next: QA gate E.
+- 2026-10-07 — T17 done (ADR 0051): orphan sweep scripts, dry-run default. 2039 unit green. Next: T18.
+- 2026-10-07 — QA gate D PASS (T14–T15) on Sonnet 5.5 at the user's request: 3 Low findings recorded, 90 unit + 15 e2e QA tests added. Next: T16.
+- 2026-10-07 — T15 done (ADR 0050): settings UI, guard test extended, T14 open item closed. 1933 unit green. Next: QA gate D.
+- 2026-10-06 — T11b done (ADR 0046): images editor, variant image select, area uploader. The first run on Sonnet was stopped because the user wants a very good-looking UI; Opus built it. 1670 unit + 84 e2e green, build OK. Next: T12.
+- 2026-10-06 — T11a done on Opus (ADR 0045, note on 0027): Cloudinary sign/verify, `saveProductImages`, `setAreaImage`, admin-only CSP; gate A L-2 and gate B L-C closed. User reminded about the R2 CORS rule. 1605 unit green, build OK. Next: T11b.
+- 2026-10-06 — QA gate B PASS (T7–T10b) on Sonnet 5.5 at the user's request: no Critical, High or Medium findings; Lows L-A (model-no. case across products) to L-E recorded. 52 QA tests added. 1476 unit + 84 e2e green. Next: T11a.
+- 2026-10-06 — T10b done on Opus (ADR 0044). The auto-review caught a regex with literal line breaks (Critical); it was fixed. Input `name`s are dropped so a pre-hydration submit can't put spec text in the URL. 200 variants stay responsive. 1429 unit + 80 e2e green. Next: QA gate B.
+- 2026-10-06 — T10a done on Opus (ADR 0043). The auto-review found two Highs, both fixed: every save after the first did nothing (the in-flight flag stayed set through the redirect), and a stale tab could overwrite newer data. The second fix: status now changes only through publish/unpublish, and saves are checked against `updatedAt`. Six Medium fixes followed. 1364 unit + 74 e2e green. Next: T10b.
+- 2026-10-06 — T9 done on Opus (ADR 0042): products list, new draft, shared move guard, e2e for products. Next: T10.
+- 2026-10-06 — T8 done (ADR 0041): product service with publish gate, trackSize rule, modelNo field errors. Next: T9.
+- 2026-10-06 — T7 done (ADR 0040). Auto-review caught a server-only import in the schema; constants moved to `product-constants.ts`. Next: T8.
+- 2026-10-06 — QA gate A PASS (T1–T6); e2e flows for categories and areas added; audit gate P-1 and Lows L1–L5 recorded in Resume here. Next: T7.
+- 2026-10-06 — T6 done on Sonnet 5.5 subagents at the user's request (ADR 0039). 1141 tests green. Next: QA gate A, then T7.
+- 2026-10-06 — T3 committed (ADR 0036). Found that Next puts static admin metadata into a customer's 403 payload, so admin metadata stays static. 933 unit and 42 e2e tests green. The user ends the session here; the next session starts at T4.
+- 2026-10-06 — T2 committed (ADR 0035; ADR 0008 status points to it). The auto-review raised a Medium: `"max"` could serve newly restricted columns stale. Fixed: `settings:columns` always uses `{ expire: 0 }`. 899 tests green. Next: T3.
+- 2026-10-06 — T1 committed (shadcn + token mapping, ADR 0034). The user ruled that UI work always goes to the frontend subagents on Opus. A Sonnet run was stopped and an Opus run reviewed its draft, fixing 11 issues: a dead QA regex, a nearly invisible destructive focus ring, leftover motion, needless `"use client"`, raw black overlays, CRLF. 819 tests and the build are green. Next: T2.
+- 2026-10-06 — Phase 2 planned in plan mode and approved (`doc/phase-2-plan.md`, T1–T18, QA gates A–E). Services verified with `npm run check:services` (committed). User decisions: direct uploads with server verification; ADR 0019 defaults. Next: T1 (shadcn init) in a fresh session.
+- 2026-10-06 — CI green and PR #9 merged to `main` (`5fff0bb`) with the user's approval. Phase 1 is done. `phase-2` branched off. Next: plan Phase 2 in plan mode.
 - 2026-10-06 — The next CI run failed differently: on a cold binary cache, parallel Vitest workers raced on mongodb-memory-server's download lockfile. Fixed with a Vitest `globalSetup` (`test/global-setup.ts`) that downloads the binary once before the workers start. GitHub is now handled through `gh` (PR #9 "Phase 1"). Ask the user before merging to `main`.
 - 2026-10-06 — CI failed on `scripts/sync-indexes.test.ts`, because `node_modules/.cache` is missing on a fresh runner. Fixed by creating the folder with `mkdir -p` and guarding the cleanup. Next: CI green, then PR and merge.
 - 2026-10-05 — Wrap-up step 3 committed, ADR 0033: the full-tree audit is blocking through `scripts/audit.mjs` with one dated allowance. QA on the wrap-up diff: PASS (L1 session-cap gap after change-password recorded in ADR 0032; L2 audit-script fail-open cases fixed). Next: push, CI, PR, merge.

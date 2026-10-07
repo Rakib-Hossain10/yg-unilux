@@ -13,6 +13,11 @@ export interface CspOptions {
   isDev: boolean;
   /** When true, inline scripts are allowed (see ADR 0027 for why). */
   allowInlineScripts: boolean;
+  /**
+   * Extra `connect-src` origins, added after 'self'. Only the admin panel
+   * uses this (direct uploads, see adminConnectSrc); public pages pass none.
+   */
+  extraConnectSrc?: readonly string[];
 }
 
 /*
@@ -29,7 +34,11 @@ const CLOUDINARY_DELIVERY = "https://res.cloudinary.com";
  * The Content-Security-Policy value. Every fetch type falls back to 'self';
  * plugins, <base> tricks, cross-site form posts and framing are refused.
  */
-export function buildCsp({ isDev, allowInlineScripts }: CspOptions): string {
+export function buildCsp({
+  isDev,
+  allowInlineScripts,
+  extraConnectSrc = [],
+}: CspOptions): string {
   const scriptSrc = [
     "'self'",
     allowInlineScripts ? "'unsafe-inline'" : null,
@@ -46,7 +55,7 @@ export function buildCsp({ isDev, allowInlineScripts }: CspOptions): string {
     ["img-src", "'self'", "data:", "blob:", CLOUDINARY_DELIVERY],
     ["media-src", "'self'", CLOUDINARY_DELIVERY],
     ["font-src", "'self'"],
-    ["connect-src", "'self'"],
+    ["connect-src", "'self'", ...extraConnectSrc],
     ["frame-src", "'none'"],
     ["worker-src", "'self'"],
     ["manifest-src", "'self'"],
@@ -59,6 +68,38 @@ export function buildCsp({ isDev, allowInlineScripts }: CspOptions): string {
   if (!isDev) directives.push(["upgrade-insecure-requests"]);
 
   return directives.map((parts) => parts.join(" ")).join("; ");
+}
+
+/*
+ * Upload endpoints the admin panel's browser code posts files to directly
+ * (ADR "Direct uploads, server verifies"): Cloudinary's Upload API for
+ * images, and the R2 S3 endpoint for presigned datasheet PUTs (T12). The R2
+ * host is `<account id>.r2.cloudflarestorage.com`, so presigned URLs must use
+ * path-style addressing (bucket in the path, not the host name).
+ */
+const CLOUDINARY_UPLOAD_API = "https://api.cloudinary.com";
+/** Cloudflare account ids are 32 lowercase hex characters. */
+const R2_ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
+ * The `connect-src` additions for /admin pages only. Without an R2 account id
+ * (CI, a fresh checkout) only Cloudinary is added. A set but malformed id
+ * throws, so a typo fails the build instead of emitting a broken host; the
+ * value is never put in the error.
+ */
+export function adminConnectSrc(r2AccountId: string | undefined): string[] {
+  if (r2AccountId === undefined || r2AccountId === "") {
+    return [CLOUDINARY_UPLOAD_API];
+  }
+  if (!R2_ACCOUNT_ID_PATTERN.test(r2AccountId)) {
+    throw new Error(
+      "R2_ACCOUNT_ID is invalid. Expected the 32-character hex Cloudflare account id.",
+    );
+  }
+  return [
+    CLOUDINARY_UPLOAD_API,
+    `https://${r2AccountId}.r2.cloudflarestorage.com`,
+  ];
 }
 
 /** Headers sent with every response from the app (pages, APIs, assets). */

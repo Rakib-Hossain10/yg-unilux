@@ -6,6 +6,8 @@ import {
 } from "./src/lib/cloudinary-url";
 import {
   WHISTLEBLOWER_HEADERS,
+  adminConnectSrc,
+  buildCsp,
   securityHeaders,
 } from "./src/lib/security-headers";
 
@@ -71,9 +73,27 @@ const nextConfig: NextConfig = {
         // only external files and hydration fails without this.
         headers: securityHeaders({ isDev, allowInlineScripts: true }),
       },
-      // Later entries override earlier ones with the same header key.
+      // Later entries override earlier ones with the same header key
+      // (installed docs: 05-config/01-next-config-js/headers.md, "Header
+      // Overriding Behavior").
       { source: "/whistleblower/:path*", headers: WHISTLEBLOWER_HEADERS },
       { source: "/whistleblower", headers: WHISTLEBLOWER_HEADERS },
+      // Admin pages only: the same CSP plus the direct-upload hosts in
+      // connect-src (Cloudinary Upload API, R2 presigned PUT). `:path*`
+      // also matches /admin itself. Public pages keep the plain CSP.
+      {
+        source: "/admin/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: buildCsp({
+              isDev,
+              allowInlineScripts: true,
+              extraConnectSrc: adminConnectSrc(process.env.R2_ACCOUNT_ID),
+            }),
+          },
+        ],
+      },
     ];
   },
 };

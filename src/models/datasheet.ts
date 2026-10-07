@@ -4,9 +4,10 @@
 
 import type { Types } from "mongoose";
 
+import { MAX_DATASHEET_BYTES, XLSX_MIME_TYPE } from "@/lib/constants";
 import { mongoose } from "@/lib/db";
 
-import { MAX_DATASHEET_BYTES, XLSX_MIME_TYPE, defineModel } from "./shared";
+import { defineModel } from "./shared";
 
 const { Schema } = mongoose;
 

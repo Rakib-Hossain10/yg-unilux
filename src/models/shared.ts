@@ -4,7 +4,9 @@
 
 import type { Model, Schema } from "mongoose";
 
+import { PUBLIC_ID_PATTERN } from "@/lib/cloudinary-ids";
 import { mongoose } from "@/lib/db";
+import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";
 
 /**
  * Compiles a model, or returns the one already compiled under that name.
@@ -19,32 +21,30 @@ export function defineModel<TRaw>(
   return existing ?? mongoose.model<TRaw>(name, schema);
 }
 
-/** URL slugs: lowercase letters and digits in dash-separated words, e.g. "arc-ar-013a". */
-export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-/** A slug field: required, trimmed, lowercased, URL-safe. */
+/**
+ * A slug field: required, trimmed, lowercased, URL-safe. The pattern and cap
+ * live in src/lib/slug.ts so `slugify` and the schema can never disagree.
+ */
 export const slugField = {
   type: String,
   required: true,
   trim: true,
   lowercase: true,
-  maxlength: 120,
+  maxlength: MAX_SLUG_LENGTH,
   match: SLUG_PATTERN,
 } as const;
 
-/** A Cloudinary public id (public product, area, leader images only). */
+/**
+ * A Cloudinary public id (public product, area, leader images only), in the
+ * server-chosen shape `yg/<folder>/<ownerId>/<uuid>` (src/lib/cloudinary-ids.ts),
+ * so no free text or foreign id can be stored as an image.
+ */
 export const publicIdField = {
   type: String,
   trim: true,
   maxlength: 255,
+  match: PUBLIC_ID_PATTERN,
 } as const;
 
 /** A short single-line text such as a name, title or label. */
 export const shortText = { type: String, trim: true, maxlength: 200 } as const;
-
-/** The only MIME type accepted for datasheets (.xlsx). */
-export const XLSX_MIME_TYPE =
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
-/** Largest datasheet upload: 10 MB (CLAUDE.md, ADR 0001). */
-export const MAX_DATASHEET_BYTES = 10 * 1024 * 1024;

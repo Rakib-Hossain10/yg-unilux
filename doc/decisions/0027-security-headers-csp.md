@@ -45,3 +45,9 @@
   - analytics are not planned, and must never load on whistleblower pages.
 - **Revisit nonces** if the site ever renders all pages dynamically anyway, or if Next ships hash support for inline scripts.
 - **Before Phase 10:** confirm `upgrade-insecure-requests` and HSTS on the client's domain, and decide on `preload`.
+
+## Note (T11a, 2026-10-06): admin-only connect-src for direct uploads
+- `buildCsp`/`securityHeaders` take `extraConnectSrc` (default none). `next.config.ts` adds a LAST headers entry `/admin/:path*` (also matches `/admin`) that sets only `Content-Security-Policy`: the same policy with `connect-src 'self' https://api.cloudinary.com https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`.
+- Override order comes from the installed docs (`01-app/03-api-reference/05-config/01-next-config-js/headers.md`, "Header Overriding Behavior"): "If two headers match the same path and set the same header key, the last header key will override the first." It is tested with Next's own matcher.
+- `adminConnectSrc` reads `process.env.R2_ACCOUNT_ID` at build time, like `cloudinaryImagePatterns`. Unset gives the Cloudinary host only. A value that isn't 32 lowercase hex fails the build without echoing it, so no malformed or injected source can be emitted.
+- Public pages' CSP is unchanged byte for byte (tested against a literal). See ADR 0045.
