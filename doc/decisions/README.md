@@ -70,3 +70,4 @@ Template:
 | [0052](0052-e2e-provider-fakes.md) | E2E: in-memory R2/Cloudinary fakes via a preload on `next start`, shared sign-in state, one worker, `admin-exit` project last | Accepted |
 | [0053](0053-sweep-guard-etag-finalize.md) | Sweep mass-delete guard (`--max-delete`, names printed) and ETag-pinned datasheet finalize (gate E M-1, L-1) | Accepted |
 | [0054](0054-product-page-spec-placement.md) | Product page: the client's pink columns go in a right-side quick-spec panel, green columns in the full spec table; `placement` in `SPEC_COLUMNS`; visibility still wins (Phase 4) | Accepted |
+| [0055](0055-case-insensitive-model-no.md) | Case-insensitive model nos.: collated unique index (en/2), shared `modelNoKey`, collation on every lookup, duplicate-key re-read, server-owned `sourceSha256`, manual index migration + `check:model-nos` | Accepted |

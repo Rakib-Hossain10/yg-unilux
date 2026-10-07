@@ -11,16 +11,31 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - studied: plan section "Fixture findings";
     - fixture path fixed in `import-engineer.md`;
     - ADR 0054 written (product page layout).
-  - **Next: T1** (`backend-architect`, Opus): case-insensitive unique index on `variants.modelNo` (collation en/2) with case-insensitive lookups, `ProductImage.sourceSha256`, script `check:model-nos`, and ADR 0055 text. Then T2 (`import-engineer`: reader + synthetic fixture).
+  - **T1 done** (`bfbfa6f`, ADR 0055):
+    - case-insensitive unique `variants.modelNo` index (collation en/2); shared `modelNoKey` / `MODEL_NO_COLLATION` in `src/models/product-constants.ts`;
+    - `ProductImage.sourceSha256` (server-owned);
+    - `npm run check:model-nos`;
+    - gate B L-A closed;
+    - 2149 unit green (4 expected-fail).
+  - **Next: T2** (`import-engineer`, Opus): `src/lib/import/{types,safety,workbook}.ts`, a limits-aware central-directory reader exported from `xlsx-signature.ts`, and the synthetic fixture builder `test/fixtures/import/build.ts` (copies the real sheet, see the plan's "Fixture findings"). Then T3 (cleaner/columns/numbers).
+  - **Carry into T7/T8:**
+    - use `modelNoKey` for in-sheet duplicates;
+    - pass `{ collation: MODEL_NO_COLLATION }` on every model-no. lookup;
+    - set `sourceSha256` on imported images;
+    - `findModelNoCollisions` (`src/lib/model-no-collisions.ts`) can be reused.
+  - **QA:** gate A after T5, B after T8, C at exit.
   - **English only (user, 2026-10-07):**
     - no Chinese is ever stored;
     - the sheet puts English first, then a blank line, then Chinese; the blank-line cut + CJK strip handle it;
     - multi-line cells use a per-column split policy (options / options+slash / join), not always options.
-  - **User must do before T1 hits the real DB:** run `npm run check:model-nos`, then drop the index `variants.modelNo_1` in Atlas, then `npm run db:indexes`.
+  - **User must do (per database; dev now, preview/prod later):**
+    1. `npm run check:model-nos`, and fix anything it lists.
+    2. In Atlas, open `products` → Indexes, then drop `variants.modelNo_1` (or in mongosh: `db.products.dropIndex("variants.modelNo_1")`).
+    3. Right after step 2, run `npm run db:indexes`.
   - **Ask the client:** Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, and the "High Effciency Reflector" typo.
   - Subagents: `import-engineer`, `backend-architect`, `admin-panel-builder`, `qa-security-reviewer`. No new subagent. All on Opus.
 - **Phase 3 must-dos (all planned in, see the plan's last section):**
-  - Fix gate B **L-A**: model numbers are case-insensitive within a product but case-sensitive across products (unique index on `variants.modelNo`); import upserts by model no., so fix with a collation or normalised case. The `it.fails` in `test/admin-products.qa.test.ts` becomes a plain `it`.
+  - ~~Fix gate B L-A~~ (done in T1, ADR 0055).
   - The import MUST call `withoutRestrictedFilters` (`src/lib/admin/products.ts`) so restricted columns never get filter numbers.
   - Import-preview images uploaded to Cloudinary and not confirmed within 24 h would be swept by `sweep:cloudinary`; design the preview step with this in mind (or confirm in the same sitting / track pending ids).
   - Open: per-environment Cloudinary folder prefix (dev/preview/prod share `yg/products|areas`; sweep has a mass-delete guard, ADR 0053).
@@ -156,7 +171,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 3 — Bulk import — plan approved, T0 done, next T1 (Phase 2 merged 2026-10-07)
+**Current focus:** Phase 3 — Bulk import — plan approved, T0–T1 done, next T2 (Phase 2 merged 2026-10-07)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -257,7 +272,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Plan drafted (2026-10-07)
 - [x] Plan approved by the user (Q1–Q6: all defaults, 2026-10-07)
 - [x] T0: client sheet received (local only, gitignored), studied, ADR 0054 (product page layout)
-- [ ] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
+- [x] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
+- [ ] T2: workbook reader + safety + synthetic fixture
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -326,6 +342,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07: T1 done (`bfbfa6f`, ADR 0055): case-insensitive model nos. via a collated unique index, shared `modelNoKey`, `sourceSha256`, `check:model-nos`. The auto-review caught a broken regex in the migration message (lost backslash); it was fixed before the commit. 2149 unit green. Next: T2.
 - 2026-10-07: Phase 3 plan approved (all six defaults). T0: client sheet received (WPS file; drawing-anchored PNGs; no merges; English before Chinese; Nos. 80/81 lack model nos.), gitignored, studied into the plan. ADR 0054 logs the client's pink/green product page layout for Phase 4. Next: T1.
 - 2026-10-07 — Phase 3 planned: `doc/phase-3-plan.md` (stateless preview + planHash, idempotent commit batches, images uploaded at commit with sha256 dedupe, field-ownership table, 6 questions for the user). `/find-skills`: only the installed `xlsx` skill applies. Existing subagents reused. Awaiting review; nothing built.
 - 2026-10-07 — Phase 2 merged to `main` (PR #11, `b689cb7`). `phase-3` branched. Next: plan Phase 3 in plan mode.
