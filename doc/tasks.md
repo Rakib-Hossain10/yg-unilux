@@ -5,7 +5,9 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 
 ## ▶ Resume here (next session)
 - **Phase 4b: plan APPROVED (2026-10-08, all defaults Q1–Q9), `doc/phase-4b-plan.md`. Branch `phase-4b` (from `main`, 4a merged in PR #15).**
-  - **L0 done** (roster line in ADR 0013 + CLAUDE.md). **Next: L1** listing data layer (`backend-architect`/Opus; write ADR 0065 after it).
+  - **L0 done** (roster line in ADR 0013 + CLAUDE.md).
+  - **L1 done** (`c09ae39`, ADR 0065): `src/lib/catalog/{listing-params,category-path,listing-scope,listing,facets,areas}.ts`; 3669 unit green. Wiring for L4/L5: `getCatalogVisibility()` once per request → `parseListingParams(searchParams, {publicFacets: publicSpecFacets(v), track: path.isMagneticTrack, cat: isAreaPage})` → `listProducts(scope, params, v)` + `getFacets(scope, v)` → 404 when `page > pageCount`; chips/canonical from `result.params`. `listPublicCategories` lacks `description`/`coverImage` (add with L3/L4, bump `CATALOG_CACHE_VERSION`); `listCategoryPaths()` has no `updatedAt` (sitemap lastmod). L2 can reuse `listing-scope.ts` and `toListingCardView`.
+  - **Next: L2** search (`backend-architect`/Opus): `search.ts`, `scripts/search-index.ts` + `npm run db:search-index`, `GET /api/catalog/search`; ADR 0066 after it. Then L3 (admin category icon/cover/description), then QA gate A.
   - Tasks L0–L8: L1 listing data layer, L2 search (Atlas + fallback, `db:search-index` script, ADR 0066), L3 category icon/cover/description in admin, **QA gate A after L3**; L4 listing pages, L5 area pages, L6 mega-menu + search UI + sitemap, **QA gate B after L6**; L7 motion + polish, L8 exit e2e + Lighthouse, **gate C** (`qa-security-reviewer` then `ui-reviewer`).
   - **User must:** approve/answer Q1–Q9; run `npm run db:search-index` on the Atlas dev cluster once L2 lands; supply category icons, real photos, logo, favicon.
   - **Carried must-dos:** cards reuse `ProductImageTransition` + `STRIP_CARD_FRAME`; remove `prefetch={false}` for `/products` and `/search` once built; breadcrumb moves from `?category=` to `/products/<main>/<sub>` (sub slugs repeat across parents); no restricted value in cards, facets, search, sitemap (rule 9); drafts never listed; Phase 5 items from ADR 0064 §14/19 unchanged.
@@ -388,7 +390,8 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] 4a P4–P7: page shell, variant switcher, gallery + lightbox, restricted block (ADR 0064) → QA gate B
 - [ ] 4a P8: motion pass; P9 exit e2e + Lighthouse → QA gate C
 - [x] 4b L0: plan approved (`doc/phase-4b-plan.md`, all defaults), `ui-reviewer` roster line
-- [ ] 4b L1–L3: listing data layer, search, category icon/cover → QA gate A
+- [x] 4b L1: listing data layer (ADR 0065)
+- [ ] 4b L2–L3: search, category icon/cover → QA gate A
 - [ ] 4b L4–L6: listing pages, area pages, mega-menu + search UI → QA gate B
 - [ ] 4b L7–L8: motion + polish, exit e2e + Lighthouse → QA gate C
 - [ ] `lib/catalog/` cached + tagged, restricted fields excluded by projection — ADR 0002
@@ -519,3 +522,4 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-08: Phase 3 merged (PR #12). Branch `phase-4`; CSP fix cherry-picked. Phase 4a plan approved with answers; `ui-reviewer` (read-only) added; agent files edited (P0). P1 spike started.
 - 2026-10-08: P1 done (ADR 0062): `cacheComponents` off (customer would get 200 not 403 on /admin); `unstable_cache` + ISR + client-fetched restricted block. Plan amended. Next: P2.
 - 2026-10-08: Phase 4b planned: `doc/phase-4b-plan.md` (L0–L8, gates A/B/C, ADRs 0065–0067, questions Q1–Q9 with defaults). Existing subagents reused, no new skills. Waiting for the user's review; no code written.
+- 2026-10-08: Phase 4b plan approved (all defaults); L0 roster line; L1 listing data layer done (`c09ae39`, ADR 0065), 3669 unit green. Next: L2 search.
