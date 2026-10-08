@@ -1,34 +1,39 @@
 // The quick-spec panel beside the gallery (ADR 0054, the sheet's pink
-// columns): family, title, type, the shown variant's Model No., the "quick"
-// columns read from SPEC_COLUMNS, the output readout and the datasheet slot.
+// columns): family, title, type, the selected variant's Model No., the
+// "quick" columns from SPEC_COLUMNS, the optic switch, readout and datasheet.
 
 import type { PublicProductView } from "@/lib/catalog/view";
 
-import {
-  displaySpecs,
-  displayVariant,
-  quickSpecRows,
-  READOUT_KEYS,
-  specLabel,
-} from "./product-display";
+import { VariantSpecValues, VariantText } from "./product-detail-client";
+import { quickSpecRows, READOUT_KEYS, specLabel } from "./product-display";
 import { DatasheetSlot } from "./restricted-slots";
-import { SpecValues } from "./spec-values";
+import {
+  switcherLegend,
+  unionVariantSpecs,
+  type SwitchVariant,
+} from "./variant-selection";
+import { VariantSwitcher } from "./variant-switcher";
 
 /*
- * Static HTML always shows variant 1 (plan Q3). The P5 switcher updates the
- * elements marked data-field="model-no" / data-readout on the client.
+ * A Server Component inside <ProductDetailClient>. Rows are every quick column
+ * any variant fills (so a switch never adds or removes a row); the values
+ * themselves are small client leaves that follow the selected variant.
+ * Static HTML shows variant 1 (plan Q3).
  */
-export function QuickSpecPanel({ product }: { product: PublicProductView }) {
-  const variant = displayVariant(product);
-  const specs = displaySpecs(product);
-  const rows = quickSpecRows(specs);
-  const modelNo = variant?.modelNo ?? product.modelCode;
-  const readout = READOUT_KEYS.flatMap((key) => {
-    const values = specs[key];
-    return values && values.length > 0
-      ? [{ key, label: specLabel(key), value: values.join(", ") }]
-      : [];
-  });
+export function QuickSpecPanel({
+  product,
+  variants,
+}: {
+  product: PublicProductView;
+  /** The variants the switcher works on (public values only). */
+  variants: readonly SwitchVariant[];
+}) {
+  const shown = unionVariantSpecs(variants, product.specs);
+  const rows = quickSpecRows(shown);
+  const hasModelNo = Boolean(variants[0]?.modelNo);
+  const readout = READOUT_KEYS.filter(
+    (key) => (shown[key]?.length ?? 0) > 0,
+  ).map((key) => ({ key, label: specLabel(key) }));
   const family = product.family?.trim();
   const showFamily =
     family && family.toLowerCase() !== product.name.trim().toLowerCase();
@@ -54,14 +59,11 @@ export function QuickSpecPanel({ product }: { product: PublicProductView }) {
       ) : null}
 
       <dl className="mt-8 text-sm">
-        {modelNo ? (
+        {hasModelNo ? (
           <div className="flex items-baseline justify-between gap-6 border-y border-ink py-4">
             <dt className="text-grey-600">Model No.</dt>
-            <dd
-              data-field="model-no"
-              className="text-lg font-medium tracking-[0.04em] tabular-nums"
-            >
-              {modelNo}
+            <dd className="text-lg font-medium tracking-[0.04em] tabular-nums">
+              <VariantText field="model-no" />
             </dd>
           </div>
         ) : null}
@@ -73,22 +75,24 @@ export function QuickSpecPanel({ product }: { product: PublicProductView }) {
           >
             <dt className="text-grey-600">{row.label}</dt>
             <dd>
-              <SpecValues values={row.values} />
+              <VariantSpecValues specKey={row.key} />
             </dd>
           </div>
         ))}
       </dl>
 
-      {product.variants.length > 1 ? (
-        // P5 mounts the optic switcher here (plan "Variant switcher spec").
-        <div data-slot="variant-switcher" className="mt-6 text-sm">
-          <p className="text-grey-600">
-            Available in {product.variants.length} models.{" "}
+      {variants.length > 1 ? (
+        <div data-slot="variant-switcher" className="mt-8">
+          <VariantSwitcher
+            legend={switcherLegend(variants)}
+            name={`variant-${product.id}`}
+          />
+          <p className="mt-2 text-sm text-grey-600">
             <a
               href="#models"
               className="inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 hover:decoration-ink"
             >
-              Compare models
+              Compare all {variants.length} models
             </a>
           </p>
         </div>
@@ -99,11 +103,8 @@ export function QuickSpecPanel({ product }: { product: PublicProductView }) {
           {readout.map((item) => (
             <div key={item.key} className="bg-paper py-3 pr-4">
               <dt className="text-xs text-grey-600">{item.label}</dt>
-              <dd
-                data-field={item.key}
-                className="mt-1 font-display text-2xl tabular-nums"
-              >
-                {item.value}
+              <dd className="mt-1 font-display text-2xl tabular-nums">
+                <VariantText field={item.key} />
               </dd>
             </div>
           ))}

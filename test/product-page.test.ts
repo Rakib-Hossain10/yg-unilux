@@ -390,10 +390,37 @@ describe("product page: visibility is followed", () => {
   });
 });
 
+describe("product page: variant switcher (P5)", () => {
+  it("renders a radio per variant, variant 1 checked, and Show buttons", async () => {
+    const html = await renderPage(HERO);
+    const switcher = between(
+      html,
+      'data-slot="variant-switcher"',
+      'data-slot="datasheet"',
+    );
+    expect(switcher).toContain("<fieldset");
+    expect(switcher.match(/type="radio"/g)).toHaveLength(2);
+    expect(switcher).toMatch(/id="variant-option-0"[^>]*checked=""/);
+    expect(switcher).toContain(">Regular lens<");
+    expect(switcher).toContain('aria-live="polite"');
+    const models = between(
+      html,
+      'data-section="models"',
+      'data-section="downloads"',
+    );
+    // Variant 1's row is the one shown; the other offers "Show".
+    expect(models).toMatch(/>Shown<span class="sr-only"> AR-013A1</);
+    expect(models).toMatch(/>Show<span class="sr-only"> AR-013A2</);
+    // The table caption names the shown model (variant 1).
+    expect(html).toContain("Specifications of Arc AR-013A1: ");
+  });
+});
+
 describe("product page: single variant, no photo", () => {
   it("hides the switcher slot and Models table and shows the placeholder", async () => {
     const html = await renderPage("solo-so-001");
     expect(html).not.toContain('data-slot="variant-switcher"');
+    expect(html).not.toContain('type="radio"');
     expect(html).not.toContain('data-section="models"');
     expect(html).toContain("Solo: photo not yet available");
     expect(html).toContain("Datasheet coming soon");

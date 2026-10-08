@@ -5,12 +5,14 @@
 import type { PublicVariantView } from "@/lib/catalog/view";
 import type { SpecKey } from "@/models/spec-columns";
 
+import { ShowVariantButton, VariantTableRow } from "./product-detail-client";
 import { modelsTableColumns, specLabel, variantName } from "./product-display";
 
 /*
- * P5 makes each row select its variant (data-variant-index is the hook); in
- * the static page the rows are plain data. The scroll box is focusable so a
- * wide table can be scrolled by keyboard at 360 px without page scroll.
+ * Rows are plain server data; only the row wrapper (selected state) and the
+ * last cell's "Show" button are client leaves (P5). The scroll box is
+ * focusable so a wide table scrolls by keyboard at 360 px; it is `relative`
+ * so sr-only text inside cannot widen the page (P5 check at 360 px).
  */
 export function ModelsTable({
   variants,
@@ -40,7 +42,7 @@ export function ModelsTable({
         role="region"
         aria-labelledby="models-heading"
         tabIndex={0}
-        className="overflow-x-auto"
+        className="relative overflow-x-auto"
       >
         <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
           <caption className="sr-only">
@@ -65,14 +67,17 @@ export function ModelsTable({
                   {specLabel(key)}
                 </th>
               ))}
+              <th scope="col" className="py-3 font-normal">
+                <span className="sr-only">Show this model</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {variants.map((variant, index) => (
-              <tr
+              <VariantTableRow
                 key={variant.modelNo}
-                data-variant-index={index}
-                className="border-b border-grey-200"
+                index={index}
+                className="border-b border-grey-200 transition-colors duration-(--duration-quick) data-selected:bg-grey-50"
               >
                 <th
                   scope="row"
@@ -93,7 +98,10 @@ export function ModelsTable({
                     )}
                   </td>
                 ))}
-              </tr>
+                <td className="py-1 pr-2 text-right">
+                  <ShowVariantButton index={index} modelNo={variant.modelNo} />
+                </td>
+              </VariantTableRow>
             ))}
           </tbody>
         </table>

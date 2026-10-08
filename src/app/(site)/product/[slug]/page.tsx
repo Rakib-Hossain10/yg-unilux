@@ -16,12 +16,15 @@ import { Downloads } from "@/components/site/product/downloads";
 import { GalleryStage } from "@/components/site/product/gallery-stage";
 import { ModelsTable } from "@/components/site/product/models-table";
 import {
-  displayVariant,
+  ProductDetailClient,
+  SelectedModelNo,
+  VariantSpecValues,
+} from "@/components/site/product/product-detail-client";
+import {
   extraSpecGroups,
   metaDescription,
   productTitle,
   specTableGroups,
-  displaySpecs,
 } from "@/components/site/product/product-display";
 import {
   productJsonLd,
@@ -37,6 +40,10 @@ import {
   SpecTable,
   type SpecTableGroup,
 } from "@/components/site/product/spec-table";
+import {
+  unionVariantSpecs,
+  type SwitchVariant,
+} from "@/components/site/product/variant-selection";
 import { absoluteSiteUrl } from "@/components/site/site-url";
 import { getBreadcrumb } from "@/lib/catalog/categories";
 import { getFamilyProducts } from "@/lib/catalog/family";
@@ -49,8 +56,32 @@ import { EnvError } from "@/lib/env";
  * Never import @/lib/catalog/restricted here or in any component of this page
  * (static guard, ADR 0063). Never read headers()/cookies()/searchParams: the
  * page would turn dynamic and lose its static HTML (ADR 0062). The selected
- * variant (?model=) is read on the client by the P5 switcher.
+ * variant (?model=) is read on the client by ProductDetailClient (P5).
  */
+
+/**
+ * The variants the switcher works on: the product's own, or (a product saved
+ * without one) a single stand-in holding the product's values. The fields
+ * are copied one by one so nothing else of the view reaches the client.
+ */
+function switchVariants(product: PublicProductView): SwitchVariant[] {
+  if (product.variants.length === 0) {
+    return [
+      {
+        modelNo: product.modelCode ?? "",
+        label: null,
+        imagePublicId: null,
+        specs: product.specs,
+      },
+    ];
+  }
+  return product.variants.map((variant) => ({
+    modelNo: variant.modelNo,
+    label: variant.label,
+    imagePublicId: variant.imagePublicId,
+    specs: variant.specs,
+  }));
+}
 
 /** One read per render, shared by generateMetadata and the page. */
 const loadProduct = cache((slug: string): Promise<PublicProductView | null> =>
@@ -160,11 +191,22 @@ export default async function ProductPage({
   const cloudName = siteCloudName();
   const images = stageImages(product, cloudName);
   const title = productTitle(product);
-  const variant = displayVariant(product);
-  const shownModel = variant?.modelNo ?? product.modelCode ?? title;
+  const variants = switchVariants(product);
+  const shownModel = variants[0]?.modelNo ? <SelectedModelNo /> : title;
 
+  // Every table column any variant fills; the cell follows the selection,
+  // so a switch never adds or removes a row (no layout jump).
   const groups: SpecTableGroup[] = [
-    ...specTableGroups(displaySpecs(product)),
+    ...specTableGroups(unionVariantSpecs(variants, product.specs)).map(
+      (group) => ({
+        title: group.title,
+        rows: group.rows.map((row) => ({
+          key: row.key,
+          label: row.label,
+          content: <VariantSpecValues specKey={row.key} size="compact" />,
+        })),
+      }),
+    ),
     ...extraSpecGroups(product.extraSpecs).map((group) => ({
       title: group.title,
       rows: group.rows.map((row, index) => ({
@@ -195,28 +237,38 @@ export default async function ProductPage({
         <ProductBreadcrumb categories={categories} current={product.name} />
       </div>
 
-      <div
-        className={`${container} mt-4 grid gap-10 lg:grid-cols-12 lg:gap-16`}
-      >
-        <div className="lg:col-span-7">
-          <GalleryStage images={images} productName={product.name} />
+      {/* The one client state of the page (selected variant, P5): panel,
+          table and Models rows stay Server Components with client leaves. */}
+      <ProductDetailClient variants={variants}>
+        <div
+          className={`${container} mt-4 grid gap-10 lg:grid-cols-12 lg:gap-16`}
+        >
+          <div className="lg:col-span-7">
+            <GalleryStage images={images} productName={product.name} />
+          </div>
+          <div className="lg:col-span-5">
+            <QuickSpecPanel product={product} variants={variants} />
+          </div>
         </div>
-        <div className="lg:col-span-5">
-          <QuickSpecPanel product={product} />
+
+        <div className={`${container} mt-16 space-y-16 md:mt-28 md:space-y-28`}>
+          <SpecTable
+            groups={groups}
+            captionPrefix={
+              <>
+                Specifications of {product.name} {shownModel}
+              </>
+            }
+          >
+            {/* P7 renders restricted rows here for allowed viewers. */}
+            <RestrictedSpecsSlot />
+          </SpecTable>
+
+          <ModelsTable variants={product.variants} productTitle={title} />
         </div>
-      </div>
+      </ProductDetailClient>
 
       <div className={`${container} mt-16 space-y-16 md:mt-28 md:space-y-28`}>
-        <SpecTable
-          groups={groups}
-          captionPrefix={`Specifications of ${product.name} ${shownModel}`}
-        >
-          {/* P7 renders restricted rows here for allowed viewers. */}
-          <RestrictedSpecsSlot />
-        </SpecTable>
-
-        <ModelsTable variants={product.variants} productTitle={title} />
-
         <Downloads files={product.publicFiles} />
 
         <ApplicationsRow

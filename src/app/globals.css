@@ -199,3 +199,31 @@
   --ring: var(--color-ink);
   --radius: 0.5rem;
 }
+
+/* Product page, optic switch (P5): a value that changed with the selected
+   model gets a short warm wash that fades out, so the eye finds what is new.
+   Only colour changes (no movement); with reduced motion the wash is a static
+   tint that stays until the next switch. P8 may refine it (hook:
+   .variant-value[data-changed]). */
+@keyframes variant-value-changed {
+  from {
+    background-color: var(--color-grey-200);
+    box-shadow: 0 0 0 0.25rem var(--color-grey-200);
+  }
+  to {
+    background-color: transparent;
+    box-shadow: 0 0 0 0.25rem transparent;
+  }
+}
+
+.variant-value[data-changed] {
+  animation: variant-value-changed 1.6s var(--ease-calm) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .variant-value[data-changed] {
+    animation: none;
+    background-color: var(--color-grey-100);
+    box-shadow: 0 0 0 0.25rem var(--color-grey-100);
+  }
+}

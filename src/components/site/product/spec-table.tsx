@@ -8,7 +8,14 @@ import { SpecValues } from "./spec-values";
 
 export interface SpecTableGroup {
   title: string;
-  rows: { key: string; label: string; values: readonly string[] }[];
+  rows: {
+    key: string;
+    label: string;
+    /** Static values (extra specs) ... */
+    values?: readonly string[];
+    /** ... or a client leaf that follows the selected variant (P5). */
+    content?: ReactNode;
+  }[];
 }
 
 function GroupTable({
@@ -16,7 +23,7 @@ function GroupTable({
   captionPrefix,
 }: {
   group: SpecTableGroup;
-  captionPrefix: string;
+  captionPrefix: ReactNode;
 }) {
   return (
     <div className="grid gap-3 border-t border-grey-300 pt-5 pb-8 md:grid-cols-[minmax(11rem,1fr)_3fr] md:gap-10">
@@ -41,7 +48,9 @@ function GroupTable({
                 {row.label}
               </th>
               <td className="py-3 align-top">
-                <SpecValues values={row.values} size="compact" />
+                {row.content ?? (
+                  <SpecValues values={row.values ?? []} size="compact" />
+                )}
               </td>
             </tr>
           ))}
@@ -58,7 +67,7 @@ export function SpecTable({
 }: {
   groups: readonly SpecTableGroup[];
   /** E.g. "Specifications of Arc AR-013A1"; each caption adds its group. */
-  captionPrefix: string;
+  captionPrefix: ReactNode;
   /** Rendered after the groups: the reserved restricted-specs slot. */
   children?: ReactNode;
 }) {
