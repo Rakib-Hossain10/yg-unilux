@@ -6,7 +6,8 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetGeoLogForTests } from "./lib/geo";
-import { config, proxy } from "./proxy";
+import { MAX_SLUG_LENGTH } from "./lib/slug";
+import { config, isImpossibleProductPath, proxy } from "./proxy";
 
 const BASE = "http://localhost:3000";
 
@@ -73,6 +74,68 @@ describe("geo-block", () => {
     const response = proxy(request("/admin", { "x-vercel-ip-country": "CN" }));
     expect(response.status).toBe(403);
     expect(response.headers.get("location")).toBeNull();
+  });
+});
+
+describe("impossible product slugs (QA gate C L-1)", () => {
+  it.each([
+    ["upper case", "/product/UPPER-Case"],
+    ["too long", `/product/${"a".repeat(MAX_SLUG_LENGTH + 1)}`],
+    ["encoded traversal", "/product/..%2f..%2fetc"],
+    ["encoded markup", "/product/%3Cscript%3E"],
+    ["bad percent encoding", "/product/%E0%A4%A"],
+    ["underscore", "/product/arc_ar-013a"],
+    ["double dash", "/product/arc--ar"],
+    ["trailing dash", "/product/arc-"],
+    ["a dot", "/product/arc.ar"],
+    ["upper case flight request", "/product/ARC.rsc"],
+  ])("answers a plain, uncached 404 for %s", async (_label, path) => {
+    const response = proxy(request(path));
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-type")).toBe(
+      "text/plain; charset=utf-8",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await response.text()).toBe("Product not found.");
+  });
+
+  it.each([
+    "/product/arc-ar-013a",
+    `/product/${"a".repeat(MAX_SLUG_LENGTH)}`,
+    "/product/76",
+    // The page decodes the segment: an encoded valid slug is still valid.
+    "/product/%61rc-ar-013a",
+    "/product/arc-ar-013a.rsc",
+    // Not a single product segment: left to Next.
+    "/product",
+    "/product/",
+    "/product/arc/extra",
+    "/product/arc-ar-013a.segments/_tree.segment.rsc",
+    "/products/UPPER",
+    "/productx/UPPER",
+  ])("lets %s through", (path) => {
+    expect(isImpossibleProductPath(new URL(path, BASE).pathname)).toBe(false);
+    expect(passedThrough(proxy(request(path)))).toBe(true);
+  });
+
+  it("geo-blocks before the product 404", () => {
+    const response = proxy(
+      request("/product/UPPER", { "x-vercel-ip-country": "CN" }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("lets HK reach the product 404 like everyone else", () => {
+    const response = proxy(
+      request("/product/UPPER", { "x-vercel-ip-country": "HK" }),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("is covered by the matcher", () => {
+    const [source] = config.matcher;
+    expect(new RegExp(`^${source}$`).test("/product/UPPER")).toBe(true);
   });
 });
 

@@ -11,6 +11,8 @@ import {
   DEFAULT_RESTRICTED_SPEC_KEYS,
   SPEC_COLUMNS,
   SPEC_KEYS,
+  restrictedSpecKeys,
+  specColumnsFor,
 } from "./spec-columns";
 
 // The 28 spec keys as written in the task specification (independent source).
@@ -88,5 +90,41 @@ describe("spec columns", () => {
     expect(childPaths("specs", variantSchema).sort()).toEqual(
       [...EXPECTED_SPEC_KEYS].sort(),
     );
+  });
+});
+
+describe("placement (ADR 0054)", () => {
+  it("quick-spec panel = the five pink spec keys, in sheet order", () => {
+    expect(specColumnsFor("quick").map((c) => c.key)).toEqual([
+      "housingMaterial",
+      "housingFinish",
+      "reflectorColor",
+      "cutOutSize",
+      "cct",
+    ]);
+  });
+
+  it("every other column goes in the table, batchNo included", () => {
+    const table = specColumnsFor("table").map((c) => c.key);
+    expect(table).toContain("batchNo");
+    expect(table.length + specColumnsFor("quick").length).toBe(28);
+  });
+
+  it("restrictedSpecKeys defaults to the sheet defaults and honours overrides", () => {
+    expect(restrictedSpecKeys()).toEqual([...DEFAULT_RESTRICTED_SPEC_KEYS]);
+    expect(
+      restrictedSpecKeys({ driver: "public", lens: "restricted" }),
+    ).toEqual(expect.arrayContaining(["lens"]));
+    expect(restrictedSpecKeys({ driver: "public" })).not.toContain("driver");
+  });
+
+  it("restrictedSpecKeys fails closed: only an exact 'public' is public", () => {
+    for (const odd of ["RESTRICTED", "Public", "", "hidden", 1, null]) {
+      expect(
+        restrictedSpecKeys({ cct: odd, lens: odd } as never),
+        String(odd),
+      ).toEqual(expect.arrayContaining(["cct", "lens"]));
+    }
+    expect(restrictedSpecKeys({ cct: "public" })).not.toContain("cct");
   });
 });

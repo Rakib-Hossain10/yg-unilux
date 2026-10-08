@@ -5,6 +5,9 @@
 /** Who may see a spec column's values (an admin setting; this is the default). */
 export type SpecVisibility = "public" | "restricted";
 
+/** Where a spec column shows on the product page. */
+export type SpecPlacement = "quick" | "table";
+
 export interface SpecColumn {
   /** The fixed key under `product.specs` and `variant.specs`. */
   readonly key: string;
@@ -14,6 +17,14 @@ export interface SpecColumn {
    */
   readonly header: string;
   readonly defaultVisibility: SpecVisibility;
+  /**
+   * Where the product page shows it (ADR 0054): "quick" = the right-hand
+   * quick-spec panel (the sheet's pink columns), "table" = the full spec
+   * table (the green columns).
+   */
+  readonly placement: SpecPlacement;
+  /** The title of the group it belongs to (editor and spec table). */
+  readonly group: string;
 }
 
 /*
@@ -28,61 +39,201 @@ export interface SpecColumn {
  * that way.
  */
 export const SPEC_COLUMNS = [
-  { key: "batchNo", header: "Batch No.", defaultVisibility: "restricted" },
+  {
+    key: "batchNo",
+    header: "Batch No.",
+    defaultVisibility: "restricted",
+    placement: "table",
+    group: "Identification",
+  },
   {
     key: "housingMaterial",
     header: "Housing Material",
     defaultVisibility: "public",
+    placement: "quick",
+    group: "Housing and optics",
   },
   {
     key: "housingFinish",
     header: "Housing Color/Finish",
     defaultVisibility: "public",
+    placement: "quick",
+    group: "Housing and optics",
   },
   {
     key: "reflectorColor",
     header: "Reflector Color",
     defaultVisibility: "public",
+    placement: "quick",
+    group: "Housing and optics",
   },
-  { key: "lens", header: "Lens", defaultVisibility: "public" },
-  { key: "reflector", header: "Reflector", defaultVisibility: "public" },
-  { key: "diffuser", header: "Diffuser", defaultVisibility: "public" },
-  { key: "cutOutSize", header: "Cut-out Size", defaultVisibility: "public" },
-  { key: "dimensions", header: "Dimensions", defaultVisibility: "public" },
+  {
+    key: "lens",
+    header: "Lens",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Housing and optics",
+  },
+  {
+    key: "reflector",
+    header: "Reflector",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Housing and optics",
+  },
+  {
+    key: "diffuser",
+    header: "Diffuser",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Housing and optics",
+  },
+  {
+    key: "cutOutSize",
+    header: "Cut-out Size",
+    defaultVisibility: "public",
+    placement: "quick",
+    group: "Size and mounting",
+  },
+  {
+    key: "dimensions",
+    header: "Dimensions",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Size and mounting",
+  },
   {
     key: "rotatingAngle",
     header: "Rotating Angle",
     defaultVisibility: "public",
+    placement: "table",
+    group: "Size and mounting",
   },
-  { key: "chipType", header: "Chip Type", defaultVisibility: "restricted" },
-  { key: "holder", header: "Holder", defaultVisibility: "restricted" },
+  {
+    key: "chipType",
+    header: "Chip Type",
+    defaultVisibility: "restricted",
+    placement: "table",
+    group: "Light source",
+  },
+  {
+    key: "holder",
+    header: "Holder",
+    defaultVisibility: "restricted",
+    placement: "table",
+    group: "Light source",
+  },
   {
     key: "chipEfficiency",
     header: "Chip Efficiency",
     defaultVisibility: "restricted",
+    placement: "table",
+    group: "Light source",
   },
-  { key: "cct", header: "CCT", defaultVisibility: "public" },
-  { key: "cri", header: "CRI", defaultVisibility: "public" },
-  { key: "beamAngle", header: "Beam Angle", defaultVisibility: "public" },
-  { key: "ugr", header: "UGR", defaultVisibility: "public" },
-  { key: "driver", header: "Driver", defaultVisibility: "restricted" },
-  { key: "voltageInput", header: "Voltage Input", defaultVisibility: "public" },
-  { key: "wattage", header: "Wattage", defaultVisibility: "public" },
-  { key: "lumenOutput", header: "Lumen Output", defaultVisibility: "public" },
+  {
+    key: "cct",
+    header: "CCT",
+    defaultVisibility: "public",
+    placement: "quick",
+    group: "Light source",
+  },
+  {
+    key: "cri",
+    header: "CRI",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Light source",
+  },
+  {
+    key: "beamAngle",
+    header: "Beam Angle",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Light source",
+  },
+  {
+    key: "ugr",
+    header: "UGR",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Light source",
+  },
+  {
+    key: "driver",
+    header: "Driver",
+    defaultVisibility: "restricted",
+    placement: "table",
+    group: "Electrical and output",
+  },
+  {
+    key: "voltageInput",
+    header: "Voltage Input",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
+  },
+  {
+    key: "wattage",
+    header: "Wattage",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
+  },
+  {
+    key: "lumenOutput",
+    header: "Lumen Output",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
+  },
   {
     key: "lumenEfficiency",
     header: "Lumen Efficiency",
     defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
   },
-  { key: "powerFactor", header: "Power Factor", defaultVisibility: "public" },
-  { key: "sdcm", header: "SDCM", defaultVisibility: "public" },
-  { key: "dimmable", header: "Dimmable", defaultVisibility: "public" },
-  { key: "lifespan", header: "Lifespan", defaultVisibility: "public" },
-  { key: "ipRating", header: "IP Rating", defaultVisibility: "public" },
+  {
+    key: "powerFactor",
+    header: "Power Factor",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
+  },
+  {
+    key: "sdcm",
+    header: "SDCM",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
+  },
+  {
+    key: "dimmable",
+    header: "Dimmable",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Electrical and output",
+  },
+  {
+    key: "lifespan",
+    header: "Lifespan",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Lifetime and protection",
+  },
+  {
+    key: "ipRating",
+    header: "IP Rating",
+    defaultVisibility: "public",
+    placement: "table",
+    group: "Lifetime and protection",
+  },
   {
     key: "warrantyPeriod",
     header: "Warranty Period",
     defaultVisibility: "public",
+    placement: "table",
+    group: "Lifetime and protection",
   },
 ] as const satisfies readonly SpecColumn[];
 
@@ -126,3 +277,28 @@ export const FILTER_KEY_BY_SPEC: Readonly<Partial<Record<SpecKey, FilterKey>>> =
  * (e.g. cct: ["3000K", "4000K"]). A missing key means "not applicable".
  */
 export type SpecValues = Partial<Record<SpecKey, string[]>>;
+
+/** The spec columns shown in one product-page area, in sheet order. */
+export function specColumnsFor(
+  placement: SpecPlacement,
+): readonly (typeof SPEC_COLUMNS)[number][] {
+  return SPEC_COLUMNS.filter((column) => column.placement === placement);
+}
+
+/**
+ * The restricted keys under the default setting, or under an admin's
+ * effective one (`visibility` overrides by key). Fails closed: a column is
+ * public only when its value is exactly "public"; any other value (a typo,
+ * "RESTRICTED", a number from damaged data) counts as restricted. Pure.
+ */
+export function restrictedSpecKeys(
+  visibility: Partial<Record<SpecKey, SpecVisibility>> = {},
+): SpecKey[] {
+  return SPEC_COLUMNS.filter((column) => {
+    const value: unknown = visibility[column.key];
+    // Only a missing key falls back to the default; null is damaged data.
+    return (
+      (value === undefined ? column.defaultVisibility : value) !== "public"
+    );
+  }).map((column) => column.key);
+}

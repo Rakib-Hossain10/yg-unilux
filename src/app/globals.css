@@ -6,6 +6,8 @@
    defined at the bottom and only point at these tokens (ADR 0034). */
 
 @import "tailwindcss";
+/* Product page motion pass (P8): highlight, crossfades, lightbox, reveal. */
+@import "../components/motion/product/product-motion.css";
 
 /* State variants the shadcn components use (data-open, data-checked, ...).
    Copied from the shadcn package so we do not ship the package itself.
@@ -198,4 +200,40 @@
   --input: var(--color-grey-500);
   --ring: var(--color-ink);
   --radius: 0.5rem;
+}
+
+/* Product page, optic switch (P5): the changed-value highlight lives in
+   src/components/motion/product/product-motion.css (P8, hook:
+   .variant-value[data-changed]). */
+
+/* Product page, gallery (P6): the track and thumbnail strip scroll natively
+   (swipe, trackpad, keyboard through their buttons) with no visible bar; the
+   prev/next buttons, thumbnails and counter say where you are. */
+.gallery-track,
+.gallery-thumbs {
+  scrollbar-width: none;
+}
+.gallery-track::-webkit-scrollbar,
+.gallery-thumbs::-webkit-scrollbar {
+  display: none;
+}
+
+/* The stage button fills a clipped frame, so an outside outline would be cut
+   off: draw the focus ring inside, ink with a paper edge, visible on any
+   photograph. */
+.gallery-slide-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.gallery-slide-button:focus-visible::after {
+  box-shadow:
+    inset 0 0 0 2px var(--color-ink),
+    inset 0 0 0 4px var(--color-paper);
+}
+
+/* The page behind the open lightbox does not scroll. */
+html:has(dialog.lightbox[open]) {
+  overflow: hidden;
 }

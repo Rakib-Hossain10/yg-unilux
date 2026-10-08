@@ -1,15 +1,56 @@
 // Runs before every request (Next.js 16 "proxy", ADR 0007): blocks mainland
-// China with a 403 (ADR 0003, 0026), then sends obviously signed-out visitors
-// from /admin to /login. It is never the only guard: requireAdmin() is.
+// China with a 403 (ADR 0003, 0026), answers a plain 404 for product URLs
+// whose slug can never exist, then sends obviously signed-out visitors from
+// /admin to /login. It is never the only guard: requireAdmin() is.
 
 import { type NextRequest, NextResponse } from "next/server";
 
 import { blockedResponse, shouldGeoBlock } from "@/lib/geo";
 import { hasSessionCookie } from "@/lib/session-cookie";
+import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";
 
 /** /admin and everything under it (admin pages; admin APIs live under /api). */
 function isAdminPage(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
+/* /product/<one segment>; a trailing ".rsc" is Next's flight suffix. */
+const PRODUCT_PATH = /^\/product\/([^/]+?)(?:\.rsc)?$/;
+
+/**
+ * True for /product/<slug> when the slug can never be a product: too long,
+ * not decodable, or not lowercase dash-separated words (the same rules
+ * getPublicProduct applies, from @/lib/slug). No database call. Other paths,
+ * nested ones (/product/a/b) and Next's internal segment-prefetch paths
+ * (/product/x.segments/...) are left to Next.
+ */
+export function isImpossibleProductPath(pathname: string): boolean {
+  const match = PRODUCT_PATH.exec(pathname);
+  if (!match) return false;
+  let slug: string;
+  try {
+    // The page receives the decoded segment, so test what it would test.
+    slug = decodeURIComponent(match[1]!);
+  } catch {
+    return true;
+  }
+  return slug.length > MAX_SLUG_LENGTH || !SLUG_PATTERN.test(slug);
+}
+
+/*
+ * Plain, uncached 404. Next would render the not-found page and store it in
+ * the page cache under each new slug (QA gate C L-1), so a flood of random
+ * slugs could grow that store; this answer never reaches the page.
+ */
+function productNotFound(): Response {
+  return new Response("Product not found.", {
+    status: 404,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "private, no-store",
+      "X-Robots-Tag": "noindex",
+    },
+  });
 }
 
 export function proxy(request: NextRequest): Response {
@@ -18,7 +59,12 @@ export function proxy(request: NextRequest): Response {
   //    (ADR 0026).
   if (shouldGeoBlock(request.headers)) return blockedResponse();
 
-  // 2. Coarse admin redirect: no session cookie at all → login page. A
+  // 2. A product slug that can never exist: plain 404, no render, no cache.
+  if (isImpossibleProductPath(request.nextUrl.pathname)) {
+    return productNotFound();
+  }
+
+  // 3. Coarse admin redirect: no session cookie at all → login page. A
   //    cookie that is present but invalid is let through and refused by
   //    requireAdmin() on the server.
   if (

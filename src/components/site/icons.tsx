@@ -1,4 +1,5 @@
-// Small inline SVG icons for the site chrome (search, account, menu, close).
+// Small inline SVG icons for the site chrome (search, account, menu, close)
+// and the product gallery controls (arrows, zoom, enlarge).
 // Inline so there is no icon font or extra request; decorative by default,
 // so the surrounding link or button must carry the accessible name.
 
@@ -57,6 +58,48 @@ export function CloseIcon(props: IconProps) {
   return (
     <Icon {...props}>
       <path d="m6 6 12 12M18 6 6 18" />
+    </Icon>
+  );
+}
+
+/* Gallery and lightbox controls (product page, plan P6). */
+
+export function ArrowLeftIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M19 12H5m6-6-6 6 6 6" />
+    </Icon>
+  );
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12h14m-6-6 6 6-6 6" />
+    </Icon>
+  );
+}
+
+export function PlusIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </Icon>
+  );
+}
+
+export function MinusIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12h14" />
+    </Icon>
+  );
+}
+
+export function ExpandIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5" />
     </Icon>
   );
 }

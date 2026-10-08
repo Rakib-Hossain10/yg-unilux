@@ -11,7 +11,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,6 +20,7 @@ import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
+import { seedProductPages } from "./fixtures/product-pages";
 import {
   E2E_FAKE_PROVIDERS_PORT,
   E2E_PROVIDER_ENV,
@@ -51,6 +52,9 @@ const testEnv = {
   AUTH_SECRET: randomBytes(32).toString("base64url"),
   IP_HASH_SECRET: randomBytes(32).toString("base64url"),
   AUTH_URL: `http://localhost:${PORT}`,
+  // Canonical URLs, JSON-LD urls and the sitemap need it (/sitemap.xml
+  // answers 500 without it, ADR 0064).
+  SITE_URL: `http://localhost:${PORT}`,
   // The geo-block e2e tests send a fake country header (ADR 0026).
   GEO_BLOCK_ENABLED: "true",
   // Fake provider credentials (also used for the build, see providers-port.ts).
@@ -76,12 +80,34 @@ async function seed(uri: string): Promise<void> {
     // A customer straight from createUser keeps mustChangePassword: true,
     // like a real new account; /admin must still answer 403.
     await auth.api.createUser({ body: { ...E2E_CUSTOMER } });
+    // Every product-page spec's products, BEFORE `next start`: the cached
+    // published-slug list fills on the first product-page visit, so a
+    // product a spec inserted later would 404 (gate B harness fix).
+    await seedProductPages(getDb());
   } finally {
     await disconnectDb();
   }
 }
 
+/*
+ * Next keeps two caches on disk that outlive a build and a restart: the data
+ * cache (`unstable_cache` entries, e.g. the published-slug list) and the ISR
+ * route cache (rendered product pages and their 404s). The fixtures use fixed
+ * slugs, so an earlier run's page would be served (as STALE) on the first
+ * request of this one. Both are dropped before `next start`; the webServer
+ * command in playwright.config.ts also drops them before the build.
+ */
+function dropNextCaches(): void {
+  for (const dir of [
+    "../.next/cache/fetch-cache",
+    "../.next/server/route-cache",
+  ]) {
+    rmSync(new URL(dir, import.meta.url), { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
+  dropNextCaches();
   const replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   const uri = replSet.getUri("yg_e2e");
   await seed(uri);

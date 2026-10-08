@@ -5,15 +5,21 @@
 export interface NavLink {
   label: string;
   href: string;
+  /**
+   * false while the page behind the link is not built yet: a prefetch of a
+   * missing route logs a 404 in the console on every page (ui-reviewer L-6).
+   * Remove the flag (back to the default) once the route exists.
+   */
+  prefetch?: false;
 }
 
 /** Header, centred, in this order. */
 export const MAIN_NAV: readonly NavLink[] = [
-  { label: "Product", href: "/products" },
-  { label: "Services", href: "/services" },
-  { label: "OEM/ODM", href: "/oem-odm" },
-  { label: "R&D", href: "/rnd" },
-  { label: "About us", href: "/about" },
+  { label: "Product", href: "/products", prefetch: false },
+  { label: "Services", href: "/services", prefetch: false },
+  { label: "OEM/ODM", href: "/oem-odm", prefetch: false },
+  { label: "R&D", href: "/rnd", prefetch: false },
+  { label: "About us", href: "/about", prefetch: false },
 ];
 
 /** Footer columns. */

@@ -64,15 +64,22 @@ export default defineConfig({
   webServer: {
     // Production build, so tests see what Vercel serves (not the dev overlay),
     // started by e2e/test-server.ts against a seeded in-memory MongoDB.
+    // The on-disk data and ISR route caches are dropped first: a build would
+    // otherwise reuse `unstable_cache` entries (the published-slug list) and
+    // rendered pages from an earlier run or a `next dev` session, and seeded
+    // products would 404 or show stale content.
     command:
-      "npm run build && node --conditions=react-server --import tsx e2e/test-server.ts",
+      "node -e \"for (const d of ['.next/cache/fetch-cache','.next/server/route-cache']) require('node:fs').rmSync(d,{recursive:true,force:true})\" && npm run build && node --conditions=react-server --import tsx e2e/test-server.ts",
     url: baseURL,
     // Never reuse whatever runs on :3000 (e.g. `next dev` on the real
     // database): the tests need the seeded test accounts.
     reuseExistingServer: false,
     // Fake R2/Cloudinary values for the BUILD too: the admin CSP names the R2
     // host at build time. The test server itself starts the in-memory fakes.
-    env: { ...E2E_PROVIDER_ENV },
+    // MONGODB_URI is blanked so the build never reads the developer's
+    // .env.local database (an empty variable wins over .env files and env.ts
+    // reads "" as unset): no real product is prerendered or cached.
+    env: { ...E2E_PROVIDER_ENV, MONGODB_URI: "" },
     // First run on a machine downloads the MongoDB binary.
     timeout: 600_000,
     stdout: "pipe",
