@@ -5,12 +5,24 @@
 import type { PublicVariantView } from "@/lib/catalog/view";
 import type { SpecKey } from "@/models/spec-columns";
 
-import { ShowVariantButton, VariantTableRow } from "./product-detail-client";
+import { SelectVariantButton, VariantTableRow } from "./product-detail-client";
 import { modelsTableColumns, specLabel, variantName } from "./product-display";
 
 /*
+ * Figures compared down a column (ui-reviewer M-5): right-aligned with lining,
+ * tabular numerals so the digits line up row to row.
+ */
+const NUMERIC_COLUMNS: ReadonlySet<SpecKey> = new Set<SpecKey>([
+  "wattage",
+  "lumenOutput",
+  "lumenEfficiency",
+]);
+const cellAlign = (key: SpecKey) =>
+  NUMERIC_COLUMNS.has(key) ? "text-right lining-nums tabular-nums" : "";
+
+/*
  * Rows are plain server data; only the row wrapper (selected state) and the
- * last cell's "Show" button are client leaves (P5). The scroll box is
+ * last cell's "Select" button are client leaves (P5). The scroll box is
  * focusable so a wide table scrolls by keyboard at 360 px; it is `relative`
  * so sr-only text inside cannot widen the page (P5 check at 360 px).
  */
@@ -62,13 +74,13 @@ export function ModelsTable({
                 <th
                   key={key}
                   scope="col"
-                  className="py-3 pr-6 font-normal text-grey-600"
+                  className={`py-3 pr-6 font-normal text-grey-600 ${cellAlign(key)}`}
                 >
                   {specLabel(key)}
                 </th>
               ))}
               <th scope="col" className="py-3 font-normal">
-                <span className="sr-only">Show this model</span>
+                <span className="sr-only">Select this model</span>
               </th>
             </tr>
           </thead>
@@ -89,7 +101,7 @@ export function ModelsTable({
                   <td className="py-3 pr-6">{variantName(variant)}</td>
                 ) : null}
                 {columns.map((key) => (
-                  <td key={key} className="py-3 pr-6 tabular-nums">
+                  <td key={key} className={`py-3 pr-6 ${cellAlign(key)}`}>
                     {variant.specs[key]?.join(", ") || (
                       <span className="text-grey-600">
                         <span aria-hidden="true">–</span>
@@ -99,7 +111,10 @@ export function ModelsTable({
                   </td>
                 ))}
                 <td className="py-1 pr-2 text-right">
-                  <ShowVariantButton index={index} modelNo={variant.modelNo} />
+                  <SelectVariantButton
+                    index={index}
+                    modelNo={variant.modelNo}
+                  />
                 </td>
               </VariantTableRow>
             ))}

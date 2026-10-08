@@ -257,10 +257,13 @@ const scrollBehavior = (): ScrollBehavior =>
     : "smooth";
 
 /**
- * "Show" in a Models table row: selects that variant and takes the visitor
+ * "Select" in a Models table row: selects that variant and takes the visitor
  * to the switcher, focusing its radio (the panel shows the result there).
+ * The selected row says "Selected" as plain text: there is nothing to do
+ * there (ui-reviewer M-5). Focus never sits on it when it turns to text: the
+ * click moves focus to the radio first.
  */
-export function ShowVariantButton({
+export function SelectVariantButton({
   index,
   modelNo,
 }: {
@@ -279,13 +282,21 @@ export function ShowVariantButton({
         ?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
     }
   };
+  if (selected) {
+    return (
+      <span className="inline-flex min-h-11 items-center text-sm text-grey-600">
+        Selected
+        <span className="sr-only"> {modelNo}</span>
+      </span>
+    );
+  }
   return (
     <button
       type="button"
       onClick={onClick}
       className="inline-flex min-h-11 min-w-11 items-center text-sm text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink"
     >
-      {selected ? "Shown" : "Show"}
+      Select
       <span className="sr-only"> {modelNo}</span>
     </button>
   );

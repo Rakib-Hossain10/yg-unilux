@@ -10,8 +10,10 @@
 
 import { datasheetUrl, type DatasheetButtonState } from "./restricted-data";
 
+/* lg:pr-4: in the one-row slot (restricted-slots.tsx, lg:pr-1) a text link
+   keeps the same 20 px from the border as the label on the left. */
 const textLink =
-  "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
+  "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink lg:pr-4";
 
 /* A line-drawn arrow into a tray, at text size. */
 function DownloadIcon() {
@@ -48,7 +50,11 @@ export function DatasheetButton({
             <DownloadIcon />
             Download datasheet
           </a>
-          <span className="text-xs text-grey-600">Excel workbook (.xlsx)</span>
+          {/* Visually hidden in the one-row slot while the lg panel is too
+              narrow for it (lg–xl); screen readers always get it. */}
+          <span className="text-xs text-grey-600 lg:max-xl:sr-only">
+            Excel workbook (.xlsx)
+          </span>
         </p>
       );
     case "expired":
@@ -62,7 +68,11 @@ export function DatasheetButton({
     case "signin":
       return (
         <p data-datasheet-state="signin" className="text-sm text-grey-600">
-          Available to approved customers.{" "}
+          {/* The row holds only the link until the panel is wide enough
+              (2xl); screen readers always get the sentence. */}
+          <span className="lg:max-2xl:sr-only">
+            Available to approved customers.{" "}
+          </span>
           <a href="/login" className={textLink}>
             Sign in to download
           </a>

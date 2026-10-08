@@ -39,7 +39,10 @@ export function ProductBreadcrumb({
     <nav aria-label="Breadcrumb" className="text-sm text-grey-600">
       <ol className="flex flex-wrap items-center gap-x-2">
         <li className="flex items-center gap-2">
-          <Link href="/products" className={crumbLink}>
+          {/* prefetch={false} on both links until the /products listing
+              exists (Phase 4b): a prefetch of the missing route logs a 404
+              in the console on every product page. Remove it then. */}
+          <Link href="/products" prefetch={false} className={crumbLink}>
             Products
           </Link>
           <Separator />
@@ -49,6 +52,7 @@ export function ProductBreadcrumb({
             {/* The listing route and its URL filters arrive in Phase 4b (plan Q6). */}
             <Link
               href={`/products?category=${encodeURIComponent(category.slug)}`}
+              prefetch={false}
               className={crumbLink}
             >
               {category.name}

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   ProductDetailClient,
   SelectedModelNo,
-  ShowVariantButton,
+  SelectVariantButton,
   VariantSpecValues,
   VariantText,
 } from "./product-detail-client";
@@ -240,10 +240,20 @@ describe("server render of the client leaves", () => {
 
   it("names the Models table button with its model no.", () => {
     const html = render(
-      createElement(ShowVariantButton, { index: 1, modelNo: "AR-013A2" }),
+      createElement(SelectVariantButton, { index: 1, modelNo: "AR-013A2" }),
     );
     expect(html).toMatch(
-      /<button type="button"[^>]*>Show<span class="sr-only"> AR-013A2<\/span><\/button>/,
+      /<button type="button"[^>]*>Select<span class="sr-only"> AR-013A2<\/span><\/button>/,
+    );
+  });
+
+  it("shows the selected row as plain text, not a button", () => {
+    const html = render(
+      createElement(SelectVariantButton, { index: 0, modelNo: "AR-013A1" }),
+    );
+    expect(html).not.toContain("<button");
+    expect(html).toMatch(
+      /<span[^>]*>Selected<span class="sr-only"> AR-013A1<\/span><\/span>/,
     );
   });
 

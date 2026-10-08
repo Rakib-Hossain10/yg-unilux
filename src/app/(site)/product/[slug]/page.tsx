@@ -215,7 +215,7 @@ export default async function ProductPage({
   return (
     <article
       data-product-id={product.id}
-      className="product-page pt-4 pb-24 md:pt-6"
+      className="product-page pt-4 pb-24 md:pt-6 lg:pt-2"
     >
       {/* A plain text child: React writes script text raw (no entity
           escaping), and serializeJsonLd escapes "<" so it cannot close the
@@ -232,8 +232,11 @@ export default async function ProductPage({
         {/* Fetches this viewer's restricted answer after hydration (P7):
             only the product id crosses into it, never a restricted value. */}
         <RestrictedDataProvider productId={product.id}>
+          {/* lg: breadcrumb and stage sit tight under the header (stage top
+              ~125 px) so the panel's datasheet row stays in the first screen
+              at 1280×800 (ui-reviewer H-1). */}
           <div
-            className={`${container} mt-4 grid gap-10 lg:grid-cols-12 lg:gap-16`}
+            className={`${container} mt-4 grid gap-10 lg:mt-2 lg:grid-cols-12 lg:gap-16`}
           >
             <div className="lg:col-span-7">
               <GalleryStage

@@ -103,14 +103,14 @@ test("an unknown ?model= shows variant 1 and drops the parameter", async ({
   await expect(page).toHaveURL(new RegExp(`/product/${SLUG}\\?ref=x$`));
 });
 
-test("Show in the Models table selects the model and focuses its radio", async ({
+test("Select in the Models table selects the model and focuses its radio", async ({
   page,
 }) => {
   await page.goto(`/product/${SLUG}`);
   await waitForHydration(page);
   await page
     .locator("#models")
-    .getByRole("button", { name: `Show ${A2}` })
+    .getByRole("button", { name: `Select ${A2}` })
     .click();
   const second = page.getByRole("radio", { name: /Reflector/ });
   await expect(second).toBeChecked();

@@ -391,7 +391,7 @@ describe("product page: visibility is followed", () => {
 });
 
 describe("product page: variant switcher (P5)", () => {
-  it("renders a radio per variant, variant 1 checked, and Show buttons", async () => {
+  it("renders a radio per variant, variant 1 checked, and Select buttons", async () => {
     const html = await renderPage(HERO);
     const switcher = between(
       html,
@@ -408,9 +408,13 @@ describe("product page: variant switcher (P5)", () => {
       'data-section="models"',
       'data-section="downloads"',
     );
-    // Variant 1's row is the one shown; the other offers "Show".
-    expect(models).toMatch(/>Shown<span class="sr-only"> AR-013A1</);
-    expect(models).toMatch(/>Show<span class="sr-only"> AR-013A2</);
+    // Variant 1's row says "Selected" (plain text); the other offers "Select".
+    expect(models).toMatch(
+      /<span[^>]*>Selected<span class="sr-only"> AR-013A1</,
+    );
+    expect(models).toMatch(
+      /<button[^>]*>Select<span class="sr-only"> AR-013A2</,
+    );
     // The table caption names the shown model (variant 1).
     expect(html).toContain("Specifications of Arc AR-013A1: ");
   });

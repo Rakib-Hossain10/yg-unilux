@@ -1,6 +1,7 @@
 // The quick-spec panel beside the gallery (ADR 0054, the sheet's pink
 // columns): family, title, type, the selected variant's Model No., the
-// "quick" columns from SPEC_COLUMNS, the optic switch, readout and datasheet.
+// "quick" columns from SPEC_COLUMNS, the optic switch, readout, datasheet,
+// then the description.
 
 import type { PublicProductView } from "@/lib/catalog/view";
 
@@ -21,6 +22,18 @@ import { VariantSwitcher } from "./variant-switcher";
  * width, so the toggle always has something to reveal.
  */
 const DESCRIPTION_CLAMP = 240;
+
+/*
+ * Title size by name length (ui-reviewer M-3): a name longer than this
+ * (characters) steps down one size at every width, so long names stay within
+ * two or three lines of the panel instead of pushing the readout and the
+ * datasheet below the first screen.
+ */
+const LONG_NAME = 24;
+const titleSize = (name: string) =>
+  name.trim().length > LONG_NAME
+    ? "text-3xl md:text-4xl 2xl:text-5xl"
+    : "text-4xl md:text-5xl 2xl:text-6xl";
 
 /*
  * A Server Component inside <ProductDetailClient>. Rows are every quick column
@@ -54,25 +67,18 @@ export function QuickSpecPanel({
           {family}
         </p>
       ) : null}
-      <h1 className="mt-2 font-display text-4xl leading-[1.05] font-light text-balance md:text-5xl xl:text-6xl">
+      <h1
+        className={`mt-2 font-display leading-[1.05] font-light text-balance ${titleSize(product.name)}`}
+      >
         {product.name}
       </h1>
       {product.type ? (
         <p className="mt-2 text-base text-grey-600">{product.type}</p>
       ) : null}
-      {product.description ? (
-        <div className="mt-4">
-          <ExpandableText
-            text={product.description}
-            clamp={product.description.length > DESCRIPTION_CLAMP}
-            className="max-w-prose text-[0.9375rem] leading-relaxed text-grey-700"
-          />
-        </div>
-      ) : null}
 
       <dl className="mt-6 text-sm">
         {hasModelNo ? (
-          <div className="flex items-baseline justify-between gap-6 border-y border-ink py-2.5">
+          <div className="flex items-baseline justify-between gap-6 border-y border-ink py-2.5 lg:py-2">
             <dt className="text-grey-600">Model No.</dt>
             <dd className="text-lg font-medium tracking-[0.04em] tabular-nums">
               <VariantText field="model-no" />
@@ -83,7 +89,7 @@ export function QuickSpecPanel({
           <div
             key={row.key}
             data-spec={row.key}
-            className="grid grid-cols-[minmax(7.5rem,2fr)_3fr] gap-4 border-b border-grey-200 py-2.5"
+            className="grid grid-cols-[minmax(7.5rem,2fr)_3fr] gap-4 border-b border-grey-200 py-2.5 lg:py-2"
           >
             <dt className="text-grey-600">{row.label}</dt>
             <dd>
@@ -117,9 +123,9 @@ export function QuickSpecPanel({
       {readout.length > 0 ? (
         <dl data-readout className="mt-4 grid grid-cols-2 gap-px bg-grey-200">
           {readout.map((item) => (
-            <div key={item.key} className="bg-paper py-2.5 pr-4">
+            <div key={item.key} className="bg-paper py-2 pr-4">
               <dt className="text-xs text-grey-600">{item.label}</dt>
-              <dd className="mt-1 font-display text-2xl tabular-nums">
+              <dd className="mt-1 font-display text-2xl lining-nums tabular-nums">
                 <VariantText field={item.key} />
               </dd>
             </div>
@@ -133,6 +139,20 @@ export function QuickSpecPanel({
           hasDatasheet={product.hasDatasheet}
         />
       </div>
+
+      {/* The description follows the datasheet (ui-reviewer H-1): the plan's
+          panel is name, Model No., quick specs, optic switch, readout and
+          datasheet; above them a three-line description pushed the datasheet
+          below the first screen at 1280×800. */}
+      {product.description ? (
+        <div className="mt-6">
+          <ExpandableText
+            text={product.description}
+            clamp={product.description.length > DESCRIPTION_CLAMP}
+            className="max-w-prose text-[0.9375rem] leading-relaxed text-grey-700"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -59,8 +59,14 @@ const DOUBLE_TAP_DISTANCE = 30;
 const EXIT_HOLD_MS = 260;
 const noNavigate = () => undefined;
 
+/*
+ * Dark viewing room (ui-reviewer M-7): ink background, paper-coloured
+ * controls. The global focus ring takes currentColor, so it shows in paper on
+ * ink. Disabled arrows dim to grey-500 (not required to meet contrast, but
+ * still visible at 4:1 on ink).
+ */
 const iconButton =
-  "inline-flex size-11 shrink-0 items-center justify-center text-ink transition-colors duration-(--duration-quick) hover:bg-grey-100 aria-disabled:cursor-default aria-disabled:text-grey-400 aria-disabled:hover:bg-transparent";
+  "inline-flex size-11 shrink-0 items-center justify-center text-paper transition-colors duration-(--duration-quick) hover:bg-grey-800 aria-disabled:cursor-default aria-disabled:text-grey-500 aria-disabled:hover:bg-transparent";
 
 export function Lightbox({
   images,
@@ -115,7 +121,7 @@ export function Lightbox({
       onClose={onClose}
       // data-lenis-prevent: wheel/touch stay here if Lenis is added later.
       data-lenis-prevent=""
-      className="lightbox fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overscroll-contain bg-paper p-0 text-ink backdrop:bg-ink/60"
+      className="lightbox fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overscroll-contain bg-ink p-0 text-paper backdrop:bg-ink/60"
     >
       <p id={hintId} className="sr-only">
         Use plus and minus to zoom, the arrow keys to move between images or,
@@ -328,7 +334,7 @@ function LightboxView({
           >
             <PlusIcon />
           </button>
-          <span aria-hidden="true" className="mx-2 h-6 w-px bg-grey-200" />
+          <span aria-hidden="true" className="mx-2 h-6 w-px bg-grey-700" />
           <button
             type="button"
             aria-label="Close"
@@ -403,7 +409,7 @@ function LightboxView({
             >
               <ArrowLeftIcon />
             </button>
-            <p className="min-w-16 text-center text-sm text-grey-600 tabular-nums">
+            <p className="min-w-16 text-center text-sm text-grey-300 tabular-nums">
               {index + 1}
               <span aria-hidden="true"> / </span>
               <span className="sr-only"> of </span>

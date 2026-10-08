@@ -24,18 +24,23 @@ const iconLink =
   "inline-flex size-11 items-center justify-center rounded-full transition-colors duration-(--duration-quick) hover:bg-grey-100";
 
 export function SiteHeader() {
+  // Solid at 95% (ui-reviewer L-6): the 80% glass let busy photos read
+  // through the nav text while scrolling.
   return (
-    <header className="sticky top-0 z-40 border-b border-grey-200 bg-paper/95 backdrop-blur supports-[backdrop-filter]:bg-paper/80">
-      <div className="mx-auto grid h-16 max-w-(--container-site) grid-cols-[1fr_auto] items-center gap-4 px-4 md:grid-cols-[1fr_auto_1fr] md:px-8">
+    <header className="sticky top-0 z-40 border-b border-grey-200 bg-paper/95 backdrop-blur">
+      <div className="mx-auto grid h-16 max-w-(--container-site) grid-cols-[1fr_auto] items-center gap-4 px-4 md:px-8 lg:grid-cols-[1fr_auto_1fr]">
         <Wordmark />
 
-        {/* Desktop navigation, centred */}
-        <nav aria-label="Main" className="hidden md:block">
+        {/* Desktop navigation, centred. From lg only: at md the five
+            tracked-out items crowd the wordmark and "About us" wraps
+            (ui-reviewer M-2), so tablets get the menu button instead. */}
+        <nav aria-label="Main" className="hidden lg:block">
           <ul className="flex items-center gap-8 text-[0.8125rem] tracking-[0.14em] uppercase">
             {MAIN_NAV.map((item) => (
               <li key={item.href}>
                 <Link
                   href={item.href}
+                  prefetch={item.prefetch}
                   className="py-2 text-grey-700 transition-colors duration-(--duration-quick) hover:text-ink"
                 >
                   {item.label}
@@ -47,7 +52,14 @@ export function SiteHeader() {
 
         <div className="flex items-center justify-end gap-1">
           {/* The search overlay arrives in Phase 4. */}
-          <Link href="/search" aria-label="Search" className={iconLink}>
+          {/* prefetch={false}: /search is not built yet, and a prefetch of it
+              logs a 404 in the console on every page. Remove once it exists. */}
+          <Link
+            href="/search"
+            prefetch={false}
+            aria-label="Search"
+            className={iconLink}
+          >
             <SearchIcon />
           </Link>
           {/* Not prefetched: the sign-in page's form code (with its schema
@@ -74,6 +86,7 @@ export function SiteHeader() {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      prefetch={item.prefetch}
                       className="block py-4 text-sm tracking-[0.14em] uppercase"
                     >
                       {item.label}

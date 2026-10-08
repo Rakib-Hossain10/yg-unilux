@@ -51,7 +51,7 @@ export function MobileMenu({
   }, []);
 
   return (
-    <details ref={detailsRef} className="group md:hidden">
+    <details ref={detailsRef} className="group lg:hidden">
       <summary
         className={`${summaryClassName} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
         aria-label="Menu"

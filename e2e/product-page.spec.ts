@@ -345,10 +345,10 @@ test("keyboard only: gallery, lightbox, optic switch and Models table", async ({
     page.locator('[data-slot="variant-switcher"] [aria-live="polite"]'),
   ).toContainText(EXIT.v2);
 
-  // Models table: "Show <model>" with Enter selects it and focuses its radio.
+  // Models table: "Select <model>" with Enter selects it and focuses its radio.
   await tabUntil(page, '#models tr[data-variant-index="0"] button', 120);
   await expect(
-    page.locator("#models").getByRole("button", { name: `Show ${EXIT.v1}` }),
+    page.locator("#models").getByRole("button", { name: `Select ${EXIT.v1}` }),
   ).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.locator("#variant-option-0")).toBeChecked();
