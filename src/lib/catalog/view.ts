@@ -4,6 +4,7 @@
 
 import type { Types } from "mongoose";
 
+import type { Area } from "@/models/area";
 import type { Product, ProductImageKind } from "@/models/product";
 import {
   restrictedSpecKeys,
@@ -96,6 +97,14 @@ export interface ProductCardView {
   family: string | null;
   modelCode: string | null;
   image: PublicImageView | null;
+}
+
+/**
+ * A listing card (ADR 0065): the strip card plus how many model nos. the
+ * product has ("n models" when 2+). Still no spec value of any kind.
+ */
+export interface ListingCardView extends ProductCardView {
+  variantCount: number;
 }
 
 /** One step of the category path, main category first. */
@@ -245,6 +254,14 @@ export const PRODUCT_CARD_PROJECTION: Projection = {
   "images.kind": 1,
 };
 
+/** The area projection (product page areas, the public area list). */
+export const PUBLIC_AREA_PROJECTION: Projection = {
+  name: 1,
+  slug: 1,
+  bwImage: 1,
+  order: 1,
+};
+
 // ---------------------------------------------------------------------------
 // Lean document -> view
 // ---------------------------------------------------------------------------
@@ -338,6 +355,19 @@ export function toPublicProductView(
   };
 }
 
+/** The fields PUBLIC_AREA_PROJECTION loads. */
+export type PublicAreaDoc = Pick<Area, "_id" | "name" | "slug" | "bwImage">;
+
+/** An area as the public site shows it. */
+export function toPublicAreaView(area: PublicAreaDoc): PublicAreaView {
+  return {
+    id: hex(area._id),
+    name: area.name,
+    slug: area.slug,
+    bwImage: area.bwImage ?? null,
+  };
+}
+
 /** The card's picture: the first gallery photo, else the first image. */
 export function toProductCardView(doc: ProductCardDoc): ProductCardView {
   const images = imagesOf(doc);
@@ -352,5 +382,20 @@ export function toProductCardView(doc: ProductCardDoc): ProductCardView {
     family: orNull(doc.family),
     modelCode: orNull(doc.modelCode),
     image,
+  };
+}
+
+/** A card projected with a computed `variantCount` (never the variants). */
+export type ListingCardDoc = ProductCardDoc & { variantCount?: number };
+
+/** The listing card: the strip card plus the variant count. */
+export function toListingCardView(doc: ListingCardDoc): ListingCardView {
+  const count = doc.variantCount;
+  return {
+    ...toProductCardView(doc),
+    variantCount:
+      typeof count === "number" && Number.isInteger(count) && count > 0
+        ? count
+        : 0,
   };
 }

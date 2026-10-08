@@ -61,8 +61,14 @@ describe("catalog layer guards (TypeScript resolver, transitive)", () => {
     expect(catalogFiles.map(norm)).toEqual(
       expect.arrayContaining(
         [
+          "areas.ts",
           "categories.ts",
+          "category-path.ts",
+          "facets.ts",
           "family.ts",
+          "listing.ts",
+          "listing-params.ts",
+          "listing-scope.ts",
           "product.ts",
           "related.ts",
           "restricted.ts",
@@ -122,6 +128,22 @@ describe("catalog layer guards (TypeScript resolver, transitive)", () => {
       );
     expect(offenders).toEqual([]);
   }, 60_000);
+
+  it("keeps listing-params.ts client-safe: pure imports only (Phase 4b L1)", () => {
+    const file = path.join(CATALOG_DIR, "listing-params.ts");
+    const allowed = new Set(
+      [
+        "lib/slug.ts",
+        "models/product-constants.ts",
+        "models/spec-columns.ts",
+      ].map((f) => norm(path.join(SRC, f))),
+    );
+    // No "server-only", no database, no Next: only Zod and pure modules.
+    for (const edge of importEdges(file)) {
+      if (edge.file === null) expect(edge.spec).toBe("zod");
+      else expect(allowed.has(norm(edge.file)), edge.spec).toBe(true);
+    }
+  });
 
   it("has no barrel that could re-export the restricted reader", () => {
     expect(catalogFiles.some((file) => /[\\/]index\.[jt]sx?$/.test(file))).toBe(
