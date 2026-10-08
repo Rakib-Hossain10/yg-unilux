@@ -31,6 +31,8 @@ import {
   PlusIcon,
 } from "../icons";
 
+import { useExitHold } from "@/components/motion/product/use-exit-hold";
+
 import type { GalleryImage } from "./gallery-images";
 import {
   lightboxKeyCommand,
@@ -52,6 +54,10 @@ const SWIPE_DISTANCE = 48;
 /* Two taps closer than this in time and space are a double-tap. */
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_DISTANCE = 30;
+
+/* The close fade in product-motion.css (220 ms) plus a frame of margin. */
+const EXIT_HOLD_MS = 260;
+const noNavigate = () => undefined;
 
 const iconButton =
   "inline-flex size-11 shrink-0 items-center justify-center text-ink transition-colors duration-(--duration-quick) hover:bg-grey-100 aria-disabled:cursor-default aria-disabled:text-grey-400 aria-disabled:hover:bg-transparent";
@@ -88,6 +94,10 @@ export function Lightbox({
   }, [open]);
 
   const requestClose = () => dialogRef.current?.close();
+  // Motion pass (P8): while the dialog fades out, the last picture stays
+  // (inert, no navigation); reduced motion empties it at once, as before.
+  const viewIndex = useExitHold(index, EXIT_HOLD_MS);
+  const closing = index === null;
 
   return (
     <dialog
@@ -104,13 +114,14 @@ export function Lightbox({
         Use plus and minus to zoom, the arrow keys to move between images or,
         when zoomed, around the image. Escape closes.
       </p>
-      {index !== null && images[index] ? (
+      {viewIndex !== null && images[viewIndex] ? (
         <LightboxView
-          key={index}
+          key={viewIndex}
           images={images}
-          index={index}
+          index={viewIndex}
           productName={productName}
-          onNavigate={onNavigate}
+          inert={closing}
+          onNavigate={closing ? noNavigate : onNavigate}
           onRequestClose={requestClose}
         />
       ) : null}
@@ -134,12 +145,15 @@ function LightboxView({
   images,
   index,
   productName,
+  inert = false,
   onNavigate,
   onRequestClose,
 }: {
   images: readonly GalleryImage[];
   index: number;
   productName: string;
+  /** True while the closed dialog fades out (P8): not focusable. */
+  inert?: boolean;
   onNavigate: (index: number) => void;
   onRequestClose: () => void;
 }) {
@@ -180,6 +194,7 @@ function LightboxView({
   // One window listener while open; reads the latest zoom through the
   // effect event, so it is not re-added on every pan step.
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    if (inert) return;
     if (event.defaultPrevented || event.altKey || event.ctrlKey) return;
     if (event.metaKey) return;
     const frame = frameSize();
@@ -280,7 +295,7 @@ function LightboxView({
   if (!image) return null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div inert={inert} className="flex h-full flex-col">
       <div className="flex h-16 shrink-0 items-center justify-between gap-4 px-2 md:px-6">
         <p className="min-w-0 truncate pl-2 font-display text-xl font-light md:text-2xl">
           {productName}

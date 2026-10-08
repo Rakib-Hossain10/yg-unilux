@@ -22,7 +22,14 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
+
+import {
+  crossfadeJump,
+  isCrossfadeJump,
+} from "@/components/motion/product/gallery-jump";
+import { ProductImageTransition } from "@/components/motion/product/product-image-transition";
 
 import { ArrowLeftIcon, ArrowRightIcon, ExpandIcon } from "../icons";
 
@@ -44,10 +51,13 @@ const controlButton =
 export function Gallery({
   images,
   productName,
+  productId,
 }: {
   /** At least one image (the server shows the placeholder otherwise). */
   images: readonly GalleryImage[];
   productName: string;
+  /** Names the stage for the listing -> product morph (P8); optional. */
+  productId?: string;
 }) {
   const total = images.length;
   const trackId = useId();
@@ -85,9 +95,24 @@ export function Gallery({
         index,
         timer: window.setTimeout(clearPending, SCROLL_SETTLE_MS),
       };
+      const smooth = !instant && !prefersReducedMotion();
+      const from = Math.round(
+        track.scrollLeft / Math.max(1, slide.offsetWidth),
+      );
+      const jump = () =>
+        track.scrollTo({ left: slide.offsetLeft, behavior: "instant" });
+      // Motion pass (P8): a jump past neighbours crossfades the stage in
+      // place; next to it, or without the API, the native slide stays.
+      if (
+        smooth &&
+        isCrossfadeJump(from, index) &&
+        track.parentElement &&
+        crossfadeJump(track.parentElement, jump)
+      )
+        return;
       track.scrollTo({
         left: slide.offsetLeft,
-        behavior: instant || prefersReducedMotion() ? "instant" : "smooth",
+        behavior: smooth ? "smooth" : "instant",
       });
     },
     [clearPending],
@@ -207,45 +232,47 @@ export function Gallery({
       aria-label={`${productName} images`}
       className="gallery"
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-grey-100">
-        <div
-          ref={trackRef}
-          id={trackId}
-          data-slot="gallery-track"
-          onKeyDown={several ? onTrackKeyDown : undefined}
-          className="gallery-track absolute inset-0 flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain"
-        >
-          {images.map((image, index) => (
-            <div
-              key={image.publicId}
-              role="group"
-              aria-roledescription="slide"
-              aria-label={`${index + 1} of ${total}`}
-              data-gallery-slide={index}
-              data-current={index === current ? "" : undefined}
-              className="relative h-full w-full shrink-0 snap-center snap-always"
-            >
-              <button
-                type="button"
-                tabIndex={index === current ? 0 : -1}
-                onClick={(event) => openLightbox(index, event.currentTarget)}
-                className="gallery-slide-button absolute inset-0 block size-full cursor-zoom-in focus-visible:outline-none"
+      <StageTransition productId={productId}>
+        <div className="relative aspect-[4/3] w-full overflow-hidden bg-grey-100">
+          <div
+            ref={trackRef}
+            id={trackId}
+            data-slot="gallery-track"
+            onKeyDown={several ? onTrackKeyDown : undefined}
+            className="gallery-track absolute inset-0 flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain"
+          >
+            {images.map((image, index) => (
+              <div
+                key={image.publicId}
+                role="group"
+                aria-roledescription="slide"
+                aria-label={`${index + 1} of ${total}`}
+                data-gallery-slide={index}
+                data-current={index === current ? "" : undefined}
+                className="relative h-full w-full shrink-0 snap-center snap-always"
               >
-                {/* Named "View larger: {alt}" (the text, then the picture). */}
-                <span className="sr-only">View larger: </span>
-                <Image
-                  src={image.src}
-                  alt={image.alt}
-                  fill
-                  preload={index === 0}
-                  sizes="(min-width: 1440px) 820px, (min-width: 1024px) 58vw, 100vw"
-                  className="object-contain"
-                />
-              </button>
-            </div>
-          ))}
+                <button
+                  type="button"
+                  tabIndex={index === current ? 0 : -1}
+                  onClick={(event) => openLightbox(index, event.currentTarget)}
+                  className="gallery-slide-button absolute inset-0 block size-full cursor-zoom-in focus-visible:outline-none"
+                >
+                  {/* Named "View larger: {alt}" (the text, then the picture). */}
+                  <span className="sr-only">View larger: </span>
+                  <Image
+                    src={image.src}
+                    alt={image.alt}
+                    fill
+                    preload={index === 0}
+                    sizes="(min-width: 1440px) 820px, (min-width: 1024px) 58vw, 100vw"
+                    className="object-contain"
+                  />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      </StageTransition>
 
       <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-6">
         {several ? (
@@ -341,5 +368,22 @@ export function Gallery({
         onClose={onLightboxClose}
       />
     </div>
+  );
+}
+
+/* The shared-element name only when the product is known (P8). */
+function StageTransition({
+  productId,
+  children,
+}: {
+  productId?: string;
+  children: ReactNode;
+}) {
+  return productId ? (
+    <ProductImageTransition productId={productId}>
+      {children}
+    </ProductImageTransition>
+  ) : (
+    children
   );
 }

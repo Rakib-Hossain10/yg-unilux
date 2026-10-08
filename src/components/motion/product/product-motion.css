@@ -1,0 +1,192 @@
+/* Product page motion pass (P8, motion-engineer). Imported once by
+   src/app/globals.css. Rules:
+   - only opacity and transform animate (plus the discrete display/overlay
+     hand-off that lets the native <dialog> fade out);
+   - nothing here hides server-rendered content: every hidden start state is
+     on a hook that only exists after a visitor action or after hydration
+     (data-changed, data-crossfade-old, data-reveal, an open dialog);
+   - every animation sits under prefers-reduced-motion: no-preference, and the
+     site-wide reduced-motion rule in globals.css stays the backstop. */
+
+/* ---- Optic switch: changed-value highlight (all values) ----------------
+   A value that changed with the selected model gets a soft wash behind it
+   that fades out. The wash is a pseudo-element whose opacity animates (the
+   compositor's job), not a background-color animation. Reduced motion keeps
+   a static tint until the next switch (P5 behaviour). */
+.variant-value[data-changed] {
+  position: relative;
+  isolation: isolate;
+}
+.variant-value[data-changed]::after {
+  content: "";
+  position: absolute;
+  inset: -0.125rem -0.25rem;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--color-grey-100);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .variant-value[data-changed]::after {
+    background-color: var(--color-grey-200);
+    animation: variant-value-wash 1.6s var(--ease-calm) both;
+  }
+}
+
+@keyframes variant-value-wash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---- Optic switch: readout crossfade (Model No., lumen, efficacy) -------
+   The wrapper is the positioning box; the old value (aria-hidden, rendered
+   only with motion) lies on top of the new one without taking space. */
+.value-crossfade {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.value-crossfade > .variant-value {
+  display: inline-block;
+  max-width: 100%;
+}
+.value-crossfade-old {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .value-crossfade > .variant-value[data-changed] {
+    animation: value-crossfade-in 420ms var(--ease-calm) 60ms both;
+  }
+  .value-crossfade-old {
+    animation: value-crossfade-out 260ms var(--ease-calm) both;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .value-crossfade-old {
+    display: none;
+  }
+}
+
+@keyframes value-crossfade-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.35em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes value-crossfade-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-0.35em);
+  }
+}
+
+/* ---- Gallery: crossfade for jumps of more than one slide ---------------
+   gallery-jump.ts names the stage frame for one view transition of type
+   "gallery-jump"; the root is not captured, so the rest of the page stays
+   live and only the frame's two snapshots crossfade. */
+html:active-view-transition-type(gallery-jump) {
+  view-transition-name: none;
+}
+::view-transition-group(product-gallery-stage) {
+  animation-duration: 380ms;
+  animation-timing-function: var(--ease-calm);
+}
+::view-transition-old(product-gallery-stage),
+::view-transition-new(product-gallery-stage) {
+  animation-duration: 380ms;
+  animation-timing-function: var(--ease-calm);
+}
+
+/* ---- Listing -> product morph (wired for Phase 4b) ---------------------- */
+::view-transition-group(.product-image-morph) {
+  animation-duration: 480ms;
+  animation-timing-function: var(--ease-calm);
+}
+
+/* View transitions of any kind collapse to an instant swap. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/* ---- Lightbox: open / close ---------------------------------------------
+   The native dialog fades in from @starting-style and fades out through
+   the discrete display/overlay hand-off; browsers without them open and
+   close instantly. The frame's picture settles in on every image (the view
+   is re-keyed per image), without touching the zoom transform above it. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog.lightbox {
+    opacity: 0;
+    transition:
+      opacity 220ms var(--ease-calm),
+      display 220ms allow-discrete,
+      overlay 220ms allow-discrete;
+  }
+  dialog.lightbox[open] {
+    opacity: 1;
+  }
+  @starting-style {
+    dialog.lightbox[open] {
+      opacity: 0;
+    }
+  }
+
+  dialog.lightbox [data-slot="lightbox-frame"] img {
+    animation: lightbox-image-in 360ms var(--ease-calm) both;
+  }
+}
+
+@keyframes lightbox-image-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Table sections: one quiet reveal -----------------------------------
+   section-reveal.tsx marks only targets below the fold after hydration. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal] {
+    opacity: 0;
+    transform: translateY(1.5rem);
+  }
+  [data-reveal="in"] {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 600ms var(--ease-calm),
+      transform 600ms var(--ease-calm);
+  }
+}
+@media print {
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

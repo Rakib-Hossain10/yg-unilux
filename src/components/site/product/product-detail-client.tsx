@@ -23,6 +23,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { ValueCrossfade } from "@/components/motion/product/value-crossfade";
 import type { SpecKey } from "@/models/spec-columns";
 
 import { SpecValues } from "./spec-values";
@@ -140,10 +141,16 @@ type Field = "model-no" | SpecKey;
 function useField(field: Field) {
   const { variants, index, previous } = useVariantSelection();
   const current = variants[index];
-  const changed =
-    previous !== null && valueChanged(field, variants[previous], current);
-  return { current, changed, index };
+  const before = previous !== null ? variants[previous] : undefined;
+  const changed = previous !== null && valueChanged(field, before, current);
+  return { current, before, changed, index };
 }
+
+/* The single-line text of one field of a variant ("" = not applicable). */
+const fieldText = (field: Field, variant: SwitchVariant | undefined) =>
+  field === "model-no"
+    ? (variant?.modelNo ?? "")
+    : (variant?.specs[field] ?? []).join(", ");
 
 const notApplicable = (
   <span className="text-grey-600">
@@ -155,7 +162,7 @@ const notApplicable = (
 /**
  * A single line value of the selected variant (Model No., lumen readout).
  * Carries data-field for tests and the motion pass; re-keyed when the value
- * changes so the highlight restarts.
+ * changes so the highlight and the readout crossfade (P8) restart.
  */
 export function VariantText({
   field,
@@ -164,20 +171,28 @@ export function VariantText({
   field: Field;
   className?: string;
 }) {
-  const { current, changed, index } = useField(field);
-  const text =
-    field === "model-no"
-      ? (current?.modelNo ?? "")
-      : (current?.specs[field] ?? []).join(", ");
-  return (
+  const { current, before, changed, index } = useField(field);
+  const value = (
     <span
       key={changed ? `changed-${index}` : "static"}
       data-field={field}
       data-changed={changed ? "" : undefined}
       className={`variant-value ${className ?? ""}`.trim()}
     >
-      {text || notApplicable}
+      {fieldText(field, current) || notApplicable}
     </span>
+  );
+  // The server HTML (and every unchanged value) is the bare span; only a
+  // value changed by a switch gets the crossfade wrapper (same in every
+  // motion setting, so the final DOM does not depend on it).
+  if (!changed) return value;
+  return (
+    <ValueCrossfade
+      key={`changed-${index}`}
+      previous={fieldText(field, before) || "–"}
+    >
+      {value}
+    </ValueCrossfade>
   );
 }
 

@@ -6,6 +6,8 @@
    defined at the bottom and only point at these tokens (ADR 0034). */
 
 @import "tailwindcss";
+/* Product page motion pass (P8): highlight, crossfades, lightbox, reveal. */
+@import "../components/motion/product/product-motion.css";
 
 /* State variants the shadcn components use (data-open, data-checked, ...).
    Copied from the shadcn package so we do not ship the package itself.
@@ -200,33 +202,9 @@
   --radius: 0.5rem;
 }
 
-/* Product page, optic switch (P5): a value that changed with the selected
-   model gets a short warm wash that fades out, so the eye finds what is new.
-   Only colour changes (no movement); with reduced motion the wash is a static
-   tint that stays until the next switch. P8 may refine it (hook:
+/* Product page, optic switch (P5): the changed-value highlight lives in
+   src/components/motion/product/product-motion.css (P8, hook:
    .variant-value[data-changed]). */
-@keyframes variant-value-changed {
-  from {
-    background-color: var(--color-grey-200);
-    box-shadow: 0 0 0 0.25rem var(--color-grey-200);
-  }
-  to {
-    background-color: transparent;
-    box-shadow: 0 0 0 0.25rem transparent;
-  }
-}
-
-.variant-value[data-changed] {
-  animation: variant-value-changed 1.6s var(--ease-calm) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .variant-value[data-changed] {
-    animation: none;
-    background-color: var(--color-grey-100);
-    box-shadow: 0 0 0 0.25rem var(--color-grey-100);
-  }
-}
 
 /* Product page, gallery (P6): the track and thumbnail strip scroll natively
    (swipe, trackpad, keyboard through their buttons) with no visible bar; the

@@ -10,6 +10,7 @@ import {
   siteCloudName,
   cloudinaryImageUrl,
 } from "@/components/site/cloudinary-image";
+import { SectionReveal } from "@/components/motion/product/section-reveal";
 import { ApplicationsRow } from "@/components/site/product/applications-row";
 import { ProductBreadcrumb } from "@/components/site/product/breadcrumb";
 import { Downloads } from "@/components/site/product/downloads";
@@ -232,7 +233,11 @@ export default async function ProductPage({
             className={`${container} mt-4 grid gap-10 lg:grid-cols-12 lg:gap-16`}
           >
             <div className="lg:col-span-7">
-              <GalleryStage images={images} productName={product.name} />
+              <GalleryStage
+                images={images}
+                productName={product.name}
+                productId={product.id}
+              />
             </div>
             <div className="lg:col-span-5">
               <QuickSpecPanel product={product} variants={variants} />
@@ -256,6 +261,9 @@ export default async function ProductPage({
 
             <ModelsTable variants={product.variants} productTitle={title} />
           </div>
+          {/* Motion pass (P8): spec groups and Models rise in once; renders
+              nothing and only marks sections below the fold after hydration. */}
+          <SectionReveal />
         </RestrictedDataProvider>
       </ProductDetailClient>
 
