@@ -54,3 +54,6 @@ Vercel rejects request bodies over about 4.5 MB. Datasheets and images can each 
   - every removed image.
 - Verification is subject to Cloudinary Admin API rate limits: one `resource` call per new image.
 - The Phase 3 import uploads images on the server, under the same id shape, and does not go through `verifyUploadedImage`.
+
+## Note (2026-10-08): the admin CSP only applies if /admin is loaded as its own document
+The upload hosts are allowed on `/admin/:path*` only. Reaching `/admin` by a client-side navigation from `/login` kept the login page's `connect-src 'self'` and blocked every direct upload. Sign-in and sign-out are now full page loads (ADR 0027 note, 2026-10-08).
