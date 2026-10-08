@@ -1,10 +1,15 @@
-// Product breadcrumb: Products › main category › sub category › product,
-// from the cached category tree (ADR 0063). A <nav> with an ordered list and
-// aria-current on the last step. Server Component.
+// Catalog breadcrumb: Products › main category › sub category › current
+// page (a product, or the category of a listing page), from the cached
+// category tree (ADR 0063). Category steps link to their listing paths
+// (/products/<main>/<sub>: sub slugs repeat across parents, ADR 0065). A
+// <nav> with an ordered list and aria-current on the last step. Server
+// Component.
 
 import Link from "next/link";
 
 import type { BreadcrumbItem } from "@/lib/catalog/view";
+
+import { categoryListingPath, PRODUCTS_PATH } from "../listing/listing-urls";
 
 function Separator() {
   return (
@@ -32,27 +37,22 @@ export function ProductBreadcrumb({
   current,
 }: {
   categories: readonly BreadcrumbItem[];
-  /** The product's name, shown last and not linked. */
+  /** The current page's name (product or category), shown last, unlinked. */
   current: string;
 }) {
   return (
     <nav aria-label="Breadcrumb" className="text-sm text-grey-600">
       <ol className="flex flex-wrap items-center gap-x-2">
         <li className="flex items-center gap-2">
-          {/* prefetch={false} on both links until the /products listing
-              exists (Phase 4b): a prefetch of the missing route logs a 404
-              in the console on every product page. Remove it then. */}
-          <Link href="/products" prefetch={false} className={crumbLink}>
+          <Link href={PRODUCTS_PATH} className={crumbLink}>
             Products
           </Link>
           <Separator />
         </li>
-        {categories.map((category) => (
+        {categories.map((category, index) => (
           <li key={category.id} className="flex items-center gap-2">
-            {/* The listing route and its URL filters arrive in Phase 4b (plan Q6). */}
             <Link
-              href={`/products?category=${encodeURIComponent(category.slug)}`}
-              prefetch={false}
+              href={categoryListingPath(categories.slice(0, index + 1))}
               className={crumbLink}
             >
               {category.name}

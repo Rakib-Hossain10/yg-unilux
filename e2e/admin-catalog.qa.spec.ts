@@ -225,7 +225,22 @@ test.describe("categories", () => {
     await expect.poll(names).toEqual([TRACK, SPOT]);
     // aria-disabled (not disabled), so keyboard focus survives the move.
     await expect(up).toBeFocused();
+    // Main categories seeded before the server starts (the listing fixtures,
+    // e2e/fixtures/listing-pages.ts) sit above the ones this file creates:
+    // keep moving up until TRACK reaches the top of the tree (bounded).
+    const trackIndex = async () =>
+      (await tree.locator(":scope > li").allInnerTexts()).findIndex((t) =>
+        t.includes(TRACK),
+      );
+    for (let step = 0; step < 10; step++) {
+      if ((await up.getAttribute("aria-disabled")) === "true") break;
+      const before = await trackIndex();
+      await page.keyboard.press("Enter");
+      await expect.poll(trackIndex).toBe(before - 1);
+      await expect(up).toBeFocused();
+    }
     await expect(up).toHaveAttribute("aria-disabled", "true");
+    await expect(tree.locator(":scope > li").first()).toContainText(TRACK);
 
     // Pressing an aria-disabled edge button does nothing.
     await page.keyboard.press("Enter");

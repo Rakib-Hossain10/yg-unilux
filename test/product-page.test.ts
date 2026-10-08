@@ -221,8 +221,10 @@ describe("product page: default visibility", () => {
     const html = await renderPage(HERO);
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Breadcrumb"');
-    expect(html).toContain('href="/products?category=spot-lights"');
-    expect(html).toContain('href="/products?category=recessed"');
+    // Category steps link to listing paths (Phase 4b L4, ADR 0065 Q1).
+    expect(html).toContain('href="/products/spot-lights"');
+    expect(html).toContain('href="/products/spot-lights/recessed"');
+    expect(html).not.toContain("?category=");
     expect(html).toContain('aria-current="page"');
     const panel = between(
       html,

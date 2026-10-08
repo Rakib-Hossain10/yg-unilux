@@ -19,13 +19,30 @@ export function siteCloudName(): string | null {
 /**
  * The untransformed delivery URL of a public image, or null without a cloud
  * name. next/image resizes it (remotePatterns are pinned to our cloud, ADR
- * 0016), so no Cloudinary transformation is put in the URL.
+ * 0016), so no Cloudinary transformation is put in the URL unless a
+ * fixed one from CLOUDINARY_TRANSFORMS is asked for (smart crops).
  */
 export function cloudinaryImageUrl(
   cloudName: string | null,
   publicId: string,
+  transformation?: CloudinaryTransformation,
 ): string | null {
   if (!cloudName || publicId === "") return null;
   const path = publicId.split("/").map(encodeURIComponent).join("/");
-  return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/image/upload/${path}`;
+  const step = transformation ? `${transformation}/` : "";
+  return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/image/upload/${step}${path}`;
 }
+
+/*
+ * The few fixed transformations the site asks Cloudinary for (a closed list,
+ * never built from input). next/image still resizes the result.
+ * - categoryCover: smart crop to the listing header's 3:2 frame (ADR 0067).
+ *   No format step: next/image already serves AVIF/WebP, and this helper
+ *   never asks for an automatic format (an icon could be an SVG original;
+ *   static QA check in test/listing-gate-a-l3.qa.test.ts).
+ */
+export const CLOUDINARY_TRANSFORMS = {
+  categoryCover: "c_fill,g_auto,ar_3:2,w_2400,q_auto",
+} as const;
+export type CloudinaryTransformation =
+  (typeof CLOUDINARY_TRANSFORMS)[keyof typeof CLOUDINARY_TRANSFORMS];

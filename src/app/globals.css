@@ -135,6 +135,12 @@
   }
 }
 
+/* Listing filter sheet (src/components/site/listing/filter-sheet.tsx): the
+   page behind the open modal sheet does not scroll. */
+html:has(.filter-sheet:modal) {
+  overflow: hidden;
+}
+
 /* Respect the visitor's motion setting site-wide (CLAUDE.md "Design"):
    transitions and animations collapse to an instant change. */
 @media (prefers-reduced-motion: reduce) {

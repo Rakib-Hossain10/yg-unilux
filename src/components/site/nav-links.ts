@@ -15,7 +15,7 @@ export interface NavLink {
 
 /** Header, centred, in this order. */
 export const MAIN_NAV: readonly NavLink[] = [
-  { label: "Product", href: "/products", prefetch: false },
+  { label: "Product", href: "/products" },
   { label: "Services", href: "/services", prefetch: false },
   { label: "OEM/ODM", href: "/oem-odm", prefetch: false },
   { label: "R&D", href: "/rnd", prefetch: false },

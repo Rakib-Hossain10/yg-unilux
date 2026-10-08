@@ -20,6 +20,7 @@ import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
+import { seedListingPages } from "./fixtures/listing-pages";
 import { seedProductPages } from "./fixtures/product-pages";
 import {
   E2E_FAKE_PROVIDERS_PORT,
@@ -84,6 +85,9 @@ async function seed(uri: string): Promise<void> {
     // published-slug list fills on the first product-page visit, so a
     // product a spec inserted later would 404 (gate B harness fix).
     await seedProductPages(getDb());
+    // The listing specs' categories and products, for the same reason: the
+    // category tree is cached on the first catalog request.
+    await seedListingPages(getDb());
   } finally {
     await disconnectDb();
   }
