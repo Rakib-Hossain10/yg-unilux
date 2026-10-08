@@ -17,6 +17,7 @@ Project subagents live in `.claude/agents/` (the only folder Claude Code loads p
 | `site-frontend` | `src/app/(site)`, `(account)`, `whistleblower`, `src/components/site`, theme | 1 (shell), 4, 5, 7, 8, 9 | frontend-design, web-design-guidelines, next-best-practices, next-cache-components, vercel-react-best-practices, vercel-composition-patterns, seo |
 | `motion-engineer` | `src/components/motion`, home page composition | 6 | gsap-core, gsap-scrolltrigger, gsap-react, gsap-timeline, gsap-performance, vercel-react-view-transitions, frontend-design, vercel-react-best-practices |
 | `qa-security-reviewer` | tests only (`tests/`, `e2e/`) | end of every phase | security-and-hardening, playwright-best-practices, webapp-testing, web-design-guidelines, tdd |
+| `ui-reviewer` (added 2026-10-08, Phase 4a) | read-only, no files | exit gates of public-site phases, after `qa-security-reviewer` | frontend-design, web-design-guidelines, playwright-best-practices |
 | `code-reviewer` | read-only, no files | every file change, via the hook (ADR 0014) | security-and-hardening, next-best-practices |
 
 Rules shared by all agents:

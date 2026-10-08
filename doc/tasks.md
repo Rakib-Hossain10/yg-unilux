@@ -4,8 +4,8 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Phase 4b: plan DRAFTED (2026-10-08), `doc/phase-4b-plan.md`, AWAITING USER APPROVAL. Branch `phase-4b` (from `main`, 4a merged in PR #15). Nothing built yet.**
-  - **Next task once approved: L0** (record answers to Q1–Q9 in the plan; add the `ui-reviewer` roster line to ADR 0013 and CLAUDE.md), then **L1** listing data layer (`backend-architect`, ADR 0065).
+- **Phase 4b: plan APPROVED (2026-10-08, all defaults Q1–Q9), `doc/phase-4b-plan.md`. Branch `phase-4b` (from `main`, 4a merged in PR #15).**
+  - **L0 done** (roster line in ADR 0013 + CLAUDE.md). **Next: L1** listing data layer (`backend-architect`/Opus; write ADR 0065 after it).
   - Tasks L0–L8: L1 listing data layer, L2 search (Atlas + fallback, `db:search-index` script, ADR 0066), L3 category icon/cover/description in admin, **QA gate A after L3**; L4 listing pages, L5 area pages, L6 mega-menu + search UI + sitemap, **QA gate B after L6**; L7 motion + polish, L8 exit e2e + Lighthouse, **gate C** (`qa-security-reviewer` then `ui-reviewer`).
   - **User must:** approve/answer Q1–Q9; run `npm run db:search-index` on the Atlas dev cluster once L2 lands; supply category icons, real photos, logo, favicon.
   - **Carried must-dos:** cards reuse `ProductImageTransition` + `STRIP_CARD_FRAME`; remove `prefetch={false}` for `/products` and `/search` once built; breadcrumb moves from `?category=` to `/products/<main>/<sub>` (sub slugs repeat across parents); no restricted value in cards, facets, search, sitemap (rule 9); drafts never listed; Phase 5 items from ADR 0064 §14/19 unchanged.
@@ -387,6 +387,10 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] 4a P3: `src/lib/catalog` data layer (ADR 0063) → QA gate A
 - [ ] 4a P4–P7: page shell, variant switcher, gallery + lightbox, restricted block (ADR 0064) → QA gate B
 - [ ] 4a P8: motion pass; P9 exit e2e + Lighthouse → QA gate C
+- [x] 4b L0: plan approved (`doc/phase-4b-plan.md`, all defaults), `ui-reviewer` roster line
+- [ ] 4b L1–L3: listing data layer, search, category icon/cover → QA gate A
+- [ ] 4b L4–L6: listing pages, area pages, mega-menu + search UI → QA gate B
+- [ ] 4b L7–L8: motion + polish, exit e2e + Lighthouse → QA gate C
 - [ ] `lib/catalog/` cached + tagged, restricted fields excluded by projection — ADR 0002
 - [ ] Mega-menu (icon strip + subcategories)
 - [ ] Listing pages + URL filters, sort, pagination; area pages

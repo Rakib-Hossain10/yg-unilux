@@ -1,6 +1,6 @@
 # Phase 4b — Listings, mega-menu, area pages, search: implementation plan
 
-Status: **DRAFT, awaiting user approval** (2026-10-08). Branch `phase-4b` (from `main` after Phase 4a, PR #15).
+Status: **APPROVED** (user, 2026-10-08: "go ahead", all defaults Q1–Q9 accepted). L0 done. Branch `phase-4b` (from `main` after Phase 4a, PR #15).
 
 ## Scope
 Everything left in the `tasks.md` Phase 4 list after 4a: the **mega-menu** (category icon strip + subcategories), **listing pages** with URL filters, sort and pagination, **area pages**, the **search overlay** (Atlas Search + regex fallback, ADR 0006), and the Phase 4 exit (Playwright filters + search by variant model no., Lighthouse ≥ 90 on listing and product page). It also closes the 4a hand-offs: listing cards reuse `ProductImageTransition` + `STRIP_CARD_FRAME` (ADR 0064 §23), `prefetch={false}` is removed from `/products` and `/search` once built, the breadcrumb and applications links point at real routes.
