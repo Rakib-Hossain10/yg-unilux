@@ -11,6 +11,7 @@ import {
   cloudinaryImageUrl,
 } from "@/components/site/cloudinary-image";
 import { SectionReveal } from "@/components/motion/product/section-reveal";
+import { areaListingPath } from "@/components/site/listing/listing-urls";
 import { ApplicationsRow } from "@/components/site/product/applications-row";
 import { ProductBreadcrumb } from "@/components/site/product/breadcrumb";
 import { Downloads } from "@/components/site/product/downloads";
@@ -280,7 +281,7 @@ export default async function ProductPage({
           areas={product.areas.map((area) => ({
             id: area.id,
             name: area.name,
-            href: `/areas/${area.slug}`,
+            href: areaListingPath(area),
             image: area.bwImage
               ? cloudinaryImageUrl(cloudName, area.bwImage)
               : null,

@@ -7,7 +7,6 @@
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { cache } from "react";
 
 import {
   CLOUDINARY_TRANSFORMS,
@@ -18,6 +17,10 @@ import {
   ListingHeader,
   type ListingSubLink,
 } from "@/components/site/listing/listing-header";
+import {
+  listingLoader,
+  readListing,
+} from "@/components/site/listing/listing-load";
 import { ListingResults } from "@/components/site/listing/listing-results";
 import {
   listingMetaDescription,
@@ -40,16 +43,11 @@ import {
   resolveCategoryPath,
   type CategoryPathView,
 } from "@/lib/catalog/category-path";
-import { getFacets, type ListingFacets } from "@/lib/catalog/facets";
+import type { ListingFacets } from "@/lib/catalog/facets";
 import {
   getCatalogVisibility,
-  listProducts,
   type ListingResult,
 } from "@/lib/catalog/listing";
-import {
-  parseListingParams,
-  publicSpecFacets,
-} from "@/lib/catalog/listing-params";
 import type { ListingScope } from "@/lib/catalog/listing-scope";
 
 /*
@@ -59,42 +57,6 @@ import type { ListingScope } from "@/lib/catalog/listing-scope";
 
 /** /products/<main>/<sub> at most (MAX_CATEGORY_DEPTH). */
 const MAX_PATH_SEGMENTS = 2;
-
-/** The only query keys a listing reads (listing-params), in canonical order. */
-const LISTING_KEYS = [
-  "cat",
-  "track",
-  "cct",
-  "cri",
-  "beam",
-  "ugr",
-  "w",
-  "ip",
-  "sort",
-  "page",
-] as const;
-/* Raw values kept per key before parsing (the parser caps again). */
-const MAX_RAW_VALUES = 16;
-
-type SearchParamsRecord = Record<string, string | string[] | undefined>;
-
-/**
- * A stable string of the listing keys of a request's query (own keys only,
- * bounded), so generateMetadata and the page share one load per request.
- */
-function rawListingQuery(query: SearchParamsRecord): string {
-  const out = new URLSearchParams();
-  for (const key of LISTING_KEYS) {
-    if (!Object.hasOwn(query, key)) continue;
-    const value = query[key];
-    const list =
-      value === undefined ? [] : Array.isArray(value) ? value : [value];
-    for (const entry of list.slice(0, MAX_RAW_VALUES)) {
-      if (typeof entry === "string") out.append(key, entry);
-    }
-  }
-  return out.toString();
-}
 
 interface ListingPageData {
   basePath: string;
@@ -112,33 +74,23 @@ interface ListingPageData {
  * null for an unknown or too-deep path. The page answers 404 for null and
  * for a page past the end.
  */
-const loadListing = cache(
-  async (
-    pathKey: string,
-    queryKey: string,
-  ): Promise<ListingPageData | null> => {
+const loadListing = listingLoader(
+  async (pathKey, queryKey): Promise<ListingPageData | null> => {
     const segments = pathKey === "" ? [] : pathKey.split("/");
     if (segments.length > MAX_PATH_SEGMENTS) return null;
-    const [visibility, tree] = await Promise.all([
+    const [visibility, tree, path] = await Promise.all([
       getCatalogVisibility(),
       listPublicCategories(),
+      segments.length > 0 ? resolveCategoryPath(segments) : null,
     ]);
-    let path: CategoryPathView | null = null;
-    let scope: ListingScope = { kind: "all" };
-    if (segments.length > 0) {
-      path = await resolveCategoryPath(segments);
-      if (path === null) return null;
-      scope = { kind: "category", ids: path.subtreeIds };
-    }
-    const params = parseListingParams(new URLSearchParams(queryKey), {
-      publicFacets: publicSpecFacets(visibility),
+    if (segments.length > 0 && path === null) return null;
+    const scope: ListingScope = path
+      ? { kind: "category", ids: path.subtreeIds }
+      : { kind: "all" };
+    const { result, facets } = await readListing(scope, queryKey, visibility, {
       track: path?.isMagneticTrack ?? false,
       cat: false,
     });
-    const [result, facets] = await Promise.all([
-      listProducts(scope, params, visibility),
-      getFacets(scope, visibility),
-    ]);
     const categoryId = path?.category.id;
     return {
       basePath: path ? categoryListingPath(path.path) : PRODUCTS_PATH,
@@ -159,7 +111,7 @@ async function loadFromProps(
     props.searchParams,
   ]);
   const segments = Array.isArray(category) ? category : [];
-  return loadListing(segments.join("/"), rawListingQuery(query));
+  return loadListing(segments.join("/"), query);
 }
 
 /** Page 2+ of a listing that has fewer pages is not a page. */

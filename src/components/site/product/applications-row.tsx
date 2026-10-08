@@ -25,7 +25,6 @@ export function ApplicationsRow({ areas }: { areas: readonly AreaTile[] }) {
       <ul className="-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-4 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0 lg:grid-cols-7">
         {areas.map((area) => (
           <li key={area.id} className="w-[42%] shrink-0 snap-start md:w-auto">
-            {/* /areas/<slug> arrives in Phase 4b (plan Q6). */}
             <Link href={area.href} className="group block">
               <div className="relative aspect-square overflow-hidden bg-grey-200">
                 {area.image ? (

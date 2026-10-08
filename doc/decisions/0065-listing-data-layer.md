@@ -38,3 +38,10 @@ Listing pages (`/products`, `/products/<main>/<sub>`, `/areas/<slug>`) render on
 - **Category cover** transform `c_fill,g_auto,ar_3:2,w_2400,q_auto` **without `f_auto`** (the gate-A static guard forbids `f_auto` in `cloudinary-image.ts`; next/image already negotiates AVIF/WebP). Transforms come only from the fixed `CLOUDINARY_TRANSFORMS` list.
 - **Breadcrumb** links to `/products/<main>/<sub>`; header `/products` link is prefetched again (`/search` keeps `prefetch={false}` until L6).
 - **E2E:** listing fixtures (`e2e/fixtures/listing-pages.ts`, 29 products, 3 main categories) seeded by `test-server.ts`; `admin-catalog.qa.spec.ts` now moves its category up until it reaches the top (bounded to 10), because seeded main categories sort above it.
+
+## Addendum (2026-10-08, L5 area pages)
+- `/areas` renders on request (`connection()`): the CI build has no database. The area list stays cached on the `areas` tag. Tiles are black-and-white and turn to colour on hover/focus (CSS filter, off under reduced motion). With no photo, a tile shows the area name in grey-500 on grey-100. No product counts (a cached `countProductsByArea` would be needed).
+- `/areas/[slug]` reuses the L4 listing. One shared loader for both routes: `listingLoader` + `readListing` in `src/components/site/listing/listing-load.ts`. Visibility is read once per request. The parse uses `cat: true, track: false`.
+- Header: area name, breadcrumb Applications › area (`Breadcrumb` `root` prop), the other areas as a link row (no "All"), a fixed intro line (areas have no description), and the cover as a 3:2 smart crop in greyscale (`cover.monochrome`).
+- Meta title "Area – Applications" (+ "– page n"). Robots and canonical follow L4: any `cat`, filter or sort → `noindex, follow`; canonical `/areas/<slug>` (+ `?page=n`).
+- Deviation: the footer keeps a single "Applications → /areas" link with no per-area column. Reading areas in `SiteShell` would put a database read in the layout and break the database-less static build. Decide this together with the L6 mega-menu (cached layout read with a build-safe fallback, or render those parts on request).

@@ -1,5 +1,6 @@
 // Catalog breadcrumb: Products › main category › sub category › current
-// page (a product, or the category of a listing page), from the cached
+// page (a product, or the category of a listing page), or another root
+// (Applications › an area page) with no category steps, from the cached
 // category tree (ADR 0063). Category steps link to their listing paths
 // (/products/<main>/<sub>: sub slugs repeat across parents, ADR 0065). A
 // <nav> with an ordered list and aria-current on the last step. Server
@@ -32,10 +33,15 @@ function Separator() {
 const crumbLink =
   "inline-flex min-h-11 items-center underline-offset-4 transition-colors duration-(--duration-quick) hover:text-ink hover:underline";
 
+const PRODUCTS_ROOT = { name: "Products", href: PRODUCTS_PATH } as const;
+
 export function ProductBreadcrumb({
+  root = PRODUCTS_ROOT,
   categories,
   current,
 }: {
+  /** The first step. Default: Products. */
+  root?: { name: string; href: string };
   categories: readonly BreadcrumbItem[];
   /** The current page's name (product or category), shown last, unlinked. */
   current: string;
@@ -44,8 +50,8 @@ export function ProductBreadcrumb({
     <nav aria-label="Breadcrumb" className="text-sm text-grey-600">
       <ol className="flex flex-wrap items-center gap-x-2">
         <li className="flex items-center gap-2">
-          <Link href={PRODUCTS_PATH} className={crumbLink}>
-            Products
+          <Link href={root.href} className={crumbLink}>
+            {root.name}
           </Link>
           <Separator />
         </li>

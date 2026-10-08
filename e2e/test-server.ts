@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import { seedAreaPages } from "./fixtures/area-pages";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
 import { seedListingPages } from "./fixtures/listing-pages";
 import { seedProductPages } from "./fixtures/product-pages";
@@ -88,6 +89,9 @@ async function seed(uri: string): Promise<void> {
     // The listing specs' categories and products, for the same reason: the
     // category tree is cached on the first catalog request.
     await seedListingPages(getDb());
+    // The area-page spec's areas, categories and products (the area list
+    // is cached on the first catalog request too).
+    await seedAreaPages(getDb());
   } finally {
     await disconnectDb();
   }

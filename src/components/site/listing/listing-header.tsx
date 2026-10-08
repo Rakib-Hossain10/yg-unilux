@@ -3,7 +3,9 @@
 // admin uploaded one, the cover photo at hero scale (Arelux). Without a
 // cover the name and description sit side by side on wide screens, so the
 // header never looks like it is missing something. Below it, the links to
-// the category's sub-categories (or the main categories on /products).
+// the category's sub-categories (or the main categories on /products, the
+// other areas on an area page). Area pages show their cover in black and
+// white (Viabizzuno).
 // Server Component.
 
 import Image from "next/image";
@@ -27,7 +29,8 @@ export function ListingHeader({
 }: {
   title: string;
   description: string | null;
-  cover: { src: string; alt: string } | null;
+  /** `monochrome` renders the photo in greyscale (area pages). */
+  cover: { src: string; alt: string; monochrome?: boolean } | null;
   breadcrumb?: ReactNode;
   /** Sub-category links; the row is left out with fewer than 2. */
   subLinks: readonly ListingSubLink[];
@@ -57,7 +60,9 @@ export function ListingHeader({
               fill
               sizes="(min-width: 1440px) 52rem, (min-width: 1024px) 56vw, 100vw"
               preload
-              className="object-cover"
+              className={
+                cover.monochrome ? "object-cover grayscale" : "object-cover"
+              }
             />
           </div>
         </div>

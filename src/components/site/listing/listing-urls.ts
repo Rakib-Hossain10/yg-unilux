@@ -26,6 +26,14 @@ export function categoryListingPath(path: readonly { slug: string }[]): string {
   return `${PRODUCTS_PATH}/${path.map((step) => encodeURIComponent(step.slug)).join("/")}`;
 }
 
+/** The applications (areas) index. */
+export const AREAS_PATH = "/areas";
+
+/** An area's listing path: `/areas/<slug>`. */
+export function areaListingPath(area: { slug: string }): string {
+  return `${AREAS_PATH}/${encodeURIComponent(area.slug)}`;
+}
+
 /** `basePath` with the canonical query of `params` ("" query → no "?"). */
 export function listingHref(basePath: string, params: ListingParams): string {
   const query = serialiseListingParams(params);
