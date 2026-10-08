@@ -121,7 +121,21 @@ const CACHED_MODULES = [
   "related.ts",
   "categories.ts",
   "view.ts",
-].map((f) => path.join(SRC, "lib/catalog", f));
+  // Phase 4b gate A (L1-L2): listing, facets, areas, search and helpers.
+  "listing.ts",
+  "listing-params.ts",
+  "listing-scope.ts",
+  "facets.ts",
+  "areas.ts",
+  "category-path.ts",
+  "search.ts",
+  // Imported by search.ts (index name); also by the CLI script.
+  "search-index.ts",
+  "cache-version.ts",
+]
+  .map((f) => path.join(SRC, "lib/catalog", f))
+  // Public, session-free entry points that use the cached readers.
+  .concat([path.join(SRC, "app/api/catalog/search/route.ts")]);
 
 describe("catalog guards on the real TypeScript resolver", () => {
   it("resolver sanity: alias, ./ segments and .js extensions resolve to restricted.ts", () => {
