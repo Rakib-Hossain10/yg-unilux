@@ -5,101 +5,30 @@
 // customer gets "Access expired — contact us"; the slot height holds.
 
 import { type Browser, expect, type Page, test } from "@playwright/test";
-import { type Db, type MongoClient, ObjectId } from "mongodb";
+import { type Db, type MongoClient } from "mongodb";
 
 import { E2E_CUSTOMER } from "./fixtures/accounts";
 import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
+import { RESTRICTED } from "./fixtures/product-pages";
 
-const RUN = Date.now().toString(36);
-const SLUG = `e2e-restricted-${RUN}`;
-const SOON = `e2e-restricted-soon-${RUN}`;
-const A1 = `RS-${RUN}-A1`.toUpperCase();
-const A2 = `RS-${RUN}-A2`.toUpperCase();
-// Unique tokens: a leak is a plain substring match on the page source.
-const SECRET = {
-  batchNo: `BATCH~${RUN}`,
-  chipType: `CHIP~${RUN}`,
-  holder: `HOLDER~${RUN}`,
-  chipEfficiency: `EFF~${RUN}`,
-  driverA1: `DRIVER-A1~${RUN}`,
-  driverA2: `DRIVER-A2~${RUN}`,
-};
+// Seeded by e2e/test-server.ts before `next start` (fixtures/product-pages.ts).
+const SLUG = RESTRICTED.slug;
+const SOON = RESTRICTED.soon;
+const A1 = RESTRICTED.a1;
+const A2 = RESTRICTED.a2;
+const SECRET = RESTRICTED.secret;
+const productId = RESTRICTED.productId;
 
 let client: MongoClient;
 let db: Db;
-let productId: string;
 let savedCustomer: Record<string, unknown> | null = null;
-const categoryId = new ObjectId();
 
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
   client = await connectE2eDb();
   db = client.db();
-  const now = new Date();
-  await db.collection("categories").insertOne({
-    _id: categoryId,
-    name: `E2E Restricted ${RUN}`,
-    slug: `e2e-restricted-cat-${RUN}`,
-    parent: null,
-    order: 92,
-    createdAt: now,
-    updatedAt: now,
-  });
-  const base = {
-    mainCategory: categoryId,
-    extraCategories: [],
-    areas: [],
-    status: "published",
-    featured: false,
-    extraSpecs: [],
-    publicFiles: [],
-    images: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-  const id = new ObjectId();
-  productId = id.toHexString();
-  await db.collection("products").insertMany([
-    {
-      ...base,
-      _id: id,
-      name: "Restricted",
-      slug: SLUG,
-      family: "Restricted",
-      modelCode: `RS-${RUN}`.toUpperCase(),
-      // Only `products.datasheetId != null` matters to the page (no file).
-      datasheetId: new ObjectId(),
-      specs: {
-        cct: ["3000K"],
-        batchNo: [SECRET.batchNo],
-        chipType: [SECRET.chipType],
-        holder: [SECRET.holder],
-        chipEfficiency: [SECRET.chipEfficiency],
-      },
-      variants: [
-        {
-          modelNo: A1,
-          label: "Lens",
-          specs: { lens: ["PC lens"], driver: [SECRET.driverA1] },
-        },
-        {
-          modelNo: A2,
-          label: "Reflector",
-          specs: { lens: ["Reflector"], driver: [SECRET.driverA2] },
-        },
-      ],
-    },
-    {
-      ...base,
-      name: "Soon",
-      slug: SOON,
-      datasheetId: null,
-      specs: { cct: ["2700K"], driver: [SECRET.driverA1] },
-      variants: [{ modelNo: `SN-${RUN}`.toUpperCase(), specs: {} }],
-    },
-  ]);
   savedCustomer = await db
     .collection("users")
     .findOne(
@@ -109,8 +38,6 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await db.collection("products").deleteMany({ slug: { $in: [SLUG, SOON] } });
-  await db.collection("categories").deleteOne({ _id: categoryId });
   if (savedCustomer) {
     await db.collection("users").updateOne(
       { email: E2E_CUSTOMER.email },

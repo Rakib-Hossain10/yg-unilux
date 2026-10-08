@@ -3,96 +3,16 @@
 // navigation), ?model= deep links apply after hydration, single = no switch.
 
 import { expect, type Page, test } from "@playwright/test";
-import { type Db, type MongoClient, ObjectId } from "mongodb";
 
-import { connectE2eDb } from "./fixtures/database";
+import { SWITCHER } from "./fixtures/product-pages";
 
-const RUN = Date.now().toString(36);
-const SLUG = `e2e-arc-${RUN}`;
-const SOLO = `e2e-solo-${RUN}`;
-const A1 = `AR-${RUN}-A1`.toUpperCase();
-const A2 = `AR-${RUN}-A2`.toUpperCase();
-
-let client: MongoClient;
-let db: Db;
-const categoryId = new ObjectId();
+// Seeded by e2e/test-server.ts before `next start` (fixtures/product-pages.ts).
+const SLUG = SWITCHER.slug;
+const SOLO = SWITCHER.solo;
+const A1 = SWITCHER.a1;
+const A2 = SWITCHER.a2;
 
 test.describe.configure({ mode: "serial" });
-
-test.beforeAll(async () => {
-  client = await connectE2eDb();
-  db = client.db();
-  const now = new Date();
-  await db.collection("categories").insertOne({
-    _id: categoryId,
-    name: `E2E Spots ${RUN}`,
-    slug: `e2e-spots-${RUN}`,
-    parent: null,
-    order: 90,
-    createdAt: now,
-    updatedAt: now,
-  });
-  const base = {
-    mainCategory: categoryId,
-    extraCategories: [],
-    areas: [],
-    status: "published",
-    featured: false,
-    extraSpecs: [],
-    publicFiles: [],
-    images: [],
-    datasheetId: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await db.collection("products").insertMany([
-    {
-      ...base,
-      name: "Arc",
-      slug: SLUG,
-      family: "Arc",
-      modelCode: `AR-${RUN}`.toUpperCase(),
-      specs: {
-        housingMaterial: ["Die-cast aluminium"],
-        cct: ["3000K", "4000K"],
-        wattage: ["12W"],
-      },
-      variants: [
-        {
-          modelNo: A1,
-          label: "Regular lens",
-          specs: {
-            lens: ["PC lens"],
-            lumenOutput: ["1100lm"],
-            lumenEfficiency: ["92lm/W"],
-          },
-        },
-        {
-          modelNo: A2,
-          label: "Reflector",
-          specs: {
-            lens: ["Reflector"],
-            lumenOutput: ["1200lm"],
-            lumenEfficiency: ["100lm/W"],
-          },
-        },
-      ],
-    },
-    {
-      ...base,
-      name: "Solo",
-      slug: SOLO,
-      specs: { cct: ["2700K"] },
-      variants: [{ modelNo: `SO-${RUN}`.toUpperCase(), specs: {} }],
-    },
-  ]);
-});
-
-test.afterAll(async () => {
-  await db.collection("products").deleteMany({ slug: { $in: [SLUG, SOLO] } });
-  await db.collection("categories").deleteOne({ _id: categoryId });
-  await client.close();
-});
 
 const panel = (page: Page) => page.locator('[data-slot="quick-spec-panel"]');
 const modelNo = (page: Page) => panel(page).locator('[data-field="model-no"]');
@@ -210,7 +130,7 @@ test("Show in the Models table selects the model and focuses its radio", async (
 test("a single-variant product has no switcher", async ({ page }) => {
   await page.goto(`/product/${SOLO}`);
   await expect(page.locator("h1")).toHaveText("Solo");
-  await expect(modelNo(page)).toHaveText(`SO-${RUN}`.toUpperCase());
+  await expect(modelNo(page)).toHaveText(SWITCHER.soloModelNo);
   await expect(page.getByRole("radio")).toHaveCount(0);
   await expect(page.locator('[data-slot="variant-switcher"]')).toHaveCount(0);
 });

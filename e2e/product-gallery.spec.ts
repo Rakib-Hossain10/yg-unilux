@@ -5,22 +5,13 @@
 import { deflateSync, crc32 } from "node:zlib";
 
 import { expect, type Page, test } from "@playwright/test";
-import { type Db, type MongoClient, ObjectId } from "mongodb";
 
-import { connectE2eDb } from "./fixtures/database";
+import { GALLERY } from "./fixtures/product-pages";
 
-const RUN = Date.now().toString(36);
-const SLUG = `e2e-lumen-${RUN}`;
-const BARE = `e2e-bare-${RUN}`;
-const B1 = `LU-${RUN}-B1`.toUpperCase();
-const B2 = `LU-${RUN}-B2`.toUpperCase();
-const PHOTO_1 = `products/e2e/${RUN}-photo-1`;
-const PHOTO_2 = `products/e2e/${RUN}-photo-2`;
-const DRAWING = `products/e2e/${RUN}-drawing`;
-
-let client: MongoClient;
-let db: Db;
-const categoryId = new ObjectId();
+// Seeded by e2e/test-server.ts before `next start` (fixtures/product-pages.ts).
+const SLUG = GALLERY.slug;
+const BARE = GALLERY.bare;
+const B2 = GALLERY.b2;
 
 test.describe.configure({ mode: "serial" });
 
@@ -79,76 +70,6 @@ async function recordScrolls(page: Page) {
     } as typeof Element.prototype.scrollTo;
   });
 }
-
-test.beforeAll(async () => {
-  client = await connectE2eDb();
-  db = client.db();
-  const now = new Date();
-  await db.collection("categories").insertOne({
-    _id: categoryId,
-    name: `E2E Downlights ${RUN}`,
-    slug: `e2e-downlights-${RUN}`,
-    parent: null,
-    order: 91,
-    createdAt: now,
-    updatedAt: now,
-  });
-  const base = {
-    mainCategory: categoryId,
-    extraCategories: [],
-    areas: [],
-    status: "published",
-    featured: false,
-    extraSpecs: [],
-    publicFiles: [],
-    datasheetId: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await db.collection("products").insertMany([
-    {
-      ...base,
-      name: "Lumen",
-      slug: SLUG,
-      family: "Lumen",
-      modelCode: `LU-${RUN}`.toUpperCase(),
-      specs: { cct: ["3000K"] },
-      images: [
-        // Stored drawing-first: the page must still show photos first.
-        { publicId: DRAWING, order: 0, kind: "dimension" },
-        { publicId: PHOTO_1, order: 1, kind: "gallery" },
-        { publicId: PHOTO_2, order: 2, kind: "gallery", alt: "Lumen, black" },
-      ],
-      variants: [
-        {
-          modelNo: B1,
-          label: "Lens",
-          specs: { lens: ["PC lens"], lumenOutput: ["900lm"] },
-        },
-        {
-          modelNo: B2,
-          label: "Reflector",
-          imagePublicId: PHOTO_2,
-          specs: { lens: ["Reflector"], lumenOutput: ["950lm"] },
-        },
-      ],
-    },
-    {
-      ...base,
-      name: "Bare",
-      slug: BARE,
-      specs: {},
-      images: [],
-      variants: [{ modelNo: `BA-${RUN}`.toUpperCase(), specs: {} }],
-    },
-  ]);
-});
-
-test.afterAll(async () => {
-  await db.collection("products").deleteMany({ slug: { $in: [SLUG, BARE] } });
-  await db.collection("categories").deleteOne({ _id: categoryId });
-  await client.close();
-});
 
 const gallery = (page: Page) => page.locator('[data-slot="product-gallery"]');
 const track = (page: Page) => page.locator('[data-slot="gallery-track"]');
