@@ -36,7 +36,11 @@ import { ProductImageTransition } from "@/components/motion/product/product-imag
 
 import { ArrowLeftIcon, ArrowRightIcon, ExpandIcon } from "../icons";
 
-import { imageIndexFor, type GalleryImage } from "./gallery-images";
+import {
+  frameFitClass,
+  imageIndexFor,
+  type GalleryImage,
+} from "./gallery-images";
 import { LightboxBoundary } from "./lightbox-boundary";
 import { useOptionalVariantSelection } from "./product-detail-client";
 
@@ -306,7 +310,7 @@ export function Gallery({
                     loading={index === 0 ? "eager" : "lazy"}
                     fetchPriority={index === 0 ? "high" : undefined}
                     sizes="(min-width: 1440px) 820px, (min-width: 1024px) 58vw, 100vw"
-                    className="object-contain"
+                    className={frameFitClass(image.kind)}
                   />
                 </button>
               </div>
@@ -339,7 +343,7 @@ export function Gallery({
                       alt=""
                       fill
                       sizes="80px"
-                      className="object-contain"
+                      className={frameFitClass(image.kind)}
                     />
                   </span>
                   <span className="sr-only">

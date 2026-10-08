@@ -128,7 +128,10 @@ function toStripCards(
       modelCode: card.modelCode,
       // The card's name follows as text, so the picture's alt stays empty
       // unless the admin wrote one (no repeated announcement).
-      image: src ? { src, alt: card.image?.alt?.trim() ?? "" } : null,
+      image:
+        src && card.image
+          ? { src, alt: card.image.alt?.trim() ?? "", kind: card.image.kind }
+          : null,
     };
   });
 }

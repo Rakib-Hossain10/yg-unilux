@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PublicImageView } from "@/lib/catalog/view";
 
-import { galleryImages, imageIndexFor } from "./gallery-images";
+import { frameFitClass, galleryImages, imageIndexFor } from "./gallery-images";
 import { GalleryStage } from "./gallery-stage";
 
 const img = (
@@ -46,6 +46,12 @@ describe("galleryImages", () => {
       "Ceiling cut-out (installation drawing)",
     ]);
     expect(images[0]?.src).toBe(toSrc("p1"));
+    expect(images.map((image) => image.kind)).toEqual([
+      "gallery",
+      "gallery",
+      "dimension",
+      "installation",
+    ]);
   });
 
   it("numbers only the images that can be shown", () => {
@@ -67,6 +73,17 @@ describe("galleryImages", () => {
 
   it("is empty without a cloud", () => {
     expect(galleryImages([img("a")], "Arc", () => null)).toEqual([]);
+  });
+});
+
+describe("frameFitClass", () => {
+  it("fills the frame with photos and shows drawings whole", () => {
+    expect(frameFitClass("gallery")).toContain("object-cover");
+    expect(frameFitClass("gallery")).not.toContain("object-contain");
+    for (const kind of ["dimension", "installation"] as const) {
+      expect(frameFitClass(kind)).toContain("object-contain");
+      expect(frameFitClass(kind)).not.toContain("object-cover");
+    }
   });
 });
 
@@ -129,6 +146,25 @@ describe("GalleryStage markup", () => {
     // The lightbox is its own chunk, mounted on the first open: the server
     // HTML has no dialog (and so no lightbox picture is fetched).
     expect(html).not.toContain("<dialog");
+  });
+
+  it("photos cover the stage and thumbnails; drawings stay contained", () => {
+    const html = render(
+      galleryImages([img("p"), img("d", "dimension")], "Arc", toSrc),
+    );
+    const tags = imgTags(html);
+    // Stage: photo, drawing; then the same two as thumbnails.
+    expect(tags).toHaveLength(4);
+    for (const index of [0, 2]) {
+      expect(tags[index]).toContain("object-cover");
+      expect(tags[index]).not.toContain("object-contain");
+    }
+    for (const index of [1, 3]) {
+      expect(tags[index]).toContain("object-contain");
+      expect(tags[index]).not.toContain("object-cover");
+    }
+    // Image 1 keeps its LCP treatment whatever the fit.
+    expect(tags[0]).toContain('fetchPriority="high"');
   });
 
   it("a single image has no thumbnails, counter or prev/next", () => {

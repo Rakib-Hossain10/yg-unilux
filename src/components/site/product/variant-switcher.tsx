@@ -10,7 +10,9 @@ import { variantName } from "./product-display";
 /*
  * Rendered only for 2+ variants (the panel decides). The radios are visually
  * hidden but stay the real control; the label rows carry the look and the
- * focus ring (has-[:focus-visible]). Focus never moves on change.
+ * focus ring (has-[:focus-visible]). Focus never moves on change. The
+ * selected row carries an ink rule on its left edge and a grey-100 fill
+ * (gate C, M-3), so the choice reads without relying on the small dot.
  */
 export function VariantSwitcher({
   legend,
@@ -26,7 +28,7 @@ export function VariantSwitcher({
   return (
     <>
       <fieldset className="min-w-0">
-        <legend className="mb-3 text-sm text-grey-600">{legend}</legend>
+        <legend className="mb-3 pr-44 text-sm text-grey-600">{legend}</legend>
         <div className="border-t border-grey-200">
           {variants.map((variant, i) => {
             const title = variantName(variant);
@@ -36,7 +38,7 @@ export function VariantSwitcher({
               <label
                 key={variant.modelNo}
                 htmlFor={id}
-                className="group relative flex min-h-12 cursor-pointer items-center gap-4 border-b border-grey-200 py-3 pr-1 pl-1 transition-colors duration-(--duration-quick) hover:bg-grey-50 has-[:checked]:bg-grey-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
+                className="group relative flex min-h-11 cursor-pointer items-center gap-4 border-b border-grey-200 py-2.5 pr-2 pl-3 transition-colors duration-(--duration-quick) before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-transparent before:transition-colors before:duration-(--duration-quick) hover:bg-grey-50 has-[:checked]:bg-grey-100 has-[:checked]:before:bg-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
               >
                 <input
                   id={id}
@@ -53,9 +55,11 @@ export function VariantSwitcher({
                   className="grid size-4 shrink-0 place-items-center rounded-full border border-grey-500 peer-checked:border-ink after:size-2 after:scale-0 after:rounded-full after:bg-ink after:transition-transform after:duration-(--duration-quick) peer-checked:after:scale-100"
                 />
                 <span className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
-                  <span className="text-[0.9375rem] text-ink">{title}</span>
+                  <span className="text-[0.9375rem] text-ink group-has-[:checked]:font-medium">
+                    {title}
+                  </span>
                   {hasLabel ? (
-                    <span className="text-xs tracking-[0.04em] text-grey-600 tabular-nums">
+                    <span className="text-sm tracking-[0.02em] text-grey-600 tabular-nums group-has-[:checked]:text-grey-700">
                       {variant.modelNo}
                     </span>
                   ) : null}

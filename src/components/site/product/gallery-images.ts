@@ -11,6 +11,26 @@ export interface GalleryImage {
   alt: string;
   /** Matches a variant's `imagePublicId` (the switch jumps to it). */
   publicId: string;
+  /** Photo ("gallery") or drawing; decides how the frame fits it. */
+  kind: ProductImageKind;
+}
+
+/*
+ * How a fixed frame fits an image (gate C, H-1). Photos fill the frame
+ * (object-cover: no grey bars around a photograph); drawings are shown
+ * whole (object-contain) and multiplied onto the frame's grey so their
+ * white paper does not read as a box inside the box. The lightbox always
+ * shows the whole image and does not use this.
+ */
+const FIT: Record<ProductImageKind, string> = {
+  gallery: "object-cover",
+  dimension: "object-contain mix-blend-multiply",
+  installation: "object-contain mix-blend-multiply",
+};
+
+/** The `object-fit` classes for an image of `kind` in a fixed frame. */
+export function frameFitClass(kind: ProductImageKind): string {
+  return FIT[kind];
 }
 
 /* How a non-photo kind is named in the alt text. */
@@ -43,6 +63,7 @@ export function galleryImages(
     return {
       src,
       publicId: image.publicId,
+      kind: image.kind,
       alt:
         image.kind === "gallery" ? base : `${base} (${KIND_LABEL[image.kind]})`,
     };

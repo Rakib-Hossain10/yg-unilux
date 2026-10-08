@@ -4,6 +4,7 @@
 
 import type { PublicProductView } from "@/lib/catalog/view";
 
+import { ExpandableText } from "./expandable-text";
 import { VariantSpecValues, VariantText } from "./product-detail-client";
 import { quickSpecRows, READOUT_KEYS, specLabel } from "./product-display";
 import { DatasheetSlot } from "./restricted-slots";
@@ -13,6 +14,13 @@ import {
   type SwitchVariant,
 } from "./variant-selection";
 import { VariantSwitcher } from "./variant-switcher";
+
+/*
+ * A description longer than this (characters) is clamped to three lines with
+ * "Read more": past it the text wraps to four lines or more at every panel
+ * width, so the toggle always has something to reveal.
+ */
+const DESCRIPTION_CLAMP = 240;
 
 /*
  * A Server Component inside <ProductDetailClient>. Rows are every quick column
@@ -50,17 +58,21 @@ export function QuickSpecPanel({
         {product.name}
       </h1>
       {product.type ? (
-        <p className="mt-3 text-base text-grey-600">{product.type}</p>
+        <p className="mt-2 text-base text-grey-600">{product.type}</p>
       ) : null}
       {product.description ? (
-        <p className="mt-6 max-w-prose text-[0.9375rem] leading-relaxed text-grey-700">
-          {product.description}
-        </p>
+        <div className="mt-4">
+          <ExpandableText
+            text={product.description}
+            clamp={product.description.length > DESCRIPTION_CLAMP}
+            className="max-w-prose text-[0.9375rem] leading-relaxed text-grey-700"
+          />
+        </div>
       ) : null}
 
-      <dl className="mt-8 text-sm">
+      <dl className="mt-6 text-sm">
         {hasModelNo ? (
-          <div className="flex items-baseline justify-between gap-6 border-y border-ink py-4">
+          <div className="flex items-baseline justify-between gap-6 border-y border-ink py-2.5">
             <dt className="text-grey-600">Model No.</dt>
             <dd className="text-lg font-medium tracking-[0.04em] tabular-nums">
               <VariantText field="model-no" />
@@ -71,7 +83,7 @@ export function QuickSpecPanel({
           <div
             key={row.key}
             data-spec={row.key}
-            className="grid grid-cols-[minmax(7.5rem,2fr)_3fr] gap-4 border-b border-grey-200 py-3"
+            className="grid grid-cols-[minmax(7.5rem,2fr)_3fr] gap-4 border-b border-grey-200 py-2.5"
           >
             <dt className="text-grey-600">{row.label}</dt>
             <dd>
@@ -82,12 +94,12 @@ export function QuickSpecPanel({
       </dl>
 
       {variants.length > 1 ? (
-        <div data-slot="variant-switcher" className="mt-8">
-          <VariantSwitcher
-            legend={switcherLegend(variants)}
-            name={`variant-${product.id}`}
-          />
-          <p className="mt-2 text-sm text-grey-600">
+        <div data-slot="variant-switcher" className="relative mt-6">
+          {/* Sits on the legend's line (top right) so the readout and the
+              datasheet stay in the first screen; first in the DOM so the
+              focus order follows the visual order. 44 px tall, centred on
+              the legend line, ending where the first option row starts. */}
+          <p className="absolute top-0 right-0 -mt-3 text-sm">
             <a
               href="#models"
               className="inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 hover:decoration-ink"
@@ -95,13 +107,17 @@ export function QuickSpecPanel({
               Compare all {variants.length} models
             </a>
           </p>
+          <VariantSwitcher
+            legend={switcherLegend(variants)}
+            name={`variant-${product.id}`}
+          />
         </div>
       ) : null}
 
       {readout.length > 0 ? (
-        <dl data-readout className="mt-6 grid grid-cols-2 gap-px bg-grey-200">
+        <dl data-readout className="mt-4 grid grid-cols-2 gap-px bg-grey-200">
           {readout.map((item) => (
-            <div key={item.key} className="bg-paper py-3 pr-4">
+            <div key={item.key} className="bg-paper py-2.5 pr-4">
               <dt className="text-xs text-grey-600">{item.label}</dt>
               <dd className="mt-1 font-display text-2xl tabular-nums">
                 <VariantText field={item.key} />
@@ -111,7 +127,7 @@ export function QuickSpecPanel({
         </dl>
       ) : null}
 
-      <div className="mt-8">
+      <div className="mt-6">
         <DatasheetSlot
           productId={product.id}
           hasDatasheet={product.hasDatasheet}
