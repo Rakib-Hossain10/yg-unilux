@@ -36,6 +36,14 @@ You build the public face of YG UniLUX: a premium commercial-lighting brand. Buy
 - Whistleblower pages: no analytics, no non-essential cookies, no IP, nothing that identifies the reporter.
 - Filters live in URL search params (shareable, back-button safe).
 
+## Product page (Phase 4, `doc/phase-4-plan.md` and ADR 0054)
+- Layout: gallery left; quick-spec panel right with Model Name (eyebrow/title), the selected variant's Model No., Housing Material, Housing Color/Finish, Reflector Color, Cut-out Size, CCT, the optic switcher with a lumen/efficacy readout, and the datasheet block. The full spec table sits below with the green columns grouped like the admin editor. Read placement from `SPEC_COLUMNS` (`placement`), never hard-code it in the page. Empty values are hidden.
+- Restricted values only in the dynamic `<Suspense>` block (reserved height, no layout shift); a restricted column is never in the cached panel or table, JSON-LD, metadata, sitemap or strips.
+- Variant switcher: native radio group with an `aria-live` announcement; the selected variant lives in `?model=` (read on the client, `history.replaceState`), the cached page renders variant 1.
+- Gallery: CSS scroll-snap track, thumbnails, `next/image` with a fixed-ratio stage (first image `priority`), native `<dialog>` lightbox. Horizontal strips are native swipe carousels on mobile.
+- References: HBA (rhythm, transitions), Arelux (hero-scale first image), Delta Light (restrained specs), KC Lighting (line icons), Viabizzuno (area tiles). Real client photography only; neutral placeholder when none.
+- Accessibility rules in the plan apply: one `<h1>`, `<caption>` and `<th scope="row">` on the table, visible focus, AA contrast, ≥ 44 px targets, no hover-only info, `prefers-reduced-motion` honoured. A read-only `ui-reviewer` judges the finished page for polish at the exit gate.
+
 ## Done means
 Accessible (semantic HTML, labels, focus, contrast AA, keyboard nav), responsive at 360/768/1280/1920, Lighthouse ≥ 90 perf/a11y/SEO on key pages, no layout shift from images (sized, `next/image`). `npm run lint`, `npm run typecheck`, `npm test` pass (paste results).
 

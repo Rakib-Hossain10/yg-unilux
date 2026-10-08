@@ -4,6 +4,14 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
+- **Phase 4a: plan APPROVED (2026-10-08), `doc/phase-4-plan.md` (P0–P9; QA gate A after P3, B after P7, C at exit; ADRs 0062–0064). Branch `phase-4` from `main` (Phase 3 merged, PR #12).** P0 done. **P1 (`cacheComponents` spike) is running** (backend-architect, Opus). It reports first; `cacheComponents` is NOT committed app-wide until proven safe for the admin pages and the footer (user's condition).
+  - **Branch note:** the CSP fix (`e788deb`: sign-in/out are full page loads, ADR 0027/0045 notes) was cherry-picked onto `phase-4`; it was never pushed from `phase-3`.
+  - **User answers recorded in the plan:** 4a/4b split; agent edits done; new read-only `ui-reviewer` runs at gate C alongside `qa-security-reviewer` ("premium and distinctive?" vs "works correctly?"); Q3 `?model=` accepted, SEO cost is small and is closed by a server-rendered Models table listing every variant + JSON-LD `hasVariant`; lumen/efficacy shown twice; real photos (2, added by the user to a dev DB product) are used for the gallery task and the ui-reviewer.
+  - **Applied from ADR 0054:** pink columns in the right quick-spec panel, green in the table; `placement` added to `SPEC_COLUMNS` in P2 with a pink-keys test.
+  - **Subagents:** `site-frontend` (page), `motion-engineer` (enhancement pass), `backend-architect` (data layer), `qa-security-reviewer` (gates), `ui-reviewer` (new, read-only, gate C polish pass); all Opus. ADR 0013 / CLAUDE.md still list the older roster: add one line when Phase 4 closes.
+  - **Next:** read the P1 report, write ADR 0062, answer Q2 (enable or fallback), then P2 (`placement`/`group`) and P3 (catalog data layer) → QA gate A.
+  - **Must-do carried into Phase 4:** footer `new Date().getFullYear()` out of the prerender path before `cacheComponents` (QA L1); restricted values never in cached HTML, JSON-LD, metadata, sitemap or strips (rule 9); drafts 404 for everyone; Phase 5 `/change-password` and any public link into `/admin` must be full page loads (ADR 0027 note).
+  - Phase 3 status below is unchanged (code complete, PR #12 open).
 - **Branch:** `phase-3` (from `main`). **Phase 2 is merged** (PR #11, `b689cb7`, 2026-10-07; QA gates A–E passed, real-credential smoke passed). Phase 1 merged earlier (PR #9).
 - **Phase 3 plan APPROVED** (2026-10-07, all six defaults accepted): `doc/phase-3-plan.md` (T0–T11; QA gates A after T5, B after T8, C at exit; ADRs 0055–0058).
   - **T0 done:**
@@ -351,6 +359,13 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Exit:** re-import changes nothing, no duplicates
 
 ## Phase 4 — Public catalog
+**Plan: [phase-4-plan.md](phase-4-plan.md) (4a = data layer + product page; 4b = mega-menu, listings, area pages, search).**
+- [x] 4a P0: plan approved, answers recorded, agent files edited, `ui-reviewer` created
+- [ ] 4a P1: `cacheComponents` spike (ADR 0062)
+- [ ] 4a P2: `placement` + `group` on `SPEC_COLUMNS` (ADR 0054), pink = quick test
+- [ ] 4a P3: `src/lib/catalog` data layer (ADR 0063) → QA gate A
+- [ ] 4a P4–P7: page shell, variant switcher, gallery + lightbox, restricted block (ADR 0064) → QA gate B
+- [ ] 4a P8: motion pass; P9 exit e2e + Lighthouse → QA gate C
 - [ ] `lib/catalog/` cached + tagged, restricted fields excluded by projection — ADR 0002
 - [ ] Mega-menu (icon strip + subcategories)
 - [ ] Listing pages + URL filters, sort, pagination; area pages
@@ -475,3 +490,5 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-07: T7 done (ADR 0057): plan / preview service (`plan.ts`, `index.ts`): case-insensitive matching, cross-product conflicts, ownership merge, Zod on every merged record, restricted filters gated, diff, planHash; preview writes nothing (tested); auto-review Medium (stale trackSize after leaving Magnetic Track) fixed; tests added for `invalid_record`, `no_slug` and the image cap. 2833 unit green. Next: T8, then QA gate B.
 - 2026-10-07: T8 done (ADR 0061): commit service with per-entry hashes (hash v2), 20-product batches, conditional updates of sheet-owned paths, picture keep/destroy rule, one audit entry per writing batch; 30 new tests, 2873 unit green. Next: QA gate B.
 - 2026-10-07 — T9 done (ADR 0058): admin import UI + actions. Next: T11, gate C.
+- 2026-10-08: Phase 4a planning: `/find-skills` run (nothing installed), subagents reused (no new one), ADR 0054 applied in `doc/phase-4-plan.md` (P0–P9, gates A/B/C). Waiting for the user's review; no code written.
+- 2026-10-08: Phase 3 merged (PR #12). Branch `phase-4`; CSP fix cherry-picked. Phase 4a plan approved with answers; `ui-reviewer` (read-only) added; agent files edited (P0). P1 spike started.
