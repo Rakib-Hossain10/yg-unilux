@@ -12,6 +12,7 @@ import { CATALOG_TAGS } from "@/lib/revalidate";
 import { CategoryModel } from "@/models";
 import type { Category } from "@/models/category";
 
+import { CATALOG_CACHE_VERSION } from "./cache-version";
 import type { BreadcrumbItem, PublicProductView } from "./view";
 
 /** One category as the public site needs it. */
@@ -41,9 +42,13 @@ async function readCategories(): Promise<PublicCategoryView[]> {
 
 /** Every category (the whole tree is small), cached on `categories`. */
 export const listPublicCategories: () => Promise<PublicCategoryView[]> =
-  unstable_cache(readCategories, ["catalog", "categories", "v1"], {
-    tags: [CATALOG_TAGS.categories],
-  });
+  unstable_cache(
+    readCategories,
+    ["catalog", "categories", CATALOG_CACHE_VERSION],
+    {
+      tags: [CATALOG_TAGS.categories],
+    },
+  );
 
 /**
  * The path from the main (top) category down to the product's main category.

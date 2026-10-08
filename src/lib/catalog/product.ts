@@ -1,6 +1,7 @@
 // Cached public reads of one product page and of the published slug list
-// (ADR 0062, 0063). Restricted columns are projected away using the current
-// column visibility; drafts and unknown slugs are null. Never reads a session.
+// (ADR 0062, 0063). Restricted columns are projected away using the column
+// visibility read FRESH outside the cache and passed in as part of the cache
+// key; drafts and unknown slugs are null. Never reads a session.
 
 import "server-only";
 
@@ -13,10 +14,16 @@ import { CATALOG_TAGS } from "@/lib/revalidate";
 import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";
 import { AreaModel, ProductModel } from "@/models";
 import type { Area } from "@/models/area";
+import {
+  restrictedSpecKeys,
+  SPEC_KEYS,
+  type SpecKey,
+} from "@/models/spec-columns";
+
+import { CATALOG_CACHE_VERSION } from "./cache-version";
 
 import {
   publicProductProjection,
-  publicSpecKeys,
   toPublicProductView,
   type PublicAreaView,
   type PublicProductDoc,
@@ -43,13 +50,26 @@ async function loadAreas(
   }));
 }
 
+/*
+ * The public keys for the comma-joined restricted list in the cache key
+ * (built by restrictedSpecKeys, which fails closed). A name that is not a
+ * spec key is ignored; it can only ever take a column away, never add one.
+ */
+function publicKeysFromRestricted(restrictedKeys: string): SpecKey[] {
+  const restricted = new Set(restrictedKeys.split(","));
+  return SPEC_KEYS.filter((key) => !restricted.has(key));
+}
+
 async function readPublicProduct(
   slug: string,
+  restrictedKeys: string,
 ): Promise<PublicProductView | null> {
   await connectDb();
-  // Inside the cache entry, tagged settings:columns: a visibility change
-  // expires it at once (revalidate.ts ALWAYS_IMMEDIATE).
-  const publicKeys = publicSpecKeys(await getColumnVisibility());
+  // The projection comes ONLY from the key argument, never from a read
+  // inside the entry: an entry is valid for exactly the visibility it is
+  // keyed by, so a fill that straddles a visibility save can never be
+  // served under the new setting (ADR 0063, gate A M-1).
+  const publicKeys = publicKeysFromRestricted(restrictedKeys);
   const doc = await ProductModel.findOne(
     { slug, status: "published" },
     publicProductProjection(publicKeys),
@@ -60,13 +80,15 @@ async function readPublicProduct(
 }
 
 /*
- * Tags: every product write (admin, import) expires `products`, so that tag
- * covers this entry; a slug-keyed entry cannot carry `product:<id>` because
+ * Key: slug + the restricted keys (sheet order, comma-joined). Tags: every
+ * product write (admin, import) expires `products`, so that tag covers this
+ * entry; a slug-keyed entry cannot carry `product:<id>` because
  * unstable_cache fixes its tags before the id is known (ADR 0063).
+ * `settings:columns` stays so a visibility change also drops old entries.
  */
 const cachedPublicProduct = unstable_cache(
   readPublicProduct,
-  ["catalog", "public-product", "v1"],
+  ["catalog", "public-product", CATALOG_CACHE_VERSION],
   {
     tags: [
       CATALOG_TAGS.products,
@@ -90,7 +112,16 @@ export async function getPublicProduct(
   ) {
     return null;
   }
-  return cachedPublicProduct(slug);
+  // L-3: only a slug on the (cached, bounded) published list gets an entry,
+  // so random slugs cannot fill the cache with misses. A draft or unknown
+  // slug is null without touching the product entry.
+  const published = await listPublishedSlugs();
+  if (!published.some((entry) => entry.slug === slug)) return null;
+  // M-1: the visibility is read fresh (one small uncached read) and becomes
+  // part of the cache key.
+  await connectDb();
+  const restricted = restrictedSpecKeys(await getColumnVisibility());
+  return cachedPublicProduct(slug, restricted.join(","));
 }
 
 /** One published product page, for static params and the sitemap. */
@@ -115,6 +146,10 @@ async function readPublishedSlugs(): Promise<PublishedSlug[]> {
 
 /** Every published slug (sorted) with its last change. Cached on `products`. */
 export const listPublishedSlugs: () => Promise<PublishedSlug[]> =
-  unstable_cache(readPublishedSlugs, ["catalog", "published-slugs", "v1"], {
-    tags: [CATALOG_TAGS.products],
-  });
+  unstable_cache(
+    readPublishedSlugs,
+    ["catalog", "published-slugs", CATALOG_CACHE_VERSION],
+    {
+      tags: [CATALOG_TAGS.products],
+    },
+  );

@@ -117,4 +117,14 @@ describe("placement (ADR 0054)", () => {
     ).toEqual(expect.arrayContaining(["lens"]));
     expect(restrictedSpecKeys({ driver: "public" })).not.toContain("driver");
   });
+
+  it("restrictedSpecKeys fails closed: only an exact 'public' is public", () => {
+    for (const odd of ["RESTRICTED", "Public", "", "hidden", 1, null]) {
+      expect(
+        restrictedSpecKeys({ cct: odd, lens: odd } as never),
+        String(odd),
+      ).toEqual(expect.arrayContaining(["cct", "lens"]));
+    }
+    expect(restrictedSpecKeys({ cct: "public" })).not.toContain("cct");
+  });
 });

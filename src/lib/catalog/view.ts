@@ -28,6 +28,11 @@ export interface PublicImageView {
 /** One model no. of a product. `specs` = public values merged (variant wins). */
 export interface PublicVariantView {
   modelNo: string;
+  /**
+   * The optic switch label, or null (the page shows the model no.). Always
+   * null while any of VARIANT_LABEL_SOURCE_KEYS is restricted: the import
+   * builds labels from those values (ADR 0063).
+   */
   label: string | null;
   imagePublicId: string | null;
   specs: SpecValues;
@@ -160,6 +165,25 @@ export function mergeVariantSpecs(
   return out;
 }
 
+/**
+ * The columns variant labels are built from (the import's optic keys,
+ * src/lib/import/group.ts). A label may hold their values, so it is public
+ * only while all of them are.
+ */
+export const VARIANT_LABEL_SOURCE_KEYS: readonly SpecKey[] = [
+  "lens",
+  "reflector",
+  "diffuser",
+];
+
+/** Variant labels may be shown: every label source column is public. */
+export function variantLabelsArePublic(
+  publicKeys: readonly SpecKey[],
+): boolean {
+  const allowed = new Set(publicKeys);
+  return VARIANT_LABEL_SOURCE_KEYS.every((key) => allowed.has(key));
+}
+
 // ---------------------------------------------------------------------------
 // Projections (inclusion only: a field nobody listed is never loaded)
 // ---------------------------------------------------------------------------
@@ -169,7 +193,8 @@ export type Projection = Record<string, 1>;
 /**
  * The product-page query's projection: identity, images, extras, the
  * datasheet reference and ONLY the public spec keys, at product and variant
- * level. Restricted columns are not in the result at all (ADR 0002).
+ * level. Restricted columns are not in the result at all (ADR 0002); neither
+ * is the variant label while a label source column is restricted.
  */
 export function publicProductProjection(
   publicKeys: readonly SpecKey[],
@@ -191,7 +216,6 @@ export function publicProductProjection(
     "images.order": 1,
     "images.kind": 1,
     "variants.modelNo": 1,
-    "variants.label": 1,
     "variants.imagePublicId": 1,
     "extraSpecs.group": 1,
     "extraSpecs.label": 1,
@@ -201,6 +225,7 @@ export function publicProductProjection(
     datasheetId: 1,
     updatedAt: 1,
   };
+  if (variantLabelsArePublic(publicKeys)) projection["variants.label"] = 1;
   for (const key of publicKeys) {
     projection[`specs.${key}`] = 1;
     projection[`variants.specs.${key}`] = 1;
@@ -276,6 +301,7 @@ export function toPublicProductView(
   areas: PublicAreaView[],
 ): PublicProductView {
   const specs = pickSpecs(doc.specs, publicKeys);
+  const showLabels = variantLabelsArePublic(publicKeys);
   return {
     id: hex(doc._id),
     slug: doc.slug,
@@ -293,7 +319,8 @@ export function toPublicProductView(
     specs,
     variants: (doc.variants ?? []).map((variant) => ({
       modelNo: variant.modelNo,
-      label: orNull(variant.label),
+      // Second guard after the projection: a label may hold restricted values.
+      label: showLabels ? orNull(variant.label) : null,
       imagePublicId: orNull(variant.imagePublicId),
       specs: mergeVariantSpecs(specs, pickSpecs(variant.specs, publicKeys)),
     })),

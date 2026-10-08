@@ -1,121 +1,130 @@
-// Static guards for the catalog layer (ADR 0002, 0063): only restricted.ts
-// may read the session (permissions/auth/headers), restricted.ts is never
-// cached, and only the dynamic restricted block may import it.
+// Static guards for the catalog layer (ADR 0002, 0063), on the real
+// TypeScript resolver and TRANSITIVE: no catalog module except restricted.ts
+// reaches a session API through any import chain, restricted.ts is never
+// cached, and nothing but the dynamic restricted block reaches restricted.ts
+// (directly or through a re-export chain). Replaces the earlier regex guard
+// that "./", ".js" and "//" specifiers slipped past (gate A finding L-2).
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const CATALOG_DIR = path.join(root, "src", "lib", "catalog");
+import {
+  importEdges,
+  norm,
+  reachingChains,
+  resolveSpecifier,
+  sourceFiles,
+  SRC,
+  type ImportEdge,
+} from "./helpers/module-graph";
+
+const CATALOG_DIR = path.join(SRC, "lib", "catalog");
+const RESTRICTED_FILE = path.join(CATALOG_DIR, "restricted.ts");
+const RESTRICTED = norm(RESTRICTED_FILE);
 
 /** The one module allowed to import the restricted reader (task P7). */
-const RESTRICTED_IMPORTERS: readonly string[] = [
-  "src/app/api/catalog/restricted/[productId]/route.ts",
-];
+const RESTRICTED_IMPORTERS = new Set(
+  [path.join(SRC, "app/api/catalog/restricted/[productId]/route.ts")].map(norm),
+);
 
-const isSource = (name: string) =>
-  /\.(ts|tsx|mts|cts|js|jsx|mjs)$/.test(name) && !/\.test\.[jt]sx?$/.test(name);
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && isSource(entry.name))
-    .map((entry) =>
-      path
-        .relative(root, path.join(entry.parentPath, entry.name))
-        .replaceAll("\\", "/"),
-    )
-    .sort();
-}
-
-/* Every module specifier: import/export from, import(), require(). */
-function specifiers(file: string): string[] {
-  const code = readFileSync(path.join(root, file), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
-  const found: string[] = [];
-  const patterns = [
-    /\b(?:import|export)\b[^"'`;]*?\bfrom\s*["'`]([^"'`]+)["'`]/g,
-    /\bimport\s*["'`]([^"'`]+)["'`]/g,
-    /\b(?:import|require)\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of code.matchAll(pattern)) found.push(match[1] ?? "");
-  }
-  return found;
-}
-
-/* Resolves "./x" / "../x" against the file; "@/x" to "src/x". */
-function resolved(file: string, spec: string): string {
-  if (spec.startsWith("@/")) return `src/${spec.slice(2)}`;
-  if (spec.startsWith(".")) {
-    return path.posix.normalize(
-      path.posix.join(path.posix.dirname(file), spec),
-    );
-  }
-  return spec;
-}
-
-const SESSION_MODULES = [
-  /^src\/lib\/permissions(\.ts|\/index(\.ts)?)?$/,
-  /^src\/lib\/auth(\.ts|\/index(\.ts)?)?$/,
-  /^src\/lib\/auth-handler(\.ts)?$/,
-  /^src\/lib\/session-cookie(\.ts)?$/,
+/* Our own modules that read the request or the session. */
+const SESSION_FILES = new Set(
+  [
+    "lib/permissions.ts",
+    "lib/auth.ts",
+    "lib/auth-handler.ts",
+    "lib/session-cookie.ts",
+  ].map((file) => norm(path.join(SRC, file))),
+);
+/* Packages that read the request or the session. */
+const SESSION_PACKAGES = [
   /^next\/headers$/,
   /^better-auth(\/|$)/,
+  /^next\/dist\/.*headers/,
 ];
-const RESTRICTED_MODULE = /^src\/lib\/catalog\/restricted(\.ts)?$/;
 
-describe("catalog layer guards", () => {
+const readsSession = (edge: ImportEdge): boolean =>
+  edge.file !== null
+    ? SESSION_FILES.has(norm(edge.file))
+    : SESSION_PACKAGES.some((re) => re.test(edge.spec));
+
+const reachesRestricted = (edge: ImportEdge): boolean =>
+  edge.file !== null && norm(edge.file) === RESTRICTED;
+
+describe("catalog layer guards (TypeScript resolver, transitive)", () => {
   const catalogFiles = sourceFiles(CATALOG_DIR);
+  const cachedFiles = catalogFiles.filter((file) => norm(file) !== RESTRICTED);
 
   it("finds the catalog modules", () => {
-    expect(catalogFiles).toEqual(
-      expect.arrayContaining([
-        "src/lib/catalog/categories.ts",
-        "src/lib/catalog/family.ts",
-        "src/lib/catalog/product.ts",
-        "src/lib/catalog/related.ts",
-        "src/lib/catalog/restricted.ts",
-        "src/lib/catalog/view.ts",
-      ]),
-    );
-  });
-
-  it("lets only restricted.ts read the session", () => {
-    const offenders = catalogFiles
-      .filter((file) => file !== "src/lib/catalog/restricted.ts")
-      .flatMap((file) =>
-        specifiers(file)
-          .map((spec) => resolved(file, spec))
-          .filter((target) => SESSION_MODULES.some((re) => re.test(target)))
-          .map((target) => `${file} -> ${target}`),
-      );
-    expect(offenders).toEqual([]);
-  });
-
-  it("keeps restricted.ts out of every cache", () => {
-    const file = "src/lib/catalog/restricted.ts";
-    const code = readFileSync(path.join(root, file), "utf8");
-    expect(specifiers(file)).not.toContain("next/cache");
-    expect(code).not.toMatch(/unstable_cache|["']use cache/);
-  });
-
-  it("lets only the dynamic restricted block import restricted.ts", () => {
-    const importers = sourceFiles(path.join(root, "src")).filter((file) =>
-      specifiers(file).some((spec) =>
-        RESTRICTED_MODULE.test(resolved(file, spec)),
+    expect(catalogFiles.map(norm)).toEqual(
+      expect.arrayContaining(
+        [
+          "categories.ts",
+          "family.ts",
+          "product.ts",
+          "related.ts",
+          "restricted.ts",
+          "view.ts",
+        ].map((file) => norm(path.join(CATALOG_DIR, file))),
       ),
     );
+  });
+
+  it("resolves look-alike specifiers to restricted.ts (the guard sees them)", () => {
+    const from = path.join(SRC, "lib", "guard-probe.ts");
+    for (const spec of [
+      "@/lib/catalog/restricted",
+      "@/lib/catalog/./restricted",
+      "@/lib/catalog//restricted",
+      "@/lib/catalog/../catalog/restricted",
+      "@/lib/catalog/restricted.js",
+      "./catalog/restricted",
+    ]) {
+      const file = resolveSpecifier(spec, from);
+      expect(file && norm(file), spec).toBe(RESTRICTED);
+    }
+  });
+
+  it("restricted.ts does reach the session (positive control)", () => {
+    expect(reachingChains(RESTRICTED_FILE, readsSession)).not.toEqual([]);
+  });
+
+  it("lets no other catalog module reach the session through any chain", () => {
     expect(
-      importers.filter((file) => !RESTRICTED_IMPORTERS.includes(file)),
+      cachedFiles.flatMap((file) => reachingChains(file, readsSession)),
     ).toEqual([]);
   });
 
+  it("keeps restricted.ts out of every cache", () => {
+    const code = readFileSync(RESTRICTED_FILE, "utf8");
+    expect(importEdges(RESTRICTED_FILE).map((edge) => edge.spec)).not.toContain(
+      "next/cache",
+    );
+    expect(code).not.toMatch(/unstable_cache|["']use cache|cacheTag|cacheLife/);
+  });
+
+  it("lets only the dynamic restricted block reach restricted.ts", () => {
+    const offenders = sourceFiles(SRC)
+      .filter(
+        (file) =>
+          norm(file) !== RESTRICTED && !RESTRICTED_IMPORTERS.has(norm(file)),
+      )
+      .flatMap((file) =>
+        reachingChains(file, reachesRestricted).filter(
+          // A chain through the allowed route is guarded by that route.
+          (chain) =>
+            ![...RESTRICTED_IMPORTERS].some((allowed) =>
+              chain.includes(allowed),
+            ),
+        ),
+      );
+    expect(offenders).toEqual([]);
+  }, 60_000);
+
   it("has no barrel that could re-export the restricted reader", () => {
-    expect(catalogFiles.some((file) => /\/index\.[jt]sx?$/.test(file))).toBe(
+    expect(catalogFiles.some((file) => /[\\/]index\.[jt]sx?$/.test(file))).toBe(
       false,
     );
   });

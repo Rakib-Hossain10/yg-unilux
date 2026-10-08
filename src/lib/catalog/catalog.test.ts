@@ -333,6 +333,14 @@ describe("getPublicProduct", () => {
     expect(await getPublicProduct("")).toBeNull();
     expect(await getPublicProduct("a".repeat(500))).toBeNull();
   });
+
+  it("answers a draft or unknown slug from the slug list, without a product entry (L-3)", async () => {
+    const findOne = vi.spyOn(ProductModel, "findOne");
+    expect(await getPublicProduct("arc-ar-015a")).toBeNull();
+    expect(await getPublicProduct("no-such-product-123")).toBeNull();
+    expect(findOne).not.toHaveBeenCalled();
+    findOne.mockRestore();
+  });
 });
 
 describe("listPublishedSlugs", () => {

@@ -9,7 +9,7 @@
 //  - exact view shapes (no filters / datasheetId / status / sourceSha256);
 //  - malformed / operator-injection inputs return empty WITHOUT a query;
 //  - getRestrictedSpecs access matrix incl. odd session values;
-//  - open finding H-1 (variant labels derived from optic values) as it.fails.
+//  - finding H-1 (variant labels derived from optic values), fixed: now a plain it.
 
 import { Types } from "mongoose";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -816,12 +816,13 @@ describe("P2 spec columns (ADR 0054)", () => {
     );
   });
 
-  it("FINDING L-2: restrictedSpecKeys treats a non-'restricted' typo as PUBLIC (fails open if ever fed unparsed data)", () => {
-    // Today every caller passes parseStoredColumnVisibility output (fails
-    // closed), so this is not reachable; it documents the helper contract.
-    expect(restrictedSpecKeys({ driver: "RESTRICTED" } as never)).not.toContain(
+  it("FINDING L-2 (fixed): restrictedSpecKeys fails closed on a non-'public' value", () => {
+    // Anything but an exact "public" (typo, other case, damaged data) is
+    // restricted, so unparsed input can never open a column.
+    expect(restrictedSpecKeys({ driver: "RESTRICTED" } as never)).toContain(
       "driver",
     );
+    expect(restrictedSpecKeys({ cct: "Public" } as never)).toContain("cct");
   });
 });
 
@@ -901,40 +902,38 @@ describe("FINDING H-1: variant labels carry Lens/Reflector/Diffuser values", () 
    * Repro: admin sets Lens (or Reflector / Diffuser) to restricted. The
    * cached public view still carries variants[].label = the lens values
    * the import derived, so the restricted value reaches cached HTML / the
-   * Models table / the switcher (rule 9). it.fails = open finding.
+   * Models table / the switcher (rule 9). Fixed: labels are null while any
+   * label source column is restricted (ADR 0063).
    */
-  it.fails(
-    "a restricted Lens column does not reach the public view through variant labels",
-    async () => {
-      const id = new Types.ObjectId();
-      await ProductModel.create({
-        ...publishedBase(),
-        _id: id,
-        name: "Arc AR-1",
-        slug: "arc-ar-1",
-        family: "Arc",
-        // exactly what commit.ts writes for the grouped product above
-        variants: [
-          {
-            modelNo: "AR-1A",
-            label: "SECRET-LENS-ALPHA",
-            specs: { lens: ["SECRET-LENS-ALPHA"] },
-          },
-          {
-            modelNo: "AR-1B",
-            label: "SECRET-LENS-BETA",
-            specs: { lens: ["SECRET-LENS-BETA"] },
-          },
-        ],
-      });
-      try {
-        await setStoredVisibility({ ...all("public"), lens: "restricted" });
-        const view = await getPublicProduct("arc-ar-1");
-        expect(view?.variants[0]?.specs.lens).toBeUndefined(); // projection works
-        expect(JSON.stringify(view)).not.toContain("SECRET-LENS"); // ...label leaks
-      } finally {
-        await ProductModel.deleteOne({ _id: id });
-      }
-    },
-  );
+  it("a restricted Lens column does not reach the public view through variant labels", async () => {
+    const id = new Types.ObjectId();
+    await ProductModel.create({
+      ...publishedBase(),
+      _id: id,
+      name: "Arc AR-1",
+      slug: "arc-ar-1",
+      family: "Arc",
+      // exactly what commit.ts writes for the grouped product above
+      variants: [
+        {
+          modelNo: "AR-1A",
+          label: "SECRET-LENS-ALPHA",
+          specs: { lens: ["SECRET-LENS-ALPHA"] },
+        },
+        {
+          modelNo: "AR-1B",
+          label: "SECRET-LENS-BETA",
+          specs: { lens: ["SECRET-LENS-BETA"] },
+        },
+      ],
+    });
+    try {
+      await setStoredVisibility({ ...all("public"), lens: "restricted" });
+      const view = await getPublicProduct("arc-ar-1");
+      expect(view?.variants[0]?.specs.lens).toBeUndefined(); // projection works
+      expect(JSON.stringify(view)).not.toContain("SECRET-LENS"); // ...label leaks
+    } finally {
+      await ProductModel.deleteOne({ _id: id });
+    }
+  });
 });

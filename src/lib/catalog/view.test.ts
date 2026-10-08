@@ -19,6 +19,7 @@ import {
   publicSpecKeys,
   toProductCardView,
   toPublicProductView,
+  VARIANT_LABEL_SOURCE_KEYS,
   type ProductCardView,
   type PublicProductView,
 } from "./view";
@@ -175,6 +176,35 @@ describe("toPublicProductView", () => {
     const view = toPublicProductView(doc, publicSpecKeys({}), []);
     expect(view.specs).toEqual({ cct: ["3000K"] });
     expect(view.variants[0]?.specs).toEqual({ lens: ["PC"], cct: ["3000K"] });
+  });
+
+  it.each([...VARIANT_LABEL_SOURCE_KEYS])(
+    "hides every variant label while %s is restricted (H-1)",
+    (key) => {
+      const labelled = {
+        ...doc,
+        variants: [{ modelNo: "AR-013A1", label: "SECRET-OPTIC" }],
+      };
+      const keys = publicSpecKeys({ ...ALL_PUBLIC, [key]: "restricted" });
+      expect(publicProductProjection(keys)).not.toHaveProperty([
+        "variants.label",
+      ]);
+      const view = toPublicProductView(labelled, keys, []);
+      expect(view.variants[0]?.label).toBeNull();
+      expect(view.variants[0]?.modelNo).toBe("AR-013A1");
+      expect(JSON.stringify(view)).not.toContain("SECRET-OPTIC");
+    },
+  );
+
+  it("keeps variant labels while every label source column is public", () => {
+    const keys = publicSpecKeys(ALL_PUBLIC);
+    expect(publicProductProjection(keys)["variants.label"]).toBe(1);
+    const view = toPublicProductView(
+      { ...doc, variants: [{ modelNo: "AR-013A1", label: "Lens" }] },
+      keys,
+      [],
+    );
+    expect(view.variants[0]?.label).toBe("Lens");
   });
 
   it("picks the first gallery image for a card", () => {

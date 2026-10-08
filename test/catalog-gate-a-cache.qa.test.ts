@@ -3,7 +3,7 @@
 // in-memory MongoDB. Proves: entries are really cached, every write path's
 // tags expire the right entries through src/lib/revalidate.ts, a visibility
 // change never leaves stale restricted values, and documents the fill/expiry
-// race (it.fails = open finding).
+// race (finding M-1, fixed: the visibility is part of the cache key).
 
 import "./helpers/next-als";
 
@@ -403,47 +403,45 @@ describe("visibility changes never serve stale restricted-ness (real cache)", ()
    * tag was expired, is stored with a write time newer than the expiry, so
    * Next treats it as fresh: the newly restricted value is then served until
    * the next products/areas/settings expiry (indefinitely on a quiet catalog).
-   * it.fails = the safe behaviour is not met today.
+   * Fixed: the restricted keys are read outside the cache and are part of
+   * the key, so the stale fill sits under the OLD key and is never served.
    */
-  it.fails(
-    "a fill that straddles a visibility save does not keep the old projection",
-    async () => {
-      await setVisibilityRaw(every("public"));
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => (release = resolve));
-      let reached!: () => void;
-      const atQuery = new Promise<void>((resolve) => (reached = resolve));
-      const original = ProductModel.findOne.bind(ProductModel);
-      const spy = vi.spyOn(ProductModel, "findOne").mockImplementationOnce(((
-        ...args: Parameters<typeof original>
-      ) => {
-        const query = original(...args);
-        return {
-          lean: async () => {
-            reached();
-            await gate; // visibility already read (all public)
-            return query.lean();
-          },
-        };
-      }) as never);
-      // A visitor's render starts filling the entry...
-      const filling = getPublicProduct(SLUG);
-      await atQuery;
-      // ...the admin restricts Wattage and the action expires the tags...
-      const result = await saveColumnVisibility(ACTOR, {
-        ...every("public"),
-        wattage: "restricted",
-      });
-      await expireLikeAction(result.tags);
-      // ...then the slow fill finishes and is stored.
-      release();
-      await filling;
-      spy.mockRestore();
-      await nextTick();
-      const later = await getPublicProduct(SLUG);
-      expect(leaks(later, "wattage")).toBe(false);
-    },
-  );
+  it("a fill that straddles a visibility save does not keep the old projection", async () => {
+    await setVisibilityRaw(every("public"));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const atQuery = new Promise<void>((resolve) => (reached = resolve));
+    const original = ProductModel.findOne.bind(ProductModel);
+    const spy = vi.spyOn(ProductModel, "findOne").mockImplementationOnce(((
+      ...args: Parameters<typeof original>
+    ) => {
+      const query = original(...args);
+      return {
+        lean: async () => {
+          reached();
+          await gate; // visibility already read (all public)
+          return query.lean();
+        },
+      };
+    }) as never);
+    // A visitor's render starts filling the entry...
+    const filling = getPublicProduct(SLUG);
+    await atQuery;
+    // ...the admin restricts Wattage and the action expires the tags...
+    const result = await saveColumnVisibility(ACTOR, {
+      ...every("public"),
+      wattage: "restricted",
+    });
+    await expireLikeAction(result.tags);
+    // ...then the slow fill finishes and is stored.
+    release();
+    await filling;
+    spy.mockRestore();
+    await nextTick();
+    const later = await getPublicProduct(SLUG);
+    expect(leaks(later, "wattage")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

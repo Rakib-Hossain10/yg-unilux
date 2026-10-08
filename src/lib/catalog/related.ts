@@ -11,6 +11,7 @@ import { connectDb } from "@/lib/db";
 import { CATALOG_TAGS } from "@/lib/revalidate";
 import { ProductModel } from "@/models";
 
+import { CATALOG_CACHE_VERSION } from "./cache-version";
 import {
   PRODUCT_CARD_PROJECTION,
   toProductCardView,
@@ -50,7 +51,7 @@ async function readRelatedProducts(
 
 const cachedRelatedProducts = unstable_cache(
   readRelatedProducts,
-  ["catalog", "related-products", "v1"],
+  ["catalog", "related-products", CATALOG_CACHE_VERSION],
   { tags: [CATALOG_TAGS.products] },
 );
 

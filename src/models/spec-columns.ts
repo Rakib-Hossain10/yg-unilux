@@ -286,14 +286,19 @@ export function specColumnsFor(
 }
 
 /**
- * The keys with the given visibility under the default setting, or under an
- * admin's effective one (`visibility` overrides by key). Pure.
+ * The restricted keys under the default setting, or under an admin's
+ * effective one (`visibility` overrides by key). Fails closed: a column is
+ * public only when its value is exactly "public"; any other value (a typo,
+ * "RESTRICTED", a number from damaged data) counts as restricted. Pure.
  */
 export function restrictedSpecKeys(
   visibility: Partial<Record<SpecKey, SpecVisibility>> = {},
 ): SpecKey[] {
-  return SPEC_COLUMNS.filter(
-    (column) =>
-      (visibility[column.key] ?? column.defaultVisibility) === "restricted",
-  ).map((column) => column.key);
+  return SPEC_COLUMNS.filter((column) => {
+    const value: unknown = visibility[column.key];
+    // Only a missing key falls back to the default; null is damaged data.
+    return (
+      (value === undefined ? column.defaultVisibility : value) !== "public"
+    );
+  }).map((column) => column.key);
 }
