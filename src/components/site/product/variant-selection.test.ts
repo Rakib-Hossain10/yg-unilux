@@ -2,7 +2,7 @@
 // matching, URL building, legend, announcement, changed values, row union)
 // and the server render of the client leaves (variant 1, no mismatch).
 
-import { createElement, type ReactNode } from "react";
+import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -186,14 +186,17 @@ describe("valueChanged and unionVariantSpecs", () => {
   });
 });
 
+/* createElement's types want `children` in the props object, the lint rule
+   wants it as an argument: give the provider an optional-children type. */
+const Provider = ProductDetailClient as FunctionComponent<{
+  variants: readonly SwitchVariant[];
+  children?: ReactNode;
+}>;
+
 describe("server render of the client leaves", () => {
   const render = (children: ReactNode) =>
     renderToStaticMarkup(
-      createElement(
-        ProductDetailClient,
-        { variants: [LENS, REFLECTOR] },
-        children,
-      ),
+      createElement(Provider, { variants: [LENS, REFLECTOR] }, children),
     );
 
   it("shows variant 1 (the cached page never reads ?model=)", () => {

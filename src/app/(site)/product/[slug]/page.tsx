@@ -13,6 +13,7 @@ import {
 import { ApplicationsRow } from "@/components/site/product/applications-row";
 import { ProductBreadcrumb } from "@/components/site/product/breadcrumb";
 import { Downloads } from "@/components/site/product/downloads";
+import { galleryImages } from "@/components/site/product/gallery-images";
 import { GalleryStage } from "@/components/site/product/gallery-stage";
 import { ModelsTable } from "@/components/site/product/models-table";
 import {
@@ -103,28 +104,11 @@ export async function generateStaticParams(): Promise<{ slug: string }[]> {
 
 const canonicalPath = (slug: string) => `/product/${slug}`;
 
-function imageAlt(
-  product: PublicProductView,
-  alt: string | null,
-  index: number,
-  total: number,
-): string {
-  return alt?.trim() || `${product.name}, image ${index + 1} of ${total}`;
-}
-
-/** Gallery images with absolute URLs; empty without a cloud name. */
+/** Gallery images (photos, then drawings); empty without a cloud name. */
 function stageImages(product: PublicProductView, cloudName: string | null) {
-  // Photos first, drawings after (plan "Gallery spec").
-  const ordered = [
-    ...product.images.filter((image) => image.kind === "gallery"),
-    ...product.images.filter((image) => image.kind !== "gallery"),
-  ];
-  return ordered.flatMap((image, index) => {
-    const src = cloudinaryImageUrl(cloudName, image.publicId);
-    if (!src) return [];
-    const alt = imageAlt(product, image.alt, index, ordered.length);
-    return [{ src, alt: image.kind === "gallery" ? alt : `${alt} (drawing)` }];
-  });
+  return galleryImages(product.images, product.name, (publicId) =>
+    cloudinaryImageUrl(cloudName, publicId),
+  );
 }
 
 function toStripCards(

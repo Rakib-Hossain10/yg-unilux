@@ -1,42 +1,29 @@
-// The product block's image stage as static HTML: the first image in a fixed
-// 4:3 frame (no layout shift, preloaded as the likely LCP element) or the
-// neutral placeholder. P6 replaces the inside with the interactive gallery.
+// The product block's image area: the interactive gallery (P6) when the
+// product has images, otherwise the neutral placeholder in the same fixed
+// 4:3 frame. Server Component; only <Gallery> and its lightbox are client.
 
-import Image from "next/image";
-
+import { Gallery } from "./gallery";
+import type { GalleryImage } from "./gallery-images";
 import { ImagePlaceholder } from "./image-placeholder";
-
-export interface StageImage {
-  src: string;
-  alt: string;
-}
 
 export function GalleryStage({
   images,
   productName,
 }: {
-  /** Absolute image URLs in display order; empty = placeholder. */
-  images: readonly StageImage[];
+  /** Display order (photos, then drawings); empty = placeholder. */
+  images: readonly GalleryImage[];
   productName: string;
 }) {
-  const first = images[0];
   return (
-    // Stable hook for the P6 gallery and the motion pass (plan P6/P8).
+    // Stable hook for the gallery tests and the motion pass (plan P6/P8).
     <div data-slot="product-gallery" className="product-gallery">
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-grey-100">
-        {first ? (
-          <Image
-            src={first.src}
-            alt={first.alt}
-            fill
-            preload
-            sizes="(min-width: 1024px) 58vw, 100vw"
-            className="object-contain"
-          />
-        ) : (
+      {images.length > 0 ? (
+        <Gallery images={images} productName={productName} />
+      ) : (
+        <div className="relative aspect-[4/3] w-full overflow-hidden bg-grey-100">
           <ImagePlaceholder name={productName} />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

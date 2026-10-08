@@ -227,3 +227,35 @@
     box-shadow: 0 0 0 0.25rem var(--color-grey-100);
   }
 }
+
+/* Product page, gallery (P6): the track and thumbnail strip scroll natively
+   (swipe, trackpad, keyboard through their buttons) with no visible bar; the
+   prev/next buttons, thumbnails and counter say where you are. */
+.gallery-track,
+.gallery-thumbs {
+  scrollbar-width: none;
+}
+.gallery-track::-webkit-scrollbar,
+.gallery-thumbs::-webkit-scrollbar {
+  display: none;
+}
+
+/* The stage button fills a clipped frame, so an outside outline would be cut
+   off: draw the focus ring inside, ink with a paper edge, visible on any
+   photograph. */
+.gallery-slide-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.gallery-slide-button:focus-visible::after {
+  box-shadow:
+    inset 0 0 0 2px var(--color-ink),
+    inset 0 0 0 4px var(--color-paper);
+}
+
+/* The page behind the open lightbox does not scroll. */
+html:has(dialog.lightbox[open]) {
+  overflow: hidden;
+}

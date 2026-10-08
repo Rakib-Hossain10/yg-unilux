@@ -59,6 +59,14 @@ export function useVariantSelection(): VariantSelection {
   return value;
 }
 
+/**
+ * The selection when inside ProductDetailClient, else null: the gallery uses
+ * it to follow the switch but also works on its own (no variants).
+ */
+export function useOptionalVariantSelection(): VariantSelection | null {
+  return use(VariantContext);
+}
+
 /* Back/forward between hash anchors fires popstate; nothing else changes it. */
 function subscribe(onChange: () => void): () => void {
   window.addEventListener("popstate", onChange);
