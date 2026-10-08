@@ -28,6 +28,10 @@ import {
 } from "@/models";
 import type { Product, ProductImage } from "@/models/product";
 import {
+  isMagneticTrackCategory,
+  MAGNETIC_TRACK_SLUG,
+  MODEL_NO_COLLATION,
+  modelNoKey,
   PRODUCT_STATUSES,
   type ProductStatus,
 } from "@/models/product-constants";
@@ -52,7 +56,7 @@ export const PRODUCTS_PAGE_SIZE = 25;
 /** Longest search text used; longer input is cut, not refused. */
 export const MAX_PRODUCT_SEARCH_LENGTH = 80;
 /** The slug of the main category that may carry a `trackSize` (see below). */
-export const MAGNETIC_TRACK_SLUG = "magnetic-track";
+export { MAGNETIC_TRACK_SLUG };
 
 const NOT_FOUND = "This product no longer exists. Reload the page.";
 /** Shown when the product is gone (deleted in another tab). */
@@ -199,7 +203,8 @@ const LIST_PROJECTION = {
 
 /**
  * One page of products, newest edit first. `q` matches name, slug, family,
- * model code and every variant's model no. (literal, case-insensitive);
+ * model code and every variant's model no. (literal, case-insensitive: the
+ * regex `i` flag, so "ar-013a1" finds "AR-013A1" like the collation does);
  * `category` matches products whose main or extra category is that category or
  * one of its children. Bad input falls back to the defaults.
  */
@@ -411,12 +416,17 @@ function stable(value: unknown): string {
 /*
  * Turns a duplicate-key error from the unique indexes into a field error:
  * `slug`, or `variants.N.modelNo` for the row(s) holding the clashing value.
- * Reads the server's keyPattern/keyValue; falls back to `variants`.
+ * With the collation index (ADR 0055) the server's keyValue is an opaque
+ * "CollationKey(0x...)", not the text, so the rows are found by asking the
+ * database again which of our model nos. another product owns. A plain-text
+ * keyValue (an old index without collation, before migration) still matches
+ * directly. Falls back to `variants` when neither finds the row.
  */
-function duplicateKeyResult(
+async function duplicateKeyResult(
   error: unknown,
   variants: ProductInput["variants"],
-): ServiceResult<never> {
+  self: Types.ObjectId,
+): Promise<ServiceResult<never>> {
   const info =
     typeof error === "object" && error !== null
       ? (error as {
@@ -428,9 +438,18 @@ function duplicateKeyResult(
     return fieldErrors({ slug: [SLUG_TAKEN] });
   }
   const value = info.keyValue?.["variants.modelNo"];
-  const hits = variants.flatMap((variant, index) =>
-    variant.modelNo === value ? [index] : [],
+  let hits = variants.flatMap((variant, index) =>
+    typeof value === "string" &&
+    modelNoKey(variant.modelNo) === modelNoKey(value)
+      ? [index]
+      : [],
   );
+  if (hits.length === 0) {
+    const owned = await modelNosOwnedElsewhere(variants, self);
+    hits = variants.flatMap((variant, index) =>
+      owned.has(modelNoKey(variant.modelNo)) ? [index] : [],
+    );
+  }
   if (hits.length > 0) {
     return fieldErrors(
       Object.fromEntries(
@@ -457,9 +476,7 @@ interface CategoryRef {
  */
 async function isMagneticTrack(categories: CategoryRef[]): Promise<boolean> {
   const isRoot = (c: CategoryRef) =>
-    c.parent === null &&
-    (c.slug === MAGNETIC_TRACK_SLUG ||
-      c.name.trim().toLowerCase() === "magnetic track");
+    c.parent === null && isMagneticTrackCategory(c);
   if (categories.some(isRoot)) return true;
   const parentIds = categories.flatMap((c) => (c.parent ? [c.parent] : []));
   if (parentIds.length === 0) return false;
@@ -518,28 +535,60 @@ async function checkReferences(
   return errors;
 }
 
-/* Variant rows whose model no. another product already uses. */
+/*
+ * Variant rows whose model no. another product already uses, in any case
+ * ("zz-9" clashes with "ZZ-9", ADR 0055). The query passes the index's
+ * collation, so `$in` matches case-insensitively AND the
+ * { variants.modelNo } index serves it (a query with another collation
+ * could not use that index). The matched products' model nos. are then
+ * compared with modelNoKey, the same rule in code.
+ */
 async function takenModelNos(
   variants: ProductInput["variants"],
   self: Types.ObjectId,
 ): Promise<Record<string, string[]>> {
   if (variants.length === 0) return {};
   const modelNos = variants.map((variant) => variant.modelNo);
-  // Uses the { variants.modelNo } index.
   const others = await ProductModel.find(
     { _id: { $ne: self }, "variants.modelNo": { $in: modelNos } },
     { "variants.modelNo": 1 },
+    { collation: MODEL_NO_COLLATION },
   ).lean<{ variants: { modelNo: string }[] }[]>();
   const taken = new Set(
-    others.flatMap((o) => o.variants.map((v) => v.modelNo)),
+    others.flatMap((o) => o.variants.map((v) => modelNoKey(v.modelNo))),
   );
   const errors: Record<string, string[]> = {};
   variants.forEach((variant, index) => {
-    if (taken.has(variant.modelNo)) {
+    if (taken.has(modelNoKey(variant.modelNo))) {
       errors[`variants.${index}.modelNo`] = [MODEL_NO_TAKEN];
     }
   });
   return errors;
+}
+
+/*
+ * The keys (modelNoKey) of our model nos. that another product owns, read
+ * with `distinct` under the index's collation. Only used after a
+ * duplicate-key error, to find which row clashed (see duplicateKeyResult).
+ */
+async function modelNosOwnedElsewhere(
+  variants: ProductInput["variants"],
+  self: Types.ObjectId,
+): Promise<Set<string>> {
+  if (variants.length === 0) return new Set();
+  const owned = await ProductModel.distinct(
+    "variants.modelNo",
+    {
+      _id: { $ne: self },
+      "variants.modelNo": { $in: variants.map((variant) => variant.modelNo) },
+    },
+    { collation: MODEL_NO_COLLATION },
+  );
+  return new Set(
+    owned.flatMap((modelNo) =>
+      typeof modelNo === "string" ? [modelNoKey(modelNo)] : [],
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -821,7 +870,7 @@ export async function updateProduct(
     }
   } catch (error) {
     if (isDuplicateKeyError(error)) {
-      return duplicateKeyResult(error, values.variants);
+      return duplicateKeyResult(error, values.variants, selfId);
     }
     throw error;
   }

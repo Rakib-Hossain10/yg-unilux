@@ -1,21 +1,19 @@
 // Pure helpers of the settings UI (T15). Client-safe: no server imports.
 
 import type { ColumnVisibility } from "@/lib/schemas/settings";
-import { SPEC_COLUMNS, type SpecKey } from "@/models/spec-columns";
+import {
+  FILTER_KEY_BY_SPEC,
+  SPEC_COLUMNS,
+  type SpecKey,
+} from "@/models/spec-columns";
 
 /**
- * The columns that feed a listing filter. Mirrors FILTER_KEY_BY_SPEC in
- * src/lib/admin/settings.ts (server-only, so not importable here); a unit
- * test keeps the two lists equal.
+ * The columns that feed a listing filter, derived from the shared
+ * FILTER_KEY_BY_SPEC map (pure module, so client-safe).
  */
-export const FILTER_COLUMNS: readonly SpecKey[] = [
-  "cct",
-  "cri",
-  "beamAngle",
-  "ugr",
-  "wattage",
-  "ipRating",
-];
+export const FILTER_COLUMNS: readonly SpecKey[] = Object.keys(
+  FILTER_KEY_BY_SPEC,
+) as SpecKey[];
 
 const HEADER = new Map<string, string>(
   SPEC_COLUMNS.map((column) => [column.key, column.header]),

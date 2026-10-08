@@ -49,3 +49,7 @@ next-env.d.ts
 
 # claude code: per-file review output (local only)
 .claude/reviews/
+
+# Client spec sheets: real product data incl. restricted values; local only (Phase 3 Q1)
+/doc/reference/*.xlsx
+/test/fixtures/private/

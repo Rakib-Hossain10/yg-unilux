@@ -68,6 +68,20 @@ const OBJECT_ID_HEX = /^[0-9a-f]{24}$/i;
    Key-shaped on purpose: a phone number or email can never pass as an id. */
 const SETTINGS_KEY = /^settings\.[a-z][A-Za-z]{0,63}$/;
 
+/* A bulk import run: the uuid v4 of its staged file `imports/<uuid>.xlsx`. */
+const IMPORT_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/* How each target type is addressed. */
+const TARGET_ID_PATTERNS: Record<AuditTargetType, RegExp> = {
+  product: OBJECT_ID_HEX,
+  category: OBJECT_ID_HEX,
+  area: OBJECT_ID_HEX,
+  datasheet: OBJECT_ID_HEX,
+  settings: SETTINGS_KEY,
+  import: IMPORT_ID,
+};
+
 /* Caps that keep a single entry small even before the byte check. */
 const MAX_META_KEYS = 50;
 const MAX_META_LIST = 200;
@@ -112,14 +126,13 @@ const auditInputSchema = z
         message: "target type must match the action",
       });
     }
-    // Records are addressed by ObjectId; settings by their siteContent key.
-    const idPattern =
-      entry.target.type === "settings" ? SETTINGS_KEY : OBJECT_ID_HEX;
-    if (!idPattern.test(entry.target.id)) {
+    // Records are addressed by ObjectId, settings by their siteContent key,
+    // an import by its staged file's uuid.
+    if (!TARGET_ID_PATTERNS[entry.target.type].test(entry.target.id)) {
       ctx.addIssue({
         code: "custom",
         path: ["target", "id"],
-        message: "target id must be an ObjectId or a settings key",
+        message: "target id does not fit the target type",
       });
     }
   });

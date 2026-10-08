@@ -5,6 +5,7 @@
 import {
   Building2,
   FileSpreadsheet,
+  FileUp,
   FolderTree,
   Inbox,
   LayoutDashboard,
@@ -26,6 +27,7 @@ export interface AdminSection {
 export const ADMIN_SECTIONS = {
   dashboard: { href: ADMIN_HOME, label: "Dashboard", icon: LayoutDashboard },
   products: { href: "/admin/products", label: "Products", icon: Package },
+  import: { href: "/admin/import", label: "Import", icon: FileUp },
   categories: {
     href: "/admin/categories",
     label: "Categories",
@@ -55,6 +57,7 @@ export const ADMIN_SECTIONS = {
 export const ADMIN_NAV: readonly AdminSection[] = [
   ADMIN_SECTIONS.dashboard,
   ADMIN_SECTIONS.products,
+  ADMIN_SECTIONS.import,
   ADMIN_SECTIONS.categories,
   ADMIN_SECTIONS.areas,
   ADMIN_SECTIONS.datasheets,

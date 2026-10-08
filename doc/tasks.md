@@ -4,8 +4,107 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Branch:** `phase-2` (from `main`). Phase 1 is **merged** (PR #9, `5fff0bb`, 2026-10-06).
-- **Phase 2 is PLANNED and APPROVED. Read `doc/phase-2-plan.md` first** — it holds the architecture, 18 ordered tasks (T1–T18, one commit each), owners, models, tests, QA gates A–E, risks and ADR list. The user's decisions are in it: direct browser uploads with server-side verification (amends ADR 0009), and the ADR 0019 product defaults.
+- **Branch:** `phase-3` (from `main`). **Phase 2 is merged** (PR #11, `b689cb7`, 2026-10-07; QA gates A–E passed, real-credential smoke passed). Phase 1 merged earlier (PR #9).
+- **Phase 3 plan APPROVED** (2026-10-07, all six defaults accepted): `doc/phase-3-plan.md` (T0–T11; QA gates A after T5, B after T8, C at exit; ADRs 0055–0058).
+  - **T0 done:**
+    - the client sheet is at `doc/reference/client-sample-sheet.xlsx`, LOCAL ONLY, gitignored (`/doc/reference/*.xlsx`), never commit it;
+    - studied: plan section "Fixture findings";
+    - fixture path fixed in `import-engineer.md`;
+    - ADR 0054 written (product page layout).
+  - **T1 done** (`bfbfa6f`, ADR 0055):
+    - case-insensitive unique `variants.modelNo` index (collation en/2); shared `modelNoKey` / `MODEL_NO_COLLATION` in `src/models/product-constants.ts`;
+    - `ProductImage.sourceSha256` (server-owned);
+    - `npm run check:model-nos`;
+    - gate B L-A closed;
+    - 2149 unit green (4 expected-fail).
+  - **T2 done** (`be96922`):
+    - `src/lib/import/{types,safety,columns,workbook}.ts`;
+    - shared `readCentralDirectory` (our reader now sees exactly what JSZip sees; 3 zip-bomb bypasses found by the auto-review were fixed);
+    - synthetic fixture `test/fixtures/import/build.ts` + `raw-zip.ts`;
+    - the real-sheet test passes locally (33 headers, 12 rows, 0 warnings) and is skipped in CI;
+    - 2237 unit green (4 expected-fail, 1 skipped).
+  - **T3 done** (`4c9821f`, ADR 0056):
+    - `clean.ts` (`cleanRow` → `CleanedRow`), `SPLIT_POLICY` in `columns.ts`, `numbers.ts` (`parseFilterNumbers`, `filtersFromSpecs`);
+    - `FILTER_KEY_BY_SPEC` moved to `src/models/spec-columns.ts`;
+    - the property test proves zero CJK on the real sheet;
+    - 2452 unit green (4 expected-fail, 1 skipped).
+  - **T4 done** (ADR notes pending for 0057, below):
+    - `src/lib/import/group.ts`: `groupRows(rows, {categories, areas, defaultCategoryId})` → `{products: ImportProduct[], warnings}` (orphan rows at file level); `ImportProduct` / `ImportVariant` in `types.ts`;
+    - the Magnetic Track rule now lives once in `src/models/product-constants.ts` (`isMagneticTrackCategory`, `trackSizeFromSlug`), used by `products.ts` and `product-category-options.ts` (behaviour unchanged);
+    - golden No. 76 passes on the synthetic fixture and the real sheet; Nos. 80/81 blocked (`missing_model_no`);
+    - 2506 unit green (4 expected-fail, 2 skipped = the "real sheet missing" notices).
+  - **T5 done** (`7866406`):
+    - `src/lib/import/images.ts` (`readEmbeddedImages(bytes, sheetNames)` → `{anchors, files: Map<sha256, EmbeddedImage>, warnings}`; pure `attachImages(products, embedded)` → `product.images: ImportImageRef[]`, `variant.imageSha256`);
+    - `src/lib/import/ooxml.ts` (linear XML reader: DOCTYPE refused, caps, prefix-free, rels that climb out of the package dropped);
+    - `readZipBytes` in `src/lib/xlsx-signature.ts` (`readZipPart` now also calls a deflated part with the wrong inflated length "corrupt"); `MAX_IMPORT_XML_PART_BYTES` 16 MB, `MAX_IMPORT_IMAGE_PIXELS` 25 MP in `constants.ts`;
+    - new warning codes `image_too_large`, `image_not_on_row`; `missing_image` is emitted here;
+    - real sheet: 12 anchors, 4 PNGs, one gallery image per product, 76+77 and 78+79 share a picture, no variant pictures;
+    - 2559 unit green (4 expected-fail, 3 skipped).
+  - **QA gate A: PASS** (T1–T5, 2026-10-07, Opus; three rounds):
+    - round 1 FAIL: M-1 exceljs expands merge/validation/defined-name ranges cell by cell (tiny file → hang/OOM), M-2 cubic filter parsers, L-1 CJK punctuation survives, L-2 case-only duplicate part names;
+    - fixed in `620711c`: `src/lib/import/sheet-guard.ts` inside `checkImportFile` (strips `<dataValidations>` + `<definedNames>`, caps merges 2,000 / 100,000 cells, `<col max>` ≤ XFD, `sheetId` ≤ 10,000, refuses ambiguous XML, re-checks after strip); `src/lib/import/zip-rebuild.ts` always rewrites the checked zip (one zip path, no JSZip in production); linear `numbers.ts`; block-wide `CJK_CLASS`; lowercased part names; `CheckedImportFile` brand (readers refuse raw bytes); any `vbaProject.bin` refused; Node engines `>=22.2` (`zlib.crc32`);
+    - round 2 FAIL: M-3 non-canonical part names (`xl/./…`, `xl/a/../workbook.xml`) resolved by JSZip but not by our checks; fixed in `09d7c23` (refuse any name JSZip's `resolve` would change, backslashes too; duplicates on lowercased name) + I-7 (images read the sheet part exceljs reads);
+    - round 3 PASS (`5f3b5de`): `test/import-gate-a.qa.test.ts`, `test/import-gate-a-recheck.qa.test.ts` (deterministic guard-output asserts, exact refusal reasons). 2659 unit green (4 expected-fail, 3 skipped), build OK, audit ok.
+    - new refusal reasons `too_many_merged_cells` (→ fatal code `sheet_too_complex`), `sheet_out_of_range` (→ `not_xlsx`); caps `MAX_IMPORT_MERGES`, `MAX_IMPORT_MERGED_CELLS`, `MAX_IMPORT_SHEET_ID` in `constants.ts`.
+  - **Plan amended 2026-10-07 (user, ADR 0059):** the client's sheet was only a sample; the client will always fill **a template we control** (one row per variant, Model No. always filled, no merged cells, English-only headers, `-` for n/a, fixed Category/Extra Category/Area values). The template is now the primary defence and runs **next**; the tolerant parser stays as the safety net (don't rip anything out, just don't design around arbitrary sheets). New order: **T10a → T10b → T6 → T7 → T8 → gate B → T9 → T11 → gate C.**
+  - **T10a done** (ADR 0059 addendum): `src/lib/import/template.ts` (`buildImportTemplate`), parser additions (`Area:`/`Extra Category n` headers, `invalid_area_flag`, `Lists` sheet skipped, repeated `NO.` on the next row = continuation), golden round trip with zero warnings; 2706 unit green (4 expected-fail, 3 skipped).
+  - **Open from T10a:** reword the `Image` header note (no "Place in Cell"; use floating pictures) before client hand-off; check comment box sizes in Excel/WPS at gate B; `unknown_area` is per row, not per column (optional fix).
+  - **T10b done:** `GET /api/admin/import/template` (`src/app/api/admin/import/template/route.ts`; `requireAdminForRoute`, `listCategoryTree`/`listAreas`, attachment, `private, no-store`); 7 tests (401/403 incl. banned + temp-password admin, 200 headers, body passes `checkImportFile`, live areas/categories). 2713 unit green (4 expected-fail, 3 skipped). First admin route handler, sets the pattern. Not run against a real Next runtime yet: smoke it in `next dev` or at gate B.
+  - **T6 done** (ADR 0060): `presignImportUpload` (`imports/<uuid v4>.xlsx`, signs xlsx MIME + exact length ≤ 30 MB, 5 min), `getImportBytes(key, {ifMatch?})` (Range + streaming cap, returns ETag), `deleteImportUpload`, `uploadImageBuffer(productId, data)` (signed `upload_stream`, `overwrite:false`, own `sourceSha256`, limit checks on the Upload API answer — deliberately NOT `inspectImage`, see ADR 0060 §3), `sweep:incoming` covers `imports/` > 24 h under the one guard, audit `import.commit` / target `import` (id = staged uuid), `src/lib/schemas/import.ts` (`IMPORT_KEY_PATTERN`, `importKeySchema`, `importIdFromKey`, `presignImportInputSchema`, `defaultCategoryIdSchema`, `importFileInputSchema`). Gate C L-1 closed (escaped dot, two `it.fails` → `it`). 2802 unit green (2 expected-fail, 3 skipped).
+  - **T7 done** (ADR 0057): `src/lib/import/plan.ts` (`loadPlanLookups`, `planFromBytes`, `planProducts`, pure `planHash`) + `src/lib/import/index.ts` (`previewImport(input)` → `ServiceResult<ImportPreview>`, `{kind:"plan", etag, plan}` or `{kind:"refused", warnings}`; writes nothing, no tags). Plan types in `types.ts` (`PlanEntry`, `PlanTarget`, `PlanVariant`, `PlanChange`, `ImportPlan`); new error codes `no_slug`, `invalid_record` (merged target fails `productInputSchema`); `trackSizeOf` exported from `group.ts`. `importFileInputSchema` already had `{key, defaultCategoryId}` (T6); the service checks the category exists. Restricted filters: one `withoutRestrictedFilters` probe per plan gates every product. 31 tests in `plan.test.ts` (memory DB; incl. zero-writes via Mongoose debug + other collections unchanged + no `files` in the result, trackSize dropped when the sheet leaves Magnetic Track, conflict across two sheet products, ownership, restricted filters, hash on `updatedAt`/visibility/image sha, real sheet when present: 4 create + 2 blocked, then 4 unchanged). 2833 unit green (2 expected-fail, 3 skipped).
+  - **T8 done** (`c628e99`, ADR 0061): `src/lib/import/commit.ts` (`commitPlanBatch`, `batchCount`, `COMMIT_ERRORS`), `commitImportBatch(actorId, input)` / `finishImport(input)` in `index.ts`, `commitImportInputSchema` / `finishImportInputSchema`. Hash protocol changed from the carry note: per-entry `hash` + `sheetHash`, `PLAN_HASH_VERSION` 2 (a single hash cannot survive earlier batches). 2873 unit green (2 expected-fail, 3 skipped).
+  - **QA gate B: PASS after fixes** (T6–T8 + T10a/T10b, 2026-10-07, Opus): round 1 FAIL on M-1 (preview had no entry cap but commit refuses > 5000), L-1 (Image note said "Place in Cell"), L-2 (note boxes clipped), L-3 (`unknown_area` per row). Fixed in `08ef07e`: `too_many_products` fatal refusal in `planFromBytes`; note reworded (floating picture); template VML post-processed to 260×130 pt boxes (`jszip` used in `template.ts` on our own generated output only); `unknown_area` once per `Area:` column (`areaFlags` on cleaned rows, `areaColumns` into `groupRows`). Tests: `test/import-gate-b*.qa.test.ts` (40). Info: I-1 replaying a create batch after the product was deleted re-creates it until `finishImport`; I-2 `etag: null` skips the If-Match pin; I-3 `planHash` is not a keyed MAC. The concurrent-commit test now accepts "at least one ok" (the loser gets "preview again"). Full re-run of the gate not repeated; run the QA review again only if T9 touches these files.
+  - **T9 done** (ADR 0058): `/admin/import` (page, loading, `actions.ts` with presign/preview/commitBatch/finish, `src/components/admin/import/*`), nav entry "Import". Browser runs the batch loop and skips batches with nothing to write (`batchesToSend`; one-line change if every batch must be sent); `maxDuration` 300; commit action returns `next` (retry/preview/upload/confirm) by comparing service messages. 3031 unit green, lint/typecheck/build OK. NOT seen in a browser, e2e not run (`.next` rebuilt: rebuild before e2e); `e2e/admin-shell.spec.ts` now expects 10 nav links. Gate B not re-run (no gate-B files touched).
+  - **Follow-ups from T9:** add a `presignImport` service in `src/lib/import/index.ts` (then drop the `@/lib/storage` guard exception in `test/admin-guards.test.ts`); machine-readable error codes on `ServiceResult` (`preview_again`, `file_changed`, `staged_missing`, `category_gone`) instead of message comparison (an expired staged file currently maps to "retry").
+  - **T11 done:** `e2e/admin-import.spec.ts` (6 tests: template download, filled template -> preview -> commit -> Arc draft with 2 variants + image + audit, staged file deleted, re-import = all unchanged and nothing written, bilingual fixture as tolerance case, non-workbook refused; axe + 375 px + focus per step) and a `admin-import` project in `playwright.config.ts` (runs last, like `admin-exit`). Full e2e 139 green, typecheck/lint OK. No T9 bugs found. Optional polish: "Import finished" Alert has no `role="alert"`, results table has no accessible name.
+  - **QA gate C: PASS after fixes** (2026-10-08, Opus): H-1 `next` 16.3.7 -> 16.3.8 (six advisories, audit red; `eslint-config-next` too; CLAUDE.md updated), L-1 expired staged file now maps to `upload` (`STAGED_FILE_MESSAGES` exported from `src/lib/import`), L-2 `aria-label` on a span replaced by `sr-only` text. `test/import-gate-c.qa.test.ts` (24 tests). 3056 unit green, lint/typecheck/audit OK. Open polish: "Import finished" Alert role, table captions. Full e2e not re-run after the Next bump: CI will run it.
+  - **Phase 3 code complete. Next:** push `phase-3`, PR with `gh`, wait for CI, ask the user before merging into `main`; then Phase 4 planning. Still open for the user: real-credential smoke (import the real sheet, import again = all unchanged; R2 If-Match; Cloudinary upload_stream), `npm run db:indexes` on a scratch DB, client questions (5000 products per file, floating pictures in Excel/WPS). Follow-ups: `presignImport` service, machine-readable codes on `ServiceResult`.
+  - **T9 labels (from gate B):** `too_many_products` "Too many products" (fatal); `unknown_area` is now one file-level warning per unknown `Area:` column (column `areaFlag`, hint "download a fresh template"), per row only for the free-text `Areas` column.
+  - **Client question:** do 5000 products per file and "floating picture over the Image cell" work in the client's Excel/WPS? Real-credential smoke (R2 If-Match, Cloudinary upload) still open.
+  - **Carry into T9 (from T8):** commit action = `requireAdmin()` → `commitImportBatch(viewer.user.id, input)` → `revalidateCatalogInAction(result.tags)` on BOTH branches; the client keeps `plan.entries.map(e => e.hash)` from the preview and sends it on every batch; loop batches `0..batchCount(entries.length)-1` (re-sending is safe); on `PREVIEW_AGAIN` / `FILE_CHANGED` go back to the preview step; show each `CommittedProduct.status`/`error` with link by id/slug; call `finishImport` after the last batch; `acknowledgeRemovals` is a field error; check `maxDuration` (20 products × 4 parallel uploads + a full re-parse per batch).
+  - **Low follow-ups (T8):** `previewImport` and `commitImportBatch` repeat the "category exists, then read staged file" steps (shared helper).
+  - **Carry into T8 (from T7):**
+    - re-plan with `planFromBytes(bytes, {...await loadPlanLookups(), defaultCategoryId})` from `getImportBytes(key, {ifMatch: previewEtag})`; refuse unless `plan.planHash` equals the previewed hash (the hash covers each matched product's `updatedAt`, the visibility setting and the default category);
+    - write EXACTLY `entry.target` (plan tests' `saveAsCommitWould` shows the shape: optional texts unset when null, variant `specs` omitted when empty, `label` always set), so the next preview is `unchanged`; on update `$set` only sheet-owned paths, never `name`/`slug`/`status`/admin fields; `target.name`/`slug` are written on create only;
+    - `variantsRemoved` only with the acknowledgement; `imagesToAdd` → upload, then push `{publicId, order, kind:"gallery", sourceSha256, alt: product name}`; `PlanVariant.imageSha256` (new variants only) → that upload's `publicId` (or the existing image with that `sourceSha256`);
+    - the slug from the plan can still race: a duplicate-key error on create = product error, not a crash; `filters` are already gated, do not recompute without `withoutRestrictedFilters`.
+  - **Carry into T8 (from T6):** `getImportBytes(key, {ifMatch: previewEtag})` (`StorageConditionError` → "file changed, preview again"); pass the `Uint8Array` / `Buffer.from(img.data)` to `uploadImageBuffer` and store `image.publicId` + `image.sourceSha256`; `deleteImportUpload` in `finishImport`; audit target id = `importIdFromKey(key)`.
+  - **Carry into T9 (from T6):** presign action = `requireAdmin()` → `presignImportInputSchema` → `presignImportUpload({contentType: XLSX_MIME_TYPE, contentLength: size})`; the browser PUT must send exactly the signed `Content-Type`.
+  - **Real-credential smoke (gate B or later):** R2 honours `If-Match` on GET; a signed server `upload_stream` returns `existing` and format/bytes/width/height. Low T6 follow-ups: duplicated 24 h / 300 s literals, uuid v4 regex in four modules, no test for the non-`Uint8Array` chunk branch. `test/phase2-exit.qa.test.ts` `.next/server` walk can time out at 5 s under load (flake, not a bug).
+  - **Gate B** now covers T6–T8 + T10a/T10b (template round trip, route guard).
+  - **Carry into T9 (ADR 0059):** a "Download template" link in step 1; labels for `invalid_area_flag` and a hint on `unknown_category`/`unknown_area` ("download a fresh template").
+  - **Carry into T11:** the exit e2e downloads the template and imports a filled one (the synthetic bilingual fixture stays as the tolerance case).
+  - **Carry into T9 (from gate A):** warning messages repeat cell values, raw header first lines and uncleaned sheet names (may hold Chinese): show them to the admin only, never write warning text to the audit log, server logs or the DB (I-3, I-4). Labels for `sheet_too_complex` ("Sheet too complex: too many merged cells") and the `sheet_out_of_range` message.
+  - **Carry into T8 (from T5):** upload only sha256s that a written product references; one Cloudinary copy per product; skip sha256s already in that product's `sourceSha256`; 30-image cap on stored + new; `imageSha256` → `variants[].imagePublicId` only on create or new variant; pass `Buffer.from(img.data)`. The 25 MP cap assumes Cloudinary's free plan — confirm when the plan is known.
+  - **Carry into T9 (from T5):** labels `image_too_large` "Picture too large (over 10 MB / 25 MP)", `image_not_on_row` "Picture not on a product row", `unsupported_image` "Picture can't be used", `unsupported_image_store` "Pictures stored in cells (not imported)", `missing_image` "No picture"; alt text comes from the product name (sheet picture names are useless).
+  - **Carry into T9:** preview labels for `duplicate_product_no`, `short_base_model_code`, `model_no_has_space`, `invalid_product_no`, `invalid_model_no`.
+  - **Carry into T9 (from T7):** the preview action = `requireAdmin()` → `previewImport(input)` (no revalidation: tags are always `[]`); labels for `model_no_conflict`, `variant_removed` (needs the ack), `no_slug`, `invalid_record`; show `entry.changes` + "+`moreChanges` more"; the response holds restricted spec values (admin only, never cached or logged).
+  - **Gate B should check (T7):** the zero-writes test, that `PlanTarget` has no admin-owned field, the hash inputs (ADR 0057 §5), and the per-plan `withoutRestrictedFilters` probe (ADR 0057 §4).
+  - **Carry into T8 (from T1):**
+    - use `modelNoKey` for in-sheet duplicates;
+    - pass `{ collation: MODEL_NO_COLLATION }` on every model-no. lookup;
+    - set `sourceSha256` on imported images;
+    - `findModelNoCollisions` (`src/lib/model-no-collisions.ts`) can be reused.
+  - **QA:** gate A passed; B after T8 (covers T6–T8 + T10a/T10b), C at exit.
+  - **English only (user, 2026-10-07):**
+    - no Chinese is ever stored;
+    - the sheet puts English first, then a blank line, then Chinese; the blank-line cut + CJK strip handle it;
+    - multi-line cells use a per-column split policy (options / options+slash / join), not always options.
+  - **User must do (per database; dev now, preview/prod later):**
+    1. `npm run check:model-nos`, and fix anything it lists.
+    2. In Atlas, open `products` → Indexes, then drop `variants.modelNo_1` (or in mongosh: `db.products.dropIndex("variants.modelNo_1")`).
+    3. Right after step 2, run `npm run db:indexes`.
+  - **Ask the client:** (merged cells are now ruled out by the template rules) the sheet's pictures are cropped in Excel but we import the full photo (OK, or apply the crop at commit?); should a picture outside the Image column (e.g. a dimension drawing) become a gallery image (today it does); Nos. 80/81 have no model no. (they will be blocked in the preview), the `95±` lumen efficiency values, the "High Effciency Reflector" typo, whether NO. restarts on each sheet, and whether a base code like `AR-10`/`AR-12` → `AR-1` is OK or should stop at a digit boundary (decide before the first real import: slugs are set on create only).
+  - Subagents: `import-engineer`, `backend-architect`, `admin-panel-builder`, `qa-security-reviewer`. No new subagent. All on Opus.
+- **Phase 3 must-dos (all planned in, see the plan's last section):**
+  - ~~Fix gate B L-A~~ (done in T1, ADR 0055).
+  - The import MUST call `withoutRestrictedFilters` (`src/lib/admin/products.ts`) so restricted columns never get filter numbers.
+  - Import-preview images uploaded to Cloudinary and not confirmed within 24 h would be swept by `sweep:cloudinary`; design the preview step with this in mind (or confirm in the same sitting / track pending ids).
+  - Open: per-environment Cloudinary folder prefix (dev/preview/prod share `yg/products|areas`; sweep has a mass-delete guard, ADR 0053).
+- **Phase 2 leftovers (Low, not blocking):** gate C L-1 (escape `.` in key patterns, two `it.fails`), L-2/L-3 (delete races), L-4 (`aria-hidden` on hidden file inputs); gate D L-1/L-2/L-3; gate A L-1 (`[id]` pages 200 for unknown id), L-3; T13 follow-ups (uploader names in `listDatasheets()`), T11b low follow-ups. See the Phase 2 history below.
+- **User must do:** rebuild before any local `npm start` (the `.next` folder may come from an e2e build). Provide the client's Arc sheet as the import fixture when available.
+
+### Phase 2 history (done, kept for reference)
 - **Done:**
   - T1 (shadcn + tokens, ADR 0034).
   - T2 (shared helpers + `products.datasheetId` index, ADR 0035):
@@ -44,7 +143,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **QA gate E: PASS** (Phase 2 exit, 2026-10-07, Opus). No Critical/High. 2060 unit (6 expected-fail) + 133 e2e green, build/audit OK, gitleaks clean, db:indexes OK on a scratch DB. Added `test/phase2-exit.qa.test.ts` (22) and `e2e/admin-gate-e.qa.spec.ts` (8).
     - **M-1 and L-1 FIXED** (ADR 0053): sweep mass-delete guard + ETag-pinned finalize. 2094 unit (5 expected-fail) + 133 e2e green. Open: per-environment Cloudinary folder prefix; real-credential smoke must confirm R2 honours `If-Match` / `CopySourceIfMatch`.
 - Still open, not blocking: gate B L-A (case-insensitive model no., **fix before Phase 3 import**), gate C L-1/L-2/L-3/L-4, gate D L-1/L-2/L-3, gate A L-1 ([id] pages 200 for unknown id) and L-3. Phase 3: import preview images uploaded >24 h before confirm would be swept.
-- **Next: Phase 2 PR** (push `phase-2`, `gh pr create`, wait for CI, **ask the user before merging**). Then Phase 3 (bulk import; plan first). **Real-credential smoke DONE 2026-10-07** (R2 presigned PUT, HEAD ETag, GET `If-Match` and `CopySourceIfMatch` match + stale 412, Cloudinary signed upload/inspect/destroy, all three sweep dry runs; test objects cleaned up; dev bucket and Cloudinary were empty). CI green on PR #11. **User must do:** nothing before merge except approve; rebuild before any local `npm start`. **Phase 3 must-dos:** call `withoutRestrictedFilters`; fix gate B L-A (case-insensitive model no.) first; import preview images older than 24 h would be swept.
+- Phase 2 PR #11 merged; real-credential smoke done 2026-10-07 (R2 conditional read/copy, Cloudinary upload, sweep dry runs).
 - **Open items from gate D:**
   - **L-1:** `updateProduct` reads the visibility setting then writes; a save racing a column restriction can re-write restricted filter numbers (repaired by saving the column setting again). Fix with a version/`updatedAt` check or a second cleanup pass.
   - **L-2:** a retry whose setting is unchanged but cleanup modified products writes no audit entry.
@@ -134,7 +233,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
   - The blocked-page wording lives once, in `BLOCKED_COPY` (`src/lib/geo.ts`). `/blocked` stays outside `(site)` with no chrome (ADR 0026, 0028).
   - Tests never wait for Playwright `networkidle`: 404 prefetches never settle (ADR 0028).
 
-**Current focus:** Phase 2 — Admin core — T1–T18 done, QA gate E PASS, PR pending (Phase 1 merged 2026-10-06)
+**Current focus:** Phase 3 — Bulk import — plan approved, T0–T3 done, next T4 (Phase 2 merged 2026-10-07)
 
 **Phase 1 decisions (user, 2026-10-01):**
 - **Logo:** no SVG yet, so the header uses a text placeholder.
@@ -211,7 +310,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Exit:** seeded admin logs in; `/admin` rejects non-admin on server; fake `CN` header → 403 on preview — **met locally on `next start` (2026-10-04); preview pending the Vercel account**
 - [x] Phase 1 wrap-up: task-12 Lows (ADR 0030), task-5 L1 (ADR 0031), "Keep me signed in" (ADR 0032), task-5 L2 (ADR 0033); CI green; PR #9 merged to `main` 2026-10-06
 
-## Phase 2 — Admin core — plan: `doc/phase-2-plan.md` (T1–T18)
+## Phase 2 — Admin core ✅ (merged 2026-10-07, PR #11) — plan: `doc/phase-2-plan.md` (T1–T18)
 - [x] T1: shadcn init (radix-nova, 16 ui components), tokens mapped, animation and dark mode stripped, contrast pairs tested — ADR 0034
 - [x] T3: admin layout with `requireAdmin()` everywhere (static guard test), sidebar + mobile nav, loading/error — ADR 0036
 - [x] T3: dashboard counts (`src/lib/admin/dashboard.ts`, uncached)
@@ -231,8 +330,19 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Tests: Zod schemas, file signature, auth guard on every admin action
 - **Exit:** full product built by hand with images and attached datasheet
 
-## Phase 3 — Bulk import
-- [ ] Get client's Arc sheet as fixture
+## Phase 3 — Bulk import — plan: `doc/phase-3-plan.md` (T0–T11, draft awaiting approval)
+- [x] Plan drafted (2026-10-07)
+- [x] Plan approved by the user (Q1–Q6: all defaults, 2026-10-07)
+- [x] T0: client sheet received (local only, gitignored), studied, ADR 0054 (product page layout)
+- [x] T1: case-insensitive model no. (gate B L-A) + `sourceSha256` — ADR 0055
+- [x] T2: workbook reader + safety + synthetic fixture (ADR 0047 note: stricter shared zip reader)
+- [x] T3: cleaner + split policies + numeric parsers — ADR 0056
+- [x] T4: grouping (products/variants, shared vs per-variant, base code, slug, labels)
+- [x] T5: embedded images (drawings + rels, sha256, sharp checks); QA gate A PASS
+- [x] T10a / T10b: controlled import template + admin template route — ADR 0059
+- [x] T6: import staging, capped read, server image upload, sweep, audit — ADR 0060
+- [x] T7: plan / preview service (matching, ownership merge, diff, planHash, writes nothing) — ADR 0057
+- [x] T8: commit service (batches, idempotent) — ADR 0061 → QA gate B next
 - [ ] Cell cleaner, multi-line options, numeric parsers
 - [ ] Row grouping by `NO.`, shared-vs-variant diffing, slug builder
 - [ ] Image extraction from `xl/drawings` → Cloudinary
@@ -245,6 +355,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Mega-menu (icon strip + subcategories)
 - [ ] Listing pages + URL filters, sort, pagination; area pages
 - [ ] Product page: gallery/zoom, variant switch, public specs, family strip, related
+- [ ] Product page layout (client, ADR 0054): pink columns (Model Name, Model No., Housing Material, Housing Color/Finish, Reflector Color, Cut-out Size, CCT) in a right-side quick-spec panel; green columns in a full spec table below. Add `placement` to `SPEC_COLUMNS`. Restricted columns stay in the dynamic block. The user called this "Phase 6"; in our roadmap the product page is Phase 4.
 - [ ] Dynamic `<Suspense>` block: restricted specs + datasheet button states
 - [ ] Search overlay: Atlas Search + regex fallback — ADR 0006
 - [ ] Playwright: restricted-leak check, filters, search by variant model no.
@@ -292,14 +403,20 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 ---
 
 ## Needed from user / client
-- [ ] Client's Arc spec sheet (.xlsx) — before Phase 3
+- [x] Client's Arc spec sheet (.xlsx), received 2026-10-07, at `doc/reference/` (local only)
 - [ ] MongoDB Atlas, Cloudinary, Cloudflare R2, Resend, Vercel accounts — before Phases 1–5
 - [ ] Company email (whistleblower + request alerts)
 - [ ] Logo files (SVG preferred) — Phase 1
 - [ ] Categories 8–10; empty subcategories (Hanging 3rd, Track Light, Motorized)
-- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (Nos. 80/81, lm/W tolerance, empty columns, public/restricted split)
+- [ ] Open client questions: admin from China, Catalog/Knowledge footer links, WeChat icon, sheet questions (blank vs "-" the same?; comma lists like `100,150W`?; Nos. 80/81 have no model no., `95±` lumen efficiency, "Effciency" typo, lm/W tolerance, base code for `AR-10`/`AR-12` → `AR-1` (stop at a digit boundary?), does NO. restart per sheet, empty columns, public/restricted split)
 
 ## Session log
+- 2026-10-07: T3 done (`4c9821f`, ADR 0056): cell cleaner, per-column split policy, filter parsers. The auto-review caught wattage count and comma-list parsing bugs during test-first steps; all fixed. The real sheet cleans with zero warnings and zero CJK. 2452 unit green. Next: T4. The user is clearing the session here.
+- 2026-10-07: T2 done (`be96922`): import safety pre-check, workbook reader, synthetic fixture, real-sheet test. The auto-review found 3 zip parser-difference bypasses (decoy directory, hidden entries past `count`, name or extra-field tricks); all fixed. The shared reader also hardens the datasheet check (note on ADR 0047). 2237 unit green. Next: T3.
+- 2026-10-07: T1 done (`bfbfa6f`, ADR 0055): case-insensitive model nos. via a collated unique index, shared `modelNoKey`, `sourceSha256`, `check:model-nos`. The auto-review caught a broken regex in the migration message (lost backslash); it was fixed before the commit. 2149 unit green. Next: T2.
+- 2026-10-07: Phase 3 plan approved (all six defaults). T0: client sheet received (WPS file; drawing-anchored PNGs; no merges; English before Chinese; Nos. 80/81 lack model nos.), gitignored, studied into the plan. ADR 0054 logs the client's pink/green product page layout for Phase 4. Next: T1.
+- 2026-10-07 — Phase 3 planned: `doc/phase-3-plan.md` (stateless preview + planHash, idempotent commit batches, images uploaded at commit with sha256 dedupe, field-ownership table, 6 questions for the user). `/find-skills`: only the installed `xlsx` skill applies. Existing subagents reused. Awaiting review; nothing built.
+- 2026-10-07 — Phase 2 merged to `main` (PR #11, `b689cb7`). `phase-3` branched. Next: plan Phase 3 in plan mode.
 - 2026-10-07 — Real-credential smoke PASS (R2 conditional read/copy, Cloudinary upload, sweep dry runs); PR #11 CI green. Awaiting the user's merge approval.
 - 2026-10-07 — Gate E fixes (ADR 0053): sweep guard + ETag-pinned datasheet finalize. 2094 unit + 133 e2e green. Next: push, PR.
 - 2026-10-07 — QA gate E PASS (Phase 2 exit) on Opus: 1 Medium (sweep guard), 1 new Low (datasheet copy race). 30 QA tests added.
@@ -348,3 +465,13 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-01 — Two QA rounds on Phase 0; all findings fixed; F4/F6 documented (ADR 0015, Phase 1 tasks); npm 12 via devEngines `warn` (ADR 0011).
 - 2026-09-30 — Phase 0 built by backend-architect on `phase-0` (9 commits); ADRs 0007/0008/0010/0011 updated from installed Next 16.3.7 docs; ADR 0015 added; Auth.js found to be maintenance-only → decision pending.
 - 2026-09-30 — Added the automatic review hook (ADR 0014) and moved code-reviewer into `.claude/agents/`; replaced the find-skills symlink with a copy (`core.symlinks=false`); committed the setup on `main`. Vercel deferred.
+- 2026-10-07: Plan amended (ADR 0059): the client fills a template we control; T10 split into T10a (generator + parser additions) and T10b (route), both run next, before T6. Areas = one Yes/No column per area, extras = 2 numbered dropdown slots (user's choice). Next: T10a.
+- 2026-10-07: QA gate A PASS after three rounds (M-1 range expansion in exceljs → sheet guard + zip rewrite; M-2 cubic parsers; L-1 CJK punctuation; L-2 case-only part names; M-3 non-canonical part names). 2659 unit green, build OK, audit ok. Next: T6.
+- 2026-10-07: T5 done (`7866406`, images): own drawing/rels reader + linear XML reader, sha256 dedupe, sniff + sharp header checks, gallery/variant pictures. Found the real sheet uses `twoCellAnchor editAs="oneCell"` and Excel crops (plan corrected). `readZipPart` stricter on inflated length. 2559 unit green. Next: QA gate A.
+- 2026-10-07: T4 done (grouping, `group.ts`). The auto-review caught colliding variant labels and extras wiping stored values; both fixed. Main session made `duplicate_product_no` per sheet, widened the base-code trim, added type/name tests. 2506 unit green. Next: T5 (images), then QA gate A.
+- 2026-10-07: T10a done (template generator + parser additions, golden round trip). Next: T10b.
+- 2026-10-07: T10b done (admin template route + tests). Next: T6.
+- 2026-10-07: T6 done (ADR 0060): import staging presign + capped read, server image upload, imports sweep, audit vocabulary, import schemas; gate C L-1 closed. Server upload checks the Upload API answer instead of `inspectImage` (Admin API quota). 2802 unit green. Next: T7.
+- 2026-10-07: T7 done (ADR 0057): plan / preview service (`plan.ts`, `index.ts`): case-insensitive matching, cross-product conflicts, ownership merge, Zod on every merged record, restricted filters gated, diff, planHash; preview writes nothing (tested); auto-review Medium (stale trackSize after leaving Magnetic Track) fixed; tests added for `invalid_record`, `no_slug` and the image cap. 2833 unit green. Next: T8, then QA gate B.
+- 2026-10-07: T8 done (ADR 0061): commit service with per-entry hashes (hash v2), 20-product batches, conditional updates of sheet-owned paths, picture keep/destroy rule, one audit entry per writing batch; 30 new tests, 2873 unit green. Next: QA gate B.
+- 2026-10-07 — T9 done (ADR 0058): admin import UI + actions. Next: T11, gate C.

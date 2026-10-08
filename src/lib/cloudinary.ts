@@ -1,13 +1,16 @@
 // Server-only Cloudinary access for public images: signing a direct browser
-// upload, checking what was uploaded (size, format) and deleting a rejected
-// upload. Credentials come only from env.cloudinary() (ADR 0016).
+// upload, uploading a server-held image (bulk import), checking what was
+// uploaded (size, format) and deleting a rejected upload. Credentials come
+// only from env.cloudinary() (ADR 0016).
 
 import "server-only";
 
-import { v2 as cloudinary } from "cloudinary";
+import { createHash, randomUUID } from "node:crypto";
+
+import { v2 as cloudinary, type UploadApiResponse } from "cloudinary";
 
 import { ALLOWED_IMAGE_FORMATS, MAX_IMAGE_BYTES } from "./constants";
-import { isPublicId } from "./cloudinary-ids";
+import { buildPublicId, isOwnPublicId, isPublicId } from "./cloudinary-ids";
 import { env } from "./env";
 
 /*
@@ -134,6 +137,15 @@ export async function inspectImage(publicId: string): Promise<ImageCheck> {
     return { ok: false, reason: "unavailable" };
   }
 
+  return checkStoredImage(resource);
+}
+
+/*
+ * The limits every stored image must meet, applied to what Cloudinary says it
+ * stored: an Admin API resource (browser uploads) or the Upload API response
+ * the server received itself (uploadImageBuffer). Both carry the same fields.
+ */
+function checkStoredImage(resource: unknown): ImageCheck {
   const { bytes, format, width, height, resource_type } = (resource ??
     {}) as Record<string, unknown>;
   if (resource_type !== "image" || typeof format !== "string") {
@@ -231,4 +243,123 @@ export async function listImages(prefix: string): Promise<ListedImage[]> {
     );
   }
   return found;
+}
+
+/** Why a server-side upload was not kept. */
+export type ServerUploadRejection =
+  | ImageRejection
+  /** Cloudinary already had an asset under the new id (never ours to touch). */
+  | "exists";
+
+/** One image uploaded and verified from the server (bulk import, Phase 3). */
+export interface UploadedImage {
+  /** `yg/products/<productId>/<uuid v4>`, chosen here. */
+  publicId: string;
+  /**
+   * sha256 (64 lowercase hex) of the bytes uploaded, computed here so the
+   * stored `ProductImage.sourceSha256` always matches the file (ADR 0055).
+   */
+  sourceSha256: string;
+  bytes: number;
+  format: string;
+  width: number;
+  height: number;
+}
+
+export type ServerUploadResult =
+  | { ok: true; image: UploadedImage }
+  | { ok: false; reason: ServerUploadRejection };
+
+/* Sends `data` through the SDK's upload stream (no base64 copy in memory). */
+function uploadStream(
+  data: Uint8Array,
+  options: Record<string, unknown>,
+): Promise<UploadApiResponse> {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      options,
+      (error, result) => {
+        if (error || !result) reject(error ?? new Error("empty response"));
+        else resolve(result);
+      },
+    );
+    stream.end(Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+  });
+}
+
+/**
+ * Uploads one image held by the server to a new, server-chosen id under the
+ * product's folder (`yg/products/<productId>/<uuid>`), signed with our API
+ * secret, `overwrite: false`, only jpg/png/webp/avif. The stored asset then
+ * gets the same checks as a browser upload (inspectImage's limits), applied
+ * to the Upload API response the server received itself: unlike a browser
+ * upload, nothing in between could have forged it, and skipping the Admin API
+ * lookup keeps a large import inside Cloudinary's hourly Admin API limit. If
+ * the checks fail, or Cloudinary answers with another id, the new asset is
+ * destroyed (best effort, it is referenced by nothing) and the reason
+ * returned. Nothing is uploaded for an empty or oversize buffer.
+ * `productId` must be a lowercase 24-hex id (TypeError otherwise).
+ */
+export async function uploadImageBuffer(
+  productId: string,
+  data: Uint8Array,
+): Promise<ServerUploadResult> {
+  const publicId = buildPublicId("product", productId, randomUUID());
+  if (data.byteLength === 0) return { ok: false, reason: "bad_format" };
+  if (data.byteLength > MAX_IMAGE_BYTES) {
+    return { ok: false, reason: "too_large" };
+  }
+  configure();
+  // Hashed before the upload awaits, so it describes exactly the bytes sent.
+  const sourceSha256 = createHash("sha256").update(data).digest("hex");
+
+  let result: UploadApiResponse;
+  try {
+    result = await uploadStream(data, {
+      public_id: publicId,
+      resource_type: "image",
+      type: "upload",
+      overwrite: false,
+      allowed_formats: [...ALLOWED_IMAGE_FORMATS],
+    });
+  } catch (error) {
+    const code = httpCode(error);
+    // Never log the error object: it carries the request options.
+    console.error(`[cloudinary] server upload failed (http ${code ?? "n/a"})`);
+    // 400: Cloudinary refused the file itself (not an image, format not allowed).
+    return { ok: false, reason: code === 400 ? "bad_format" : "unavailable" };
+  }
+
+  // overwrite:false answers with the EXISTING asset when the id is taken. A
+  // fresh uuid makes that practically impossible, but if it happens the asset
+  // is someone else's: never inspect, keep or destroy it.
+  if ((result as { existing?: unknown }).existing === true) {
+    return { ok: false, reason: "exists" };
+  }
+  if (result.public_id !== publicId) {
+    if (
+      typeof result.public_id === "string" &&
+      isOwnPublicId("product", productId, result.public_id)
+    ) {
+      await destroyImage(result.public_id);
+    }
+    return { ok: false, reason: "unavailable" };
+  }
+
+  const check = checkStoredImage(result);
+  if (!check.ok) {
+    await destroyImage(publicId);
+    return { ok: false, reason: check.reason };
+  }
+  return {
+    ok: true,
+    image: {
+      publicId,
+      sourceSha256,
+      bytes: check.bytes,
+      format: check.format,
+      width: check.width,
+      height: check.height,
+    },
+  };
 }

@@ -1,11 +1,12 @@
 // Tests for src/lib/db-indexes.ts on an in-memory MongoDB: every model's
 // indexes build, the loginAttempts TTL and products.datasheetId indexes exist,
-// a re-run changes nothing, and a failure is reported without quoting values.
+// a re-run changes nothing, a failure is reported without quoting values, and
+// the old case-sensitive model no. index is named with the fix (ADR 0055).
 
 import { describe, expect, it } from "vitest";
 
 import { getDb, mongoose } from "@/lib/db";
-import { indexedModels } from "@/models";
+import { indexedModels, ProductModel } from "@/models";
 import { setupMemoryDb } from "../../test/helpers/memory-db";
 
 import {
@@ -97,6 +98,65 @@ describe("syncIndexes", () => {
     const error = result && !result.ok ? result.error : "";
     expect(error).toMatch(/code 11000/);
     expect(error).not.toContain("secret.person");
+  });
+
+  describe("migrating to the case-insensitive model no. index (ADR 0055)", () => {
+    const OLD_OPTIONS = {
+      name: "variants.modelNo_1",
+      unique: true,
+      partialFilterExpression: { "variants.modelNo": { $exists: true } },
+    } as const;
+
+    /* The products collection as an old database has it. */
+    async function withOldIndex(docs: Record<string, unknown>[] = []) {
+      // Creates the collection first, so the block runs alone or in any order.
+      await syncIndexes([ProductModel]);
+      await ProductModel.collection.dropIndexes();
+      await ProductModel.collection.deleteMany({});
+      await ProductModel.collection.createIndex(
+        { "variants.modelNo": 1 },
+        OLD_OPTIONS,
+      );
+      if (docs.length > 0) await ProductModel.collection.insertMany(docs);
+    }
+
+    async function restore() {
+      await ProductModel.collection.deleteMany({});
+      await ProductModel.collection.dropIndexes();
+      await syncIndexes([ProductModel]);
+    }
+
+    it("names the old index and says to drop it in Atlas, then re-run", async () => {
+      await withOldIndex();
+      try {
+        const [result] = await syncIndexes([ProductModel]);
+        expect(result).toMatchObject({ ok: false, collection: "products" });
+        const error = result && !result.ok ? result.error : "";
+        expect(error).toMatch(/IndexKeySpecsConflict|IndexOptionsConflict/);
+        expect(error).toContain('"variants.modelNo_1"');
+        expect(error).toContain("npm run check:model-nos");
+        expect(error).toMatch(/drop .*in Atlas.*re-run/);
+      } finally {
+        await restore();
+      }
+    });
+
+    it("points to check:model-nos when case-only duplicates block the new index, without quoting them", async () => {
+      await withOldIndex([
+        { name: "a", slug: "a", variants: [{ modelNo: "SECRET-77A" }] },
+        { name: "b", slug: "b", variants: [{ modelNo: "secret-77a" }] },
+      ]);
+      await ProductModel.collection.dropIndex("variants.modelNo_1");
+      try {
+        const [result] = await syncIndexes([ProductModel]);
+        const error = result && !result.ok ? result.error : "";
+        expect(error).toMatch(/code 11000/);
+        expect(error).toContain("npm run check:model-nos");
+        expect(error.toLowerCase()).not.toContain("secret-77a");
+      } finally {
+        await restore();
+      }
+    });
   });
 });
 

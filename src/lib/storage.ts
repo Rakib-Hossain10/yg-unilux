@@ -1,9 +1,12 @@
 // The only module that talks to the private Cloudflare R2 bucket (ADR 0009,
 // 0045). Everything is private: no public URL is ever built here. Credentials
-// come only from env.r2(). Callers (admin datasheet service, later the
-// download route and whistleblower uploads) never see the S3 SDK.
+// come only from env.r2(). Callers (admin datasheet service, bulk import
+// staging, later the download route and whistleblower uploads) never see the
+// S3 SDK.
 
 import "server-only";
+
+import { randomUUID } from "node:crypto";
 
 import {
   CopyObjectCommand,
@@ -17,7 +20,14 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+import {
+  IMPORT_UPLOAD_TTL_SECONDS,
+  MAX_IMPORT_BYTES,
+  R2_IMPORTS_PREFIX,
+  XLSX_MIME_TYPE,
+} from "./constants";
 import { env } from "./env";
+import { IMPORT_KEY_PATTERN } from "./schemas/import";
 
 /** A presigned PUT is valid for 5 minutes (Phase 2 plan, ADR 0045). */
 export const PRESIGNED_PUT_TTL_SECONDS = 300;
@@ -83,6 +93,13 @@ export async function presignPut(options: {
   contentType: string;
   contentLength: number;
 }): Promise<PresignedPut> {
+  return signPut(options, PRESIGNED_PUT_TTL_SECONDS);
+}
+
+async function signPut(
+  options: { key: string; contentType: string; contentLength: number },
+  expiresIn: number,
+): Promise<PresignedPut> {
   const { s3, bucket } = client();
   const url = await getSignedUrl(
     s3,
@@ -93,15 +110,54 @@ export async function presignPut(options: {
       ContentLength: options.contentLength,
     }),
     {
-      expiresIn: PRESIGNED_PUT_TTL_SECONDS,
+      expiresIn,
       signableHeaders: new Set(["content-type", "content-length"]),
     },
   );
   return {
     url,
     headers: { "Content-Type": options.contentType },
-    expiresIn: PRESIGNED_PUT_TTL_SECONDS,
+    expiresIn,
   };
+}
+
+/** A presigned import PUT plus the server-chosen key to pass back later. */
+export interface ImportUploadTicket extends PresignedPut {
+  /** `imports/<uuid v4>.xlsx`; preview and commit read the file from here. */
+  key: string;
+}
+
+/**
+ * A presigned PUT for one bulk import file (Phase 3). The key is chosen here
+ * (`imports/<uuid v4>.xlsx`), never by the browser; the type is always the
+ * .xlsx MIME type and the exact length is signed, at most MAX_IMPORT_BYTES
+ * (30 MB). Valid for IMPORT_UPLOAD_TTL_SECONDS. The caller has already
+ * Zod-checked the request; a value outside these limits is a programming
+ * error and throws (TypeError / RangeError) before anything is signed.
+ */
+export async function presignImportUpload(options: {
+  contentType: string;
+  contentLength: number;
+}): Promise<ImportUploadTicket> {
+  if (options.contentType !== XLSX_MIME_TYPE) {
+    throw new TypeError("presignImportUpload signs only the .xlsx MIME type");
+  }
+  const { contentLength } = options;
+  if (
+    !Number.isSafeInteger(contentLength) ||
+    contentLength < 1 ||
+    contentLength > MAX_IMPORT_BYTES
+  ) {
+    throw new RangeError(
+      `presignImportUpload needs a whole size from 1 to ${MAX_IMPORT_BYTES} bytes`,
+    );
+  }
+  const key = `${R2_IMPORTS_PREFIX}${randomUUID()}.xlsx`;
+  const put = await signPut(
+    { key, contentType: XLSX_MIME_TYPE, contentLength },
+    IMPORT_UPLOAD_TTL_SECONDS,
+  );
+  return { ...put, key };
 }
 
 /**
@@ -270,4 +326,136 @@ export async function listObjects(prefix: string): Promise<ListedObject[]> {
     token = out.IsTruncated ? out.NextContinuationToken : undefined;
   } while (token !== undefined);
   return found;
+}
+
+// ---------------------------------------------------------------------------
+// Bulk import staging (Phase 3)
+// ---------------------------------------------------------------------------
+
+function assertImportKey(key: string): void {
+  if (!IMPORT_KEY_PATTERN.test(key)) {
+    throw new TypeError("Not a staged import key");
+  }
+}
+
+/* True when the S3 error is "range not satisfiable" (a zero-byte object). */
+function isInvalidRange(error: unknown): boolean {
+  if (!(error instanceof S3ServiceException)) return false;
+  return (
+    error.$metadata.httpStatusCode === 416 || error.name === "InvalidRange"
+  );
+}
+
+type ResponseBody =
+  | {
+      transformToByteArray(): Promise<Uint8Array>;
+    }
+  | undefined;
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[
+      Symbol.asyncIterator
+    ] === "function"
+  );
+}
+
+/**
+ * Reads a response body but never holds more than `cap` bytes: a stream is
+ * consumed chunk by chunk and abandoned (which destroys it) as soon as the
+ * running total passes the cap. Returns null when the body is larger.
+ */
+async function readCapped(
+  body: ResponseBody,
+  cap: number,
+): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array(0);
+  if (!isAsyncIterable(body)) {
+    const bytes = await body.transformToByteArray();
+    return bytes.byteLength > cap ? null : bytes;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of body) {
+    if (!(chunk instanceof Uint8Array)) {
+      throw new TypeError("Unexpected chunk type in the storage response");
+    }
+    total += chunk.byteLength;
+    // Leaving the loop calls the iterator's return(), which destroys the stream.
+    if (total > cap) return null;
+    chunks.push(chunk);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+export type ImportBytes =
+  | {
+      ok: true;
+      bytes: Uint8Array;
+      /** The ETag of the version read (quoted, as R2 returns it). */
+      etag: string | undefined;
+    }
+  | {
+      ok: false;
+      /**
+       * `not_found`: never uploaded, expired or already swept/finished;
+       * `too_large`: more than MAX_IMPORT_BYTES; `empty`: zero bytes.
+       */
+      reason: "not_found" | "too_large" | "empty";
+    };
+
+/**
+ * The staged import file at `key`, read with a hard cap of MAX_IMPORT_BYTES.
+ * The GET asks only for the first cap + 1 bytes, and the body is counted
+ * while it streams, so an object that is (or grew) larger is refused without
+ * ever buffering more than the cap. With `ifMatch` (the ETag an earlier read
+ * returned, e.g. the preview's) the read fails with StorageConditionError if
+ * the object was replaced since, so a commit sees exactly the previewed file.
+ * A key that is not `imports/<uuid>.xlsx` throws TypeError before any
+ * request (callers Zod-check it first).
+ */
+export async function getImportBytes(
+  key: string,
+  options: { ifMatch?: string } = {},
+): Promise<ImportBytes> {
+  assertImportKey(key);
+  const { s3, bucket } = client();
+  let out;
+  try {
+    out = await s3.send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Range: `bytes=0-${MAX_IMPORT_BYTES}`,
+        IfMatch: options.ifMatch,
+      }),
+    );
+  } catch (error) {
+    if (isNotFound(error)) return { ok: false, reason: "not_found" };
+    if (isPreconditionFailed(error)) throw new StorageConditionError();
+    if (isInvalidRange(error)) return { ok: false, reason: "empty" };
+    throw error;
+  }
+  const bytes = await readCapped(out.Body, MAX_IMPORT_BYTES);
+  if (bytes === null) return { ok: false, reason: "too_large" };
+  if (bytes.byteLength === 0) return { ok: false, reason: "empty" };
+  return { ok: true, bytes, etag: out.ETag };
+}
+
+/**
+ * Deletes a staged import file (after the last batch, or when the admin
+ * starts over). Only `imports/<uuid>.xlsx` keys; anything else throws
+ * TypeError. A missing object is not an error.
+ */
+export async function deleteImportUpload(key: string): Promise<void> {
+  assertImportKey(key);
+  await deleteObject(key);
 }

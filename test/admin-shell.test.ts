@@ -34,10 +34,11 @@ describe("admin error boundary", () => {
 });
 
 describe("admin nav", () => {
-  it("lists the nine modules in order, each with a unique /admin link", () => {
+  it("lists the ten modules in order, each with a unique /admin link", () => {
     expect(ADMIN_NAV.map((s) => s.label)).toEqual([
       "Dashboard",
       "Products",
+      "Import",
       "Categories",
       "Areas",
       "Datasheets",

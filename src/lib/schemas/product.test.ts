@@ -186,6 +186,15 @@ describe("productInputSchema", () => {
       ).toEqual(["variants.1.modelNo"]);
     });
 
+    it("uses the same key as the model and the index (full-width letters, ADR 0055)", () => {
+      expect(
+        paths({
+          ...base,
+          variants: [{ modelNo: "ＡＲ-013" }, { modelNo: "ar-013" }],
+        }),
+      ).toEqual(["variants.1.modelNo"]);
+    });
+
     it("allows distinct model nos", () => {
       expect(
         productInputSchema.safeParse({

@@ -1,6 +1,7 @@
 // Tests for src/models/product.ts: schema validation (required fields, enums,
-// trackSize, slugs, fixed spec keys) and, on an in-memory MongoDB, the unique
-// model no. across products and projecting restricted specs away (ADR 0002).
+// trackSize, slugs, fixed spec keys, image sourceSha256) and, on an in-memory
+// MongoDB, the case-insensitive unique model no. across products (ADR 0055)
+// and projecting restricted specs away (ADR 0002).
 
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -9,6 +10,7 @@ import { setupMemoryDb } from "../../test/helpers/memory-db";
 import { testPublicId } from "../../test/helpers/public-ids";
 
 import { ProductModel } from "./product";
+import { MODEL_NO_COLLATION } from "./product-constants";
 
 const { Types } = mongoose;
 
@@ -110,6 +112,43 @@ describe("product validation", () => {
     ).toEqual(["variants"]);
   });
 
+  it("treats model nos. that differ only by case as the same inside one product", async () => {
+    expect(
+      await invalidPaths(
+        productInput({
+          variants: [{ modelNo: "AR-013A1" }, { modelNo: "ar-013a1" }],
+        }),
+      ),
+    ).toEqual(["variants"]);
+  });
+
+  it("accepts an image sourceSha256 of exactly 64 lowercase hex characters", async () => {
+    const image = (sourceSha256: string) => ({
+      images: [{ publicId: testPublicId(0), kind: "gallery", sourceSha256 }],
+    });
+    expect(await invalidPaths(productInput(image("a".repeat(64))))).toEqual([]);
+    for (const bad of [
+      "A".repeat(64),
+      "a".repeat(63),
+      "a".repeat(65),
+      "g".repeat(64),
+      ` ${"a".repeat(64)}`,
+    ]) {
+      expect(await invalidPaths(productInput(image(bad)))).toEqual([
+        "images.0.sourceSha256",
+      ]);
+    }
+  });
+
+  it("leaves sourceSha256 out of images that don't set it", () => {
+    const product = new ProductModel(
+      productInput({
+        images: [{ publicId: testPublicId(0), kind: "gallery" }],
+      }),
+    );
+    expect(product.toObject().images[0]).not.toHaveProperty("sourceSha256");
+  });
+
   it("refuses a spec key that is not one of the fixed sheet columns", async () => {
     // Inside a sub-schema, strict "throw" surfaces as a cast error at validation.
     const product = new ProductModel(
@@ -154,6 +193,63 @@ describe("product storage", () => {
         productInput({ variants: [{ modelNo: "AR-013A2" }] }),
       ),
     ).rejects.toMatchObject({ code: 11000 });
+  });
+
+  it("builds the model no. index with the case-insensitive collation and the partial filter", async () => {
+    const indexes = await ProductModel.collection.indexes();
+    const index = indexes.find((i) => i.name === "variants.modelNo_1");
+    expect(index).toMatchObject({
+      unique: true,
+      partialFilterExpression: { "variants.modelNo": { $exists: true } },
+      collation: { locale: "en", strength: 2 },
+    });
+  });
+
+  it("rejects a model no. that differs only by case from another product's (ZZ-9 / zz-9)", async () => {
+    await ProductModel.create(
+      productInput({ variants: [{ modelNo: "ZZ-9" }] }),
+    );
+    await expect(
+      ProductModel.create(productInput({ variants: [{ modelNo: "zz-9" }] })),
+    ).rejects.toMatchObject({ code: 11000 });
+  });
+
+  it("stores the model no. exactly as typed", async () => {
+    const { _id } = await ProductModel.create(
+      productInput({ variants: [{ modelNo: "Mx-77b" }] }),
+    );
+    const stored = await ProductModel.findById(_id).lean();
+    expect(stored?.variants[0]?.modelNo).toBe("Mx-77b");
+  });
+
+  it("still allows two model nos. that differ by more than case", async () => {
+    await ProductModel.create(
+      productInput({ variants: [{ modelNo: "QQ-1" }] }),
+    );
+    await expect(
+      ProductModel.create(productInput({ variants: [{ modelNo: "QQ-2" }] })),
+    ).resolves.toBeDefined();
+  });
+
+  it("finds a model no. case-insensitively with the shared collation", async () => {
+    await ProductModel.create(
+      productInput({ variants: [{ modelNo: "KC-5A" }] }),
+    );
+    const hits = await ProductModel.find(
+      { "variants.modelNo": { $in: ["kc-5a"] } },
+      { _id: 1 },
+      { collation: MODEL_NO_COLLATION },
+    ).lean();
+    expect(hits).toHaveLength(1);
+    // The query's collation matches the index's, so the index serves it.
+    const plan = JSON.stringify(
+      await ProductModel.find(
+        { "variants.modelNo": { $in: ["kc-5a"] } },
+        { _id: 1 },
+        { collation: MODEL_NO_COLLATION },
+      ).explain(),
+    );
+    expect(plan).toContain('"indexName":"variants.modelNo_1"');
   });
 
   it("allows several products that have no variants yet", async () => {

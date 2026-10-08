@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.2"
   },
   "devEngines": {
     "packageManager": {
@@ -25,6 +25,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:indexes": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sync-indexes.ts",
+    "check:model-nos": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-model-no-collisions.ts",
     "check:services": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-services.ts",
     "seed:admin": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed-admin.ts",
     "sweep:incoming": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sweep-incoming.ts",
@@ -49,7 +50,7 @@
     "mongodb": "~7.6.0",
     "mongoose": "^9.10.3",
     "motion": "^13.4.6",
-    "next": "16.3.7",
+    "next": "16.3.8",
     "radix-ui": "^1.7.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -68,7 +69,7 @@
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^5.0.3",
     "eslint": "^9",
-    "eslint-config-next": "16.3.7",
+    "eslint-config-next": "16.3.8",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "mongodb-memory-server": "^11.3.0",

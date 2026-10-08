@@ -48,6 +48,29 @@ export const R2_INCOMING_PREFIX = "incoming/";
 export const R2_DATASHEETS_PREFIX = "datasheets/";
 
 /*
+ * Bulk import staging (Phase 3, T6). The browser PUTs the admin's .xlsx to a
+ * server-chosen `imports/<uuid v4>.xlsx` with a presigned URL (the file can
+ * be larger than Vercel's request body cap). Preview and commit re-read it
+ * from there; nothing else ever lives under this prefix, so anything older
+ * than IMPORT_STAGED_MAX_AGE_MS is an abandoned import and is swept.
+ */
+export const R2_IMPORTS_PREFIX = "imports/";
+/** A presigned import PUT is valid for 5 minutes, like the datasheet one. */
+export const IMPORT_UPLOAD_TTL_SECONDS = 300;
+/** Staged import files older than 24 h are deleted by `sweep:incoming`. */
+export const IMPORT_STAGED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/*
+ * The import commit (ADR 0061) saves the plan's entries in batches of this
+ * many products per call (one Server Action call each), uploading at most
+ * IMPORT_UPLOAD_CONCURRENCY pictures at a time. Entry i is in batch
+ * floor(i / IMPORT_BATCH_SIZE). A file may hold at most
+ * MAX_IMPORT_PLAN_ENTRIES products (the commit carries one hash per entry).
+ */
+export const IMPORT_BATCH_SIZE = 20;
+export const IMPORT_UPLOAD_CONCURRENCY = 4;
+export const MAX_IMPORT_PLAN_ENTRIES = 5000;
+
+/*
  * Product form caps. String lengths mirror the maxlength values in
  * src/models/product.ts (a longer value would be rejected by Mongoose anyway);
  * the array caps are ours, so one request cannot carry an unbounded document.
@@ -82,3 +105,52 @@ export const MAX_PUBLIC_FILE_URL_LENGTH = 2048;
  */
 export const MAX_XLSX_ENTRIES = 2000;
 export const MAX_XLSX_PART_BYTES = 1024 * 1024;
+
+/*
+ * Bulk import (Phase 3). The client's sheet is uploaded as-is, so the import
+ * file has its own, larger caps than a datasheet. src/lib/import/safety.ts
+ * checks all of them on the zip directory (and a counting inflate) before
+ * exceljs inflates anything, so a zip bomb never reaches the parser.
+ */
+/** Largest import file: 30 MB (Phase 3 decision 5). */
+export const MAX_IMPORT_BYTES = 30 * 1024 * 1024;
+/** Most zip entries an import file may have (the client's sheet has 28). */
+export const MAX_IMPORT_ENTRIES = 5000;
+/** Most bytes all entries of an import file may inflate to, in total. */
+export const MAX_IMPORT_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
+/** Highest uncompressed:compressed ratio one entry may have. */
+export const MAX_IMPORT_COMPRESSION_RATIO = 100;
+/*
+ * The ratio cap applies only to entries that inflate past this size: a tiny
+ * XML part can compress 200:1 and is harmless; a bomb needs volume.
+ */
+export const IMPORT_RATIO_MIN_BYTES = 1024 * 1024;
+/** The header row is searched for in the first rows of each sheet. */
+export const IMPORT_HEADER_SCAN_ROWS = 15;
+/*
+ * Range records exceljs expands cell by cell when it loads a sheet
+ * (src/lib/import/sheet-guard.ts, Phase 3 gate A M-1). Merges cost
+ * O(merges^2) (each new merge is checked against all earlier ones: 2,000
+ * take ~0.3 s, 10,000 take ~6 s) plus one cell object per covered cell, so
+ * both are capped. A <sheet sheetId> becomes an array index that exceljs
+ * walks in full (200,000,000 took 27 s); Excel numbers sheets from 1 up.
+ */
+export const MAX_IMPORT_MERGES = 2_000;
+export const MAX_IMPORT_MERGED_CELLS = 100_000;
+export const MAX_IMPORT_SHEET_ID = 10_000;
+/*
+ * Embedded pictures (src/lib/import/images.ts). The drawing and relationship
+ * parts are read with this output cap (a drawing is ~1 KB per picture, so
+ * 16 MB is thousands of pictures). A picture larger than MAX_IMAGE_BYTES is
+ * never inflated; one above this many pixels is flagged before upload
+ * (Cloudinary's free plan refuses images above 25 megapixels).
+ */
+export const MAX_IMPORT_XML_PART_BYTES = 16 * 1024 * 1024;
+export const MAX_IMPORT_IMAGE_PIXELS = 25_000_000;
+
+/*
+ * The downloadable import template (src/lib/import/template.ts, ADR 0059):
+ * its dropdowns cover data rows 2 to this many + 1 (a bounded range, never
+ * whole columns, so the file stays small and Excel stays fast).
+ */
+export const MAX_TEMPLATE_ROWS = 3000;

@@ -1,6 +1,7 @@
 // Tests for saveProductImages (src/lib/admin/product-images.ts) on an
 // in-memory MongoDB: add, reorder, remove, idempotence, verification of new
-// uploads (Cloudinary mocked), variant and publish guards, versions, audit, tags.
+// uploads (Cloudinary mocked), variant and publish guards, versions, audit, tags,
+// and that an imported image's sourceSha256 survives every editor save.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,7 +12,7 @@ import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
 import { PUBLISHED_NEEDS_IMAGE, saveProductImages } from "./product-images";
-import { PRODUCT_CHANGED } from "./products";
+import { getProductForEdit, PRODUCT_CHANGED } from "./products";
 import { IMAGE_REJECTED } from "./uploads";
 import type { ServiceResult } from "./write-result";
 
@@ -155,6 +156,81 @@ describe("saveProductImages", () => {
       { ...changed, order: 1 },
     ]);
     expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+  });
+
+  describe("sourceSha256 (set by the import, ADR 0055)", () => {
+    const SHA_0 = "0".repeat(63) + "a";
+    const SHA_1 = "1".repeat(63) + "b";
+
+    /* The editor's payload, built from what the edit page loads. */
+    async function loadedEditorList() {
+      const loaded = await getProductForEdit(product);
+      if (!loaded) throw new Error("fixture missing");
+      return {
+        version: loaded.updatedAt,
+        images: [...loaded.images]
+          .sort((a, b) => a.order - b.order)
+          .map((image) => ({
+            publicId: image.publicId,
+            alt: image.alt ?? "",
+            kind: image.kind,
+          })),
+      };
+    }
+
+    it("keeps each image's sourceSha256 through a reorder and an alt edit", async () => {
+      await store([
+        { ...entry(0), sourceSha256: SHA_0 } as ReturnType<typeof entry>,
+        { ...entry(1), sourceSha256: SHA_1 } as ReturnType<typeof entry>,
+        entry(2),
+      ]);
+      const { images, version } = await loadedEditorList();
+      const [first, second, third] = images;
+      if (!first || !second || !third) throw new Error("fixture missing");
+      const result = await save(
+        [third, { ...second, alt: "Side view" }, first],
+        { expectedUpdatedAt: version },
+      );
+      expect(result.ok).toBe(true);
+      expect(await storedImages()).toEqual([
+        { ...entry(2), order: 0 },
+        { ...entry(1), alt: "Side view", order: 1, sourceSha256: SHA_1 },
+        { ...entry(0), order: 2, sourceSha256: SHA_0 },
+      ]);
+    });
+
+    it("treats an unchanged list with hashes as unchanged (no write, no audit)", async () => {
+      await store([
+        { ...entry(0), sourceSha256: SHA_0 } as ReturnType<typeof entry>,
+      ]);
+      const before = (await ProductModel.findById(product).lean())?.updatedAt;
+      const { images } = await loadedEditorList();
+      const result = await save(images);
+      expect(result).toMatchObject({ ok: true, tags: [] });
+      expect(await AuditLogModel.countDocuments({})).toBe(0);
+      expect((await ProductModel.findById(product).lean())?.updatedAt).toEqual(
+        before,
+      );
+    });
+
+    it("never takes a sourceSha256 from the browser", async () => {
+      const result = await save([{ ...entry(0), sourceSha256: SHA_0 }]);
+      // The strict editor schema refuses the unknown key before anything runs.
+      expect(errorsOf(result).fieldErrors).toHaveProperty(["images"]);
+      expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+      expect(await storedImages()).toEqual([]);
+    });
+
+    it("gives new admin uploads no sourceSha256", async () => {
+      await store([
+        { ...entry(0), sourceSha256: SHA_0 } as ReturnType<typeof entry>,
+      ]);
+      expect((await save([entry(0), entry(1)])).ok).toBe(true);
+      expect(await storedImages()).toEqual([
+        { ...entry(0), order: 0, sourceSha256: SHA_0 },
+        { ...entry(1), order: 1 },
+      ]);
+    });
   });
 
   it("removes images from the list but leaves them in Cloudinary (T17 sweep)", async () => {

@@ -31,6 +31,8 @@ export const ADMIN_AUDIT_ACTIONS = [
   "settings.columns.update",
   "settings.whatsapp.update",
   "settings.email.update",
+  // One entry per committed import batch (Phase 3); target = the staged file.
+  "import.commit",
 ] as const;
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
 
@@ -62,5 +64,7 @@ export const AUDIT_TARGET_TYPES = [
   "area",
   "datasheet",
   "settings",
+  /** A bulk import run, addressed by its staged file's uuid (imports/<uuid>.xlsx). */
+  "import",
 ] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];

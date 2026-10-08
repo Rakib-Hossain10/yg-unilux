@@ -90,7 +90,7 @@ test("the sidebar marks the dashboard as the current page", async ({
     "aria-current",
     "page",
   );
-  await expect(nav.getByRole("link")).toHaveCount(9);
+  await expect(nav.getByRole("link")).toHaveCount(10);
 });
 
 test("the skip link is the first focusable element and targets #main", async ({

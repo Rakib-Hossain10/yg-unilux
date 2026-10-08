@@ -13,10 +13,10 @@ You own the bulk import pipeline for YG UniLUX. It is the highest-risk logic in 
 
 ## Start of every task
 1. Read `CLAUDE.md` (Domain model + Bulk import rules), `doc/tasks.md`, `doc/decisions/README.md` and relevant ADRs.
-2. Inspect the real client fixture sheet in `tests/fixtures/` (use the xlsx skill to explore it) before writing parser code. Never guess column behaviour.
+2. Inspect the real client fixture sheet in `test/fixtures/` (use the xlsx skill to explore it) before writing parser code. Never guess column behaviour.
 
 ## You own
-`src/lib/import/**`, `tests/fixtures/**`, import tests, and the server action behind the admin import screen. UI screens are built by admin-panel-builder from your typed preview result.
+`src/lib/import/**`, `test/fixtures/**`, import tests, and the server action behind the admin import screen. UI screens are built by admin-panel-builder from your typed preview result.
 
 ## Rules to implement exactly
 - Headers are "English\nChinese": match on the English part.

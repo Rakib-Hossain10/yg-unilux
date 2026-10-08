@@ -527,6 +527,64 @@ describe("updateProduct", () => {
       });
     });
 
+    it("pre-check refuses a model no. another product has in another case (ADR 0055)", async () => {
+      const a = await draft("A");
+      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
+      const b = await draft("B");
+      const result = await updateProduct(
+        ADMIN,
+        b,
+        form({ name: "B", variants: [{ modelNo: "Y1" }, { modelNo: "zz-9" }] }),
+      );
+      expect(fieldErrorsOf(result)).toEqual({
+        "variants.1.modelNo": [expect.stringMatching(/another product/)],
+      });
+      // Nothing was written: the stored text is still exactly as typed.
+      const stored = await ProductModel.findById(b).lean();
+      expect(stored?.variants).toEqual([]);
+    });
+
+    it("maps a case-only unique-index clash (race) to the right row", async () => {
+      const a = await draft("A");
+      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
+      const b = await draft("B");
+      vi.spyOn(ProductModel, "find").mockReturnValue({
+        lean: () => Promise.resolve([]),
+      } as never);
+      const result = await updateProduct(
+        ADMIN,
+        b,
+        form({ name: "B", variants: [{ modelNo: "Y1" }, { modelNo: "zz-9" }] }),
+      );
+      expect(fieldErrorsOf(result)).toEqual({
+        "variants.1.modelNo": [expect.stringMatching(/another product/)],
+      });
+    });
+
+    it("keeps its own model no. when only the case changes", async () => {
+      const a = await draft("A");
+      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
+      const result = await updateProduct(
+        ADMIN,
+        a,
+        form({ variants: [{ modelNo: "zz-9" }] }),
+      );
+      expect(result.ok).toBe(true);
+      const stored = await ProductModel.findById(a).lean();
+      expect(stored?.variants.map((v) => v.modelNo)).toEqual(["zz-9"]);
+    });
+
+    it("finds a product by any case of its model no. in the list search", async () => {
+      const a = await draft("A");
+      await updateProduct(
+        ADMIN,
+        a,
+        form({ variants: [{ modelNo: "AR-013A1" }] }),
+      );
+      const page = await listProducts({ q: "ar-013a1" });
+      expect(page.items.map((item) => item.id)).toEqual([a]);
+    });
+
     it("refuses repeats inside one product (case-insensitive)", async () => {
       const id = await draft();
       const result = await updateProduct(
@@ -536,6 +594,38 @@ describe("updateProduct", () => {
       );
       expect(fieldErrorsOf(result).variants).toBeDefined();
     });
+  });
+
+  it("a form save from the loaded edit page keeps an imported image's sourceSha256", async () => {
+    const id = await draft();
+    const sha = "c".repeat(64);
+    await ProductModel.updateOne(
+      { _id: id },
+      {
+        $set: {
+          images: [
+            {
+              publicId: imageOf(id),
+              order: 0,
+              kind: "gallery",
+              sourceSha256: sha,
+            },
+          ],
+        },
+      },
+    );
+    const loaded = await getProductForEdit(id);
+    if (!loaded) throw new Error("fixture missing");
+    const result = await updateProduct(
+      ADMIN,
+      id,
+      { ...loaded.values, description: "Changed" },
+      { expectedUpdatedAt: loaded.updatedAt },
+    );
+    expect(result.ok).toBe(true);
+    const stored = await ProductModel.findById(id).lean();
+    expect(stored?.images[0]?.sourceSha256).toBe(sha);
+    expect(stored?.description).toBe("Changed");
   });
 
   describe("slug", () => {
