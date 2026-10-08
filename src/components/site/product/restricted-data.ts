@@ -32,13 +32,20 @@ export const datasheetUrl = (productId: string): string =>
 export type DatasheetButtonState =
   "download" | "expired" | "signin" | "coming-soon";
 
+/**
+ * Why a refused viewer is refused (`@/lib/datasheet-state` RestrictedAccess;
+ * the unit test checks the two stay equal): an expired or blocked customer,
+ * or anyone who should sign in.
+ */
+export type RestrictedAccess = "expired" | "signin";
+
 export interface RestrictedVariant {
   modelNo: string;
   specs: SpecValues;
 }
 
 export type RestrictedAnswer =
-  | { allowed: false; state: DatasheetButtonState }
+  | { allowed: false; state: DatasheetButtonState; access: RestrictedAccess }
   | {
       allowed: true;
       state: DatasheetButtonState;
@@ -52,6 +59,10 @@ const STATES: ReadonlySet<string> = new Set<DatasheetButtonState>([
   "expired",
   "signin",
   "coming-soon",
+]);
+const ACCESS: ReadonlySet<string> = new Set<RestrictedAccess>([
+  "expired",
+  "signin",
 ]);
 const KNOWN_KEYS: ReadonlySet<string> = new Set(SPEC_KEYS);
 
@@ -80,7 +91,16 @@ export function parseRestrictedAnswer(body: unknown): RestrictedAnswer | null {
   if (!isRecord(body) || typeof body.state !== "string") return null;
   if (!STATES.has(body.state)) return null;
   const state = body.state as DatasheetButtonState;
-  if (body.allowed === false) return { allowed: false, state };
+  if (body.allowed === false) {
+    if (typeof body.access !== "string" || !ACCESS.has(body.access)) {
+      return null;
+    }
+    return {
+      allowed: false,
+      state,
+      access: body.access as RestrictedAccess,
+    };
+  }
   if (body.allowed !== true) return null;
   if (!Array.isArray(body.keys) || !Array.isArray(body.variants)) return null;
   const keys = body.keys.filter(
@@ -98,6 +118,21 @@ export function parseRestrictedAnswer(body: unknown): RestrictedAnswer | null {
     specs: readSpecs(body.specs),
     variants,
   };
+}
+
+/**
+ * What the restricted-rows slot shows: the rows for an allowed viewer, the
+ * "access expired" line for an expired or blocked customer (by the refusal's
+ * reason, not the button state, so it holds when the product has no
+ * datasheet and the button says "coming soon"; QA gate C L-2), otherwise the
+ * sign-in fallback. No answer yet also keeps the fallback.
+ */
+export function restrictedSlotView(
+  answer: RestrictedAnswer | null | undefined,
+): "rows" | "expired" | "fallback" {
+  if (!answer) return "fallback";
+  if (answer.allowed) return "rows";
+  return answer.access === "expired" ? "expired" : "fallback";
 }
 
 /**

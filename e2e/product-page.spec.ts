@@ -366,7 +366,11 @@ test("a visitor gets no restricted value; the block asks to sign in", async ({
 }) => {
   const { response, route } = await gotoAndWaitForRestricted(page, PAGE);
   expect(route.headers()["cache-control"]).toBe("private, no-store");
-  expect(await route.json()).toEqual({ allowed: false, state: "signin" });
+  expect(await route.json()).toEqual({
+    allowed: false,
+    state: "signin",
+    access: "signin",
+  });
   expect(found((await response?.text()) ?? "")).toEqual([]);
   // RSC payload of the route too.
   const rsc = await page.request.get(PAGE, { headers: { RSC: "1" } });

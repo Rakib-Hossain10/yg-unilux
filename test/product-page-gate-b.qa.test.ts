@@ -449,7 +449,10 @@ describe("gate B: restricted route matrix (admin and edge cases)", () => {
     expect(body.allowed).toBe(allowed);
     expect(body.state).toBe(state);
     if (!allowed) {
-      expect(Object.keys(body).sort()).toEqual(["allowed", "state"]);
+      // The refusal carries the coarse reason too (QA gate C L-2); with a
+      // datasheet present it equals the button state.
+      expect(Object.keys(body).sort()).toEqual(["access", "allowed", "state"]);
+      expect(body.access).toBe(state);
       expect(leaked(answer.text, SPEC_KEYS)).toEqual([]);
     } else {
       expect(leaked(answer.text, DEFAULT_RESTRICTED_SPEC_KEYS).sort()).toEqual(

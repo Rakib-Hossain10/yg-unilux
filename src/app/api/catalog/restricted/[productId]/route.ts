@@ -8,7 +8,7 @@ import { connection } from "next/server";
 
 import { getPublishedProductRef } from "@/lib/catalog/product-ref";
 import { getRestrictedSpecs } from "@/lib/catalog/restricted";
-import { datasheetButtonState } from "@/lib/datasheet-state";
+import { datasheetButtonState, refusedAccess } from "@/lib/datasheet-state";
 import { checkDatasheetAccess, getViewer } from "@/lib/permissions";
 import { objectIdSchema } from "@/lib/schemas/common";
 
@@ -40,7 +40,16 @@ export async function GET(
 
   const access = checkDatasheetAccess(viewer?.user, new Date());
   const state = datasheetButtonState(access, product.hasDatasheet);
-  if (!access.ok) return json({ allowed: false, state });
+  // A refusal carries the coarse reason only ("expired" | "signin"), so the
+  // restricted rows can say "access expired" even when the button says
+  // "coming soon" (no datasheet). Nothing else is sent.
+  if (!access.ok) {
+    return json({
+      allowed: false,
+      state,
+      access: refusedAccess(access.reason),
+    });
+  }
 
   // getRestrictedSpecs re-checks the viewer itself (ADR 0063). null here
   // means the product was unpublished or access was revoked in between:

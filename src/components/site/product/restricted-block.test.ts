@@ -6,7 +6,10 @@ import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { DatasheetButtonState as RouteState } from "@/lib/datasheet-state";
+import type {
+  DatasheetButtonState as RouteState,
+  RestrictedAccess as RouteAccess,
+} from "@/lib/datasheet-state";
 
 import { DatasheetButton } from "./datasheet-button";
 import { ProductDetailClient } from "./product-detail-client";
@@ -16,9 +19,11 @@ import {
   loadRestrictedAnswer,
   parseRestrictedAnswer,
   restrictedRows,
+  restrictedSlotView,
   restrictedSpecsFor,
   restrictedUrl,
   type DatasheetButtonState,
+  type RestrictedAccess,
   type RestrictedAnswer,
 } from "./restricted-data";
 import { DatasheetSlot, RestrictedSpecsSlot } from "./restricted-slots";
@@ -28,6 +33,8 @@ import type { SwitchVariant } from "./variant-selection";
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const statesMatch: Same<DatasheetButtonState, RouteState> = true;
 void statesMatch;
+const accessMatch: Same<RestrictedAccess, RouteAccess> = true;
+void accessMatch;
 
 const PRODUCT_ID = "0123456789abcdef01234567";
 
@@ -51,10 +58,22 @@ const ALLOWED: Allowed = {
 };
 
 describe("parseRestrictedAnswer", () => {
-  it("reads a refused answer with its state only", () => {
+  it("reads a refused answer with its state and reason only", () => {
     expect(
-      parseRestrictedAnswer({ allowed: false, state: "signin", keys: ["x"] }),
-    ).toEqual({ allowed: false, state: "signin" });
+      parseRestrictedAnswer({
+        allowed: false,
+        state: "signin",
+        access: "signin",
+        keys: ["x"],
+      }),
+    ).toEqual({ allowed: false, state: "signin", access: "signin" });
+    expect(
+      parseRestrictedAnswer({
+        allowed: false,
+        state: "coming-soon",
+        access: "expired",
+      }),
+    ).toEqual({ allowed: false, state: "coming-soon", access: "expired" });
   });
 
   it("reads an allowed answer and keeps only known keys and string values", () => {
@@ -84,7 +103,10 @@ describe("parseRestrictedAnswer", () => {
       "x",
       [],
       { message: "Product not found." },
-      { allowed: false, state: "granted" },
+      { allowed: false, state: "granted", access: "signin" },
+      { allowed: false, state: "signin" },
+      { allowed: false, state: "signin", access: "banned" },
+      { allowed: false, state: "signin", access: 1 },
       { allowed: "yes", state: "download" },
       { allowed: true, state: "download", keys: [] },
     ]) {
@@ -93,16 +115,46 @@ describe("parseRestrictedAnswer", () => {
   });
 });
 
+describe("restrictedSlotView", () => {
+  it("shows rows to an allowed viewer and the fallback before an answer", () => {
+    expect(restrictedSlotView(ALLOWED)).toBe("rows");
+    expect(restrictedSlotView(null)).toBe("fallback");
+    expect(restrictedSlotView(undefined)).toBe("fallback");
+  });
+
+  it.each<[DatasheetButtonState, RestrictedAccess, string]>([
+    ["expired", "expired", "expired"],
+    // QA gate C L-2: no datasheet, yet an expired or blocked customer is
+    // told access ended, not asked to sign in.
+    ["coming-soon", "expired", "expired"],
+    ["signin", "signin", "fallback"],
+    ["coming-soon", "signin", "fallback"],
+  ])(
+    "a refusal with state %s and access %s shows %s",
+    (state, access, view) => {
+      expect(restrictedSlotView({ allowed: false, state, access })).toBe(view);
+    },
+  );
+});
+
 describe("loadRestrictedAnswer", () => {
   const ok = (body: unknown, status = 200) =>
     vi.fn<typeof fetch>(async () => Response.json(body, { status }));
 
   it("asks the route with no-store, same-origin cookies and the signal", async () => {
-    const fetchImpl = ok({ allowed: false, state: "expired" });
+    const fetchImpl = ok({
+      allowed: false,
+      state: "expired",
+      access: "expired",
+    });
     const controller = new AbortController();
     await expect(
       loadRestrictedAnswer(PRODUCT_ID, controller.signal, fetchImpl),
-    ).resolves.toEqual({ allowed: false, state: "expired" });
+    ).resolves.toEqual({
+      allowed: false,
+      state: "expired",
+      access: "expired",
+    });
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(url).toBe(`/api/catalog/restricted/${PRODUCT_ID}`);
     expect(init).toMatchObject({

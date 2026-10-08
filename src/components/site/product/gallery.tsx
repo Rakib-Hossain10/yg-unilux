@@ -37,6 +37,7 @@ import { ProductImageTransition } from "@/components/motion/product/product-imag
 import { ArrowLeftIcon, ArrowRightIcon, ExpandIcon } from "../icons";
 
 import { imageIndexFor, type GalleryImage } from "./gallery-images";
+import { LightboxBoundary } from "./lightbox-boundary";
 import { useOptionalVariantSelection } from "./product-detail-client";
 
 /*
@@ -46,9 +47,17 @@ import { useOptionalVariantSelection } from "./product-detail-client";
  * code off the page's first load (Lighthouse, P9).
  */
 const loadLightbox = () => import("./lightbox");
-const Lightbox = lazy(() =>
-  loadLightbox().then((module) => ({ default: module.Lightbox })),
-);
+const lazyLightbox = () =>
+  lazy(() => loadLightbox().then((module) => ({ default: module.Lightbox })));
+let Lightbox = lazyLightbox();
+/*
+ * React.lazy remembers a failed load for good. After a failure (caught by
+ * LightboxBoundary, QA gate C L-3) start a fresh one, so the next open
+ * fetches the chunk again instead of failing at once.
+ */
+const resetLightboxLoader = () => {
+  Lightbox = lazyLightbox();
+};
 const preloadLightbox = () => {
   void loadLightbox().catch(() => undefined);
 };
@@ -229,6 +238,13 @@ export function Gallery({
     setLightboxIndex(index);
   };
 
+  /* The chunk failed: no lightbox, the page stays; the next open retries. */
+  const onLightboxError = () => {
+    resetLightboxLoader();
+    setLightboxMounted(false);
+    setLightboxIndex(null);
+  };
+
   const onLightboxClose = () => {
     const shown = lightboxIndex;
     setLightboxIndex(null);
@@ -393,16 +409,18 @@ export function Gallery({
       </div>
 
       {lightboxMounted ? (
-        <Suspense fallback={null}>
-          <Lightbox
-            images={images}
-            index={lightboxIndex}
-            productName={productName}
-            idBase={trackId}
-            onNavigate={setLightboxIndex}
-            onClose={onLightboxClose}
-          />
-        </Suspense>
+        <LightboxBoundary onError={onLightboxError}>
+          <Suspense fallback={null}>
+            <Lightbox
+              images={images}
+              index={lightboxIndex}
+              productName={productName}
+              idBase={trackId}
+              onNavigate={setLightboxIndex}
+              onClose={onLightboxClose}
+            />
+          </Suspense>
+        </LightboxBoundary>
       ) : null}
     </div>
   );

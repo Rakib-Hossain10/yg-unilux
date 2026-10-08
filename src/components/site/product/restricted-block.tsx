@@ -26,6 +26,7 @@ import { useOptionalVariantSelection } from "./product-detail-client";
 import {
   loadRestrictedAnswer,
   restrictedRows,
+  restrictedSlotView,
   restrictedSpecsFor,
   type RestrictedAnswer,
 } from "./restricted-data";
@@ -179,9 +180,8 @@ function RestrictedRows({
 export function RestrictedSpecsBlock({ fallback }: { fallback: ReactNode }) {
   const restricted = use(RestrictedContext);
   const answer = restricted?.answer;
-  if (!answer) return fallback;
-  if (answer.allowed) return <RestrictedRows answer={answer} />;
-  if (answer.state === "expired") {
+  if (answer?.allowed) return <RestrictedRows answer={answer} />;
+  if (restrictedSlotView(answer) === "expired") {
     return (
       <p data-restricted="expired">
         Some specifications are shared with approved customers only, and your

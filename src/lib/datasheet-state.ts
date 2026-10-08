@@ -2,7 +2,7 @@
 // derived from the datasheet access check (permissions.checkDatasheetAccess)
 // and whether the product has a datasheet. Never carries a URL or key.
 
-import type { DatasheetAccess } from "./permissions";
+import type { AccessDenial, DatasheetAccess } from "./permissions";
 
 /**
  * - `download`: the viewer may download (links to /api/datasheet/<id>).
@@ -22,7 +22,20 @@ export function datasheetButtonState(
 ): DatasheetButtonState {
   if (!hasDatasheet) return "coming-soon";
   if (access.ok) return "download";
-  switch (access.reason) {
+  return refusedAccess(access.reason);
+}
+
+/**
+ * Why restricted data is refused, as the product page needs it, independent
+ * of whether the product has a datasheet (QA gate C L-2):
+ * - `expired`: signed in, but access has run out or the account is blocked.
+ * - `signin`: everyone else (signed out, temporary password, other role).
+ * Coarse on purpose: "banned" and "expired" look the same to the browser.
+ */
+export type RestrictedAccess = "expired" | "signin";
+
+export function refusedAccess(reason: AccessDenial): RestrictedAccess {
+  switch (reason) {
     case "expired":
     case "banned":
       return "expired";

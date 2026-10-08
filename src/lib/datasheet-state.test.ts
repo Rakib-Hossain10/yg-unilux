@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { datasheetButtonState } from "./datasheet-state";
+import { datasheetButtonState, refusedAccess } from "./datasheet-state";
 import type { AccessDenial } from "./permissions";
 
 describe("datasheetButtonState", () => {
@@ -21,6 +21,16 @@ describe("datasheetButtonState", () => {
     ["banned", "expired"],
   ])("maps %s to %s", (reason, state) => {
     expect(datasheetButtonState({ ok: false, reason }, true)).toBe(state);
+  });
+
+  it.each<[AccessDenial, string]>([
+    ["signed-out", "signin"],
+    ["must-change-password", "signin"],
+    ["not-allowed", "signin"],
+    ["expired", "expired"],
+    ["banned", "expired"],
+  ])("refusedAccess maps %s to %s", (reason, access) => {
+    expect(refusedAccess(reason)).toBe(access);
   });
 
   it("is coming-soon for every viewer when there is no datasheet", () => {

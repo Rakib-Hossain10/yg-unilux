@@ -148,7 +148,12 @@ describe("GET /api/catalog/restricted/[productId]: refused viewers", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("Cache-Control")).toBe("private, no-store");
       const text = await response.text();
-      expect(JSON.parse(text)).toEqual({ allowed: false, state });
+      // The coarse reason equals the button state here (datasheet present).
+      expect(JSON.parse(text)).toEqual({
+        allowed: false,
+        state,
+        access: state,
+      });
       expectNoLeak(text);
     },
   );
@@ -159,14 +164,37 @@ describe("GET /api/catalog/restricted/[productId]: refused viewers", () => {
     expect(await response.json()).toEqual({
       allowed: false,
       state: "coming-soon",
+      access: "signin",
     });
   });
 
-  it("shows coming-soon to an expired customer when there is no datasheet", async () => {
-    signedInAs({ accessExpiresAt: new Date(Date.now() - DAY) });
+  // QA gate C L-2: without a datasheet the button says coming-soon, but the
+  // answer still says why the rows are refused, and nothing more.
+  it.each<[string, Record<string, unknown>]>([
+    ["an expired customer", { accessExpiresAt: new Date(Date.now() - DAY) }],
+    ["a banned customer", { banned: true }],
+  ])(
+    "shows coming-soon to %s with no datasheet, and says access expired",
+    async (_label, fields) => {
+      signedInAs(fields);
+      const response = await call(noSheet);
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({
+        allowed: false,
+        state: "coming-soon",
+        access: "expired",
+      });
+      expectNoLeak(text);
+    },
+  );
+
+  it("tells a customer on a temporary password with no datasheet to sign in", async () => {
+    signedInAs({ mustChangePassword: true });
     expect(await (await call(noSheet)).json()).toEqual({
       allowed: false,
       state: "coming-soon",
+      access: "signin",
     });
   });
 });

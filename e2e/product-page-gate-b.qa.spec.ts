@@ -276,6 +276,7 @@ test.describe("a visitor", () => {
     expect(await route.json()).toEqual({
       allowed: false,
       state: "coming-soon",
+      access: "signin",
     });
     // Client navigation through the family strip: a real RSC fetch.
     const navigated = page.waitForResponse((response) =>
@@ -325,8 +326,13 @@ test.describe("a refused customer", () => {
       expect(found(answers.rsc)).toEqual([]);
       const { page, bodies, route } = await browse(context, PAGE);
       expect(route.headers()["cache-control"]).toBe("private, no-store");
-      // The refused answer is the state only: nothing else is sent.
-      expect(await route.json()).toEqual({ allowed: false, state });
+      // The refused answer is the state and the coarse reason only: nothing
+      // else is sent (the reason equals the state here: a datasheet exists).
+      expect(await route.json()).toEqual({
+        allowed: false,
+        state,
+        access: state,
+      });
       await expect(
         page.locator(`[data-datasheet-state="${state}"]`),
       ).toBeVisible();
@@ -503,6 +509,7 @@ test.describe("GET /api/catalog/restricted/[productId]", () => {
     expect(await (await request.get(ROUTE)).json()).toEqual({
       allowed: false,
       state: "signin",
+      access: "signin",
     });
   });
 
@@ -546,6 +553,7 @@ test.describe("GET /api/catalog/restricted/[productId]", () => {
     expect(await (await forged.request.get(ROUTE)).json()).toEqual({
       allowed: false,
       state: "signin",
+      access: "signin",
     });
     await forged.close();
   });
