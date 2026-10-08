@@ -5,8 +5,9 @@
 // double-tap/double-click and + / − keys, drag or arrow keys to pan.
 
 /*
- * Controlled by the gallery: `index` null = closed. The dialog stays mounted
- * and empty while closed (no image is fetched until it opens); the view inside
+ * Controlled by the gallery: `index` null = closed. A lazy chunk: the gallery
+ * mounts it on the first open (opening at once), then it stays mounted and
+ * empty while closed (no image is fetched until it opens); the view inside
  * is keyed by the image, so zoom resets on every image. Closing (button, Esc)
  * always goes through dialog.close(), whose "close" event tells the gallery,
  * which puts focus back on the control that opened it. Hooks for the motion
@@ -17,7 +18,6 @@ import Image from "next/image";
 import {
   useEffect,
   useEffectEvent,
-  useId,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -66,10 +66,17 @@ export function Lightbox({
   images,
   index,
   productName,
+  idBase,
   onNavigate,
   onClose,
 }: {
   images: readonly GalleryImage[];
+  /**
+   * Prefix for the dialog's own ids, from the gallery's server-rendered id.
+   * The lightbox mounts on first open (lazy chunk), where a fresh useId would
+   * depend on what else mounted on the client first.
+   */
+  idBase: string;
   /** The image shown; null = closed. */
   index: number | null;
   productName: string;
@@ -78,7 +85,7 @@ export function Lightbox({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const hintId = useId();
+  const hintId = `${idBase}-hint`;
   const open = index !== null;
 
   useEffect(() => {

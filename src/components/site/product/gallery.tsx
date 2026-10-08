@@ -5,10 +5,11 @@
 // by IntersectionObserver, the optic switch's image jump and the lightbox.
 
 /*
- * Server HTML shows image 1 (preloaded, the likely LCP) in a fixed 4:3 frame,
- * so nothing shifts on load or hydration. Only image 1 is preloaded; every
- * other image, thumbnail and lightbox picture is lazy. Every image goes
- * through next/image (remotePatterns pinned to our cloud, ADR 0016).
+ * Server HTML shows image 1 (eager, fetchpriority=high: the likely LCP) in a
+ * fixed 4:3 frame, so nothing shifts on load or hydration. Every other image
+ * and thumbnail is lazy; the lightbox code and pictures load on first open.
+ * Every image goes through next/image (remotePatterns pinned to our cloud,
+ * ADR 0016).
  * Scrolling is instant under prefers-reduced-motion. Hooks for the motion
  * pass (P8): data-slot="gallery-track" / "gallery-thumbnails" /
  * "gallery-counter", data-gallery-slide, data-current.
@@ -16,6 +17,8 @@
 
 import Image from "next/image";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -34,8 +37,21 @@ import { ProductImageTransition } from "@/components/motion/product/product-imag
 import { ArrowLeftIcon, ArrowRightIcon, ExpandIcon } from "../icons";
 
 import { imageIndexFor, type GalleryImage } from "./gallery-images";
-import { Lightbox } from "./lightbox";
 import { useOptionalVariantSelection } from "./product-detail-client";
+
+/*
+ * The lightbox (dialog, zoom, pan) is its own chunk, fetched when the visitor
+ * shows intent (pointer over or focus inside the gallery) and mounted on the
+ * first open; it then stays mounted so its close fade can run. Keeps that
+ * code off the page's first load (Lighthouse, P9).
+ */
+const loadLightbox = () => import("./lightbox");
+const Lightbox = lazy(() =>
+  loadLightbox().then((module) => ({ default: module.Lightbox })),
+);
+const preloadLightbox = () => {
+  void loadLightbox().catch(() => undefined);
+};
 
 /* A slide this visible in the track is the current one. */
 const CURRENT_THRESHOLD = 0.6;
@@ -65,6 +81,8 @@ export function Gallery({
   const thumbsRef = useRef<HTMLUListElement>(null);
   const [current, setCurrent] = useState(0);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  /* False until the first open: the lightbox chunk is not needed before. */
+  const [lightboxMounted, setLightboxMounted] = useState(false);
   /* The control that opened the lightbox; focus goes back to it. */
   const openerRef = useRef<HTMLElement | null>(null);
   /* A programmatic scroll in flight: the counter waits for its target. */
@@ -207,6 +225,7 @@ export function Gallery({
 
   const openLightbox = (index: number, opener: HTMLElement) => {
     openerRef.current = opener;
+    setLightboxMounted(true);
     setLightboxIndex(index);
   };
 
@@ -231,6 +250,8 @@ export function Gallery({
       aria-roledescription="carousel"
       aria-label={`${productName} images`}
       className="gallery"
+      onPointerEnter={preloadLightbox}
+      onFocus={preloadLightbox}
     >
       <StageTransition productId={productId}>
         <div className="relative aspect-[4/3] w-full overflow-hidden bg-grey-100">
@@ -263,7 +284,11 @@ export function Gallery({
                     src={image.src}
                     alt={image.alt}
                     fill
-                    preload={index === 0}
+                    // Image 1 is the page's LCP: fetched at once with high
+                    // priority (no head preload: the <img> is discovered as
+                    // early, and Next's docs advise one or the other).
+                    loading={index === 0 ? "eager" : "lazy"}
+                    fetchPriority={index === 0 ? "high" : undefined}
                     sizes="(min-width: 1440px) 820px, (min-width: 1024px) 58vw, 100vw"
                     className="object-contain"
                   />
@@ -351,7 +376,14 @@ export function Gallery({
             <button
               type="button"
               aria-label="View larger"
-              onClick={(event) => openLightbox(current, event.currentTarget)}
+              // Mid-scroll (an optic switch just jumped the stage), open the
+              // image the stage is heading to, not the one it is leaving.
+              onClick={(event) =>
+                openLightbox(
+                  pending.current?.index ?? current,
+                  event.currentTarget,
+                )
+              }
               className={controlButton}
             >
               <ExpandIcon />
@@ -360,13 +392,18 @@ export function Gallery({
         </div>
       </div>
 
-      <Lightbox
-        images={images}
-        index={lightboxIndex}
-        productName={productName}
-        onNavigate={setLightboxIndex}
-        onClose={onLightboxClose}
-      />
+      {lightboxMounted ? (
+        <Suspense fallback={null}>
+          <Lightbox
+            images={images}
+            index={lightboxIndex}
+            productName={productName}
+            idBase={trackId}
+            onNavigate={setLightboxIndex}
+            onClose={onLightboxClose}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

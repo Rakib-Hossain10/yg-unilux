@@ -10,6 +10,7 @@ import { type Db, type MongoClient } from "mongodb";
 import { E2E_CUSTOMER } from "./fixtures/accounts";
 import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
+import { gotoAndWaitForRestricted } from "./fixtures/product-page-helpers";
 import { RESTRICTED } from "./fixtures/product-pages";
 
 // Seeded by e2e/test-server.ts before `next start` (fixtures/product-pages.ts).
@@ -94,13 +95,7 @@ const restricted = (page: Page) =>
 
 /* The block has its answer once the route has been called and answered. */
 async function gotoAndWaitForAnswer(page: Page, path: string) {
-  const answered = page.waitForResponse(
-    (response) =>
-      response.url().includes(`/api/catalog/restricted/`) &&
-      response.request().method() === "GET",
-  );
-  const response = await page.goto(path);
-  const route = await answered;
+  const { response, route } = await gotoAndWaitForRestricted(page, path);
   expect(route.headers()["cache-control"]).toContain("no-store");
   return response;
 }

@@ -10,9 +10,6 @@
 // Then the route matrix of /api/catalog/restricted/[productId] and axe on the
 // product page at 360 and 1280 px.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
 import {
   type APIRequestContext,
   type Browser,
@@ -27,15 +24,14 @@ import { E2E_CUSTOMER } from "./fixtures/accounts";
 import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
 import {
+  axeViolations,
+  horizontalOverflow,
+} from "./fixtures/product-page-helpers";
+import {
   GATE_B,
   GATE_B_RESTRICTED_TOKENS,
   GATE_B_STRIP_TOKENS,
 } from "./fixtures/product-pages";
-
-const axeSource = readFileSync(
-  join(process.cwd(), "node_modules", "axe-core", "axe.min.js"),
-  "utf8",
-);
 
 const PAGE = `/product/${GATE_B.slug}`;
 const SIBLING = `/product/${GATE_B.siblingSlug}`;
@@ -559,31 +555,6 @@ test.describe("GET /api/catalog/restricted/[productId]", () => {
 // Accessibility of the product page (visitor)
 // ---------------------------------------------------------------------------
 
-async function axeViolations(page: Page): Promise<string[]> {
-  await page.addScriptTag({ content: axeSource });
-  return page.evaluate(async () => {
-    // @ts-expect-error axe is injected above
-    const result = await window.axe.run(document, {
-      runOnly: {
-        type: "tag",
-        values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"],
-      },
-    });
-    return (
-      result.violations as {
-        id: string;
-        nodes: { target: string[] }[];
-      }[]
-    ).map(
-      (v) =>
-        `${v.id} (${v.nodes.length}): ${v.nodes
-          .slice(0, 3)
-          .map((node) => node.target.join(" "))
-          .join(" | ")}`,
-    );
-  });
-}
-
 for (const width of [360, 1280]) {
   test(`the product page passes axe at ${width} px (visitor)`, async ({
     browser,
@@ -597,12 +568,7 @@ for (const width of [360, 1280]) {
     ).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
     // No horizontal scroll at this width.
-    const overflow = await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    );
-    expect(overflow).toBeLessThanOrEqual(1);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1);
     await context.close();
   });
 }

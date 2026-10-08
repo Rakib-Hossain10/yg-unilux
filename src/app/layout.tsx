@@ -4,7 +4,7 @@
 
 import type { Metadata } from "next";
 
-import { bodyFont, displayFont } from "./fonts";
+import { bodyFont, displayFont, displayItalicFont } from "./fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +16,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${displayFont.variable} ${bodyFont.variable} h-full`}
+      className={`${displayFont.variable} ${displayItalicFont.variable} ${bodyFont.variable} h-full`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>

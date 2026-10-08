@@ -4,6 +4,7 @@
 
 import { expect, type Page, test } from "@playwright/test";
 
+import { waitForHydration as hydrated } from "./fixtures/product-page-helpers";
 import { SWITCHER } from "./fixtures/product-pages";
 
 // Seeded by e2e/test-server.ts before `next start` (fixtures/product-pages.ts).
@@ -21,17 +22,8 @@ const live = (page: Page) =>
 const lumen = (page: Page) => panel(page).locator('[data-field="lumenOutput"]');
 
 /* Hydration is done once React has attached its handlers to the radio. */
-async function waitForHydration(page: Page) {
-  await expect
-    .poll(() =>
-      page
-        .locator("#variant-option-0")
-        .evaluate((el) =>
-          Object.keys(el).some((key) => key.startsWith("__reactProps")),
-        ),
-    )
-    .toBe(true);
-}
+const waitForHydration = (page: Page) =>
+  hydrated(page.locator("#variant-option-0"));
 
 test("arrow keys switch the model, keep focus, update URL and announce", async ({
   page,

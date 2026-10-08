@@ -2,10 +2,12 @@
 // (3 images: 2 photos + a drawing, 2 variants, variant 2 has its own picture).
 // Covers swipe/snap at 375 px, keyboard, Esc focus return, zoom, CLS, alt.
 
-import { deflateSync, crc32 } from "node:zlib";
-
 import { expect, type Page, test } from "@playwright/test";
 
+import {
+  serveImages,
+  waitForHydration as hydrated,
+} from "./fixtures/product-page-helpers";
 import { GALLERY } from "./fixtures/product-pages";
 
 // Seeded by e2e/test-server.ts before `next start` (fixtures/product-pages.ts).
@@ -14,44 +16,6 @@ const BARE = GALLERY.bare;
 const B2 = GALLERY.b2;
 
 test.describe.configure({ mode: "serial" });
-
-/* A solid 400x300 PNG, so the images really load (the Cloudinary fake
-   serves no pictures; next/image's endpoint is answered here instead). */
-function solidPng(width: number, height: number, rgb: number[]): Buffer {
-  const chunk = (type: string, data: Buffer) => {
-    const head = Buffer.alloc(8);
-    head.writeUInt32BE(data.length, 0);
-    head.write(type, 4, "ascii");
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
-    return Buffer.concat([head, data, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr.writeUInt8(8, 8); // bit depth
-  ihdr.writeUInt8(2, 9); // RGB
-  const row = Buffer.concat([
-    Buffer.from([0]),
-    Buffer.from(Array.from({ length: width }, () => rgb).flat()),
-  ]);
-  const raw = Buffer.concat(Array.from({ length: height }, () => row));
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
-const PNG = solidPng(400, 300, [200, 196, 190]);
-
-/* Answer every next/image request; `delayMs` holds them back (CLS test). */
-async function serveImages(page: Page, delayMs = 0) {
-  await page.route("**/_next/image**", async (route) => {
-    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
-    await route.fulfill({ status: 200, contentType: "image/png", body: PNG });
-  });
-}
 
 /* Records the behaviour of every scrollTo on the gallery track. */
 async function recordScrolls(page: Page) {
@@ -80,15 +44,7 @@ const lightbox = (page: Page) => page.locator('dialog[data-slot="lightbox"]');
 const frame = (page: Page) => page.locator('[data-slot="lightbox-frame"]');
 
 /* Hydration is done once React has attached its handlers. */
-async function waitForHydration(page: Page) {
-  await expect
-    .poll(() =>
-      slideButton(page, 0).evaluate((el) =>
-        Object.keys(el).some((key) => key.startsWith("__reactProps")),
-      ),
-    )
-    .toBe(true);
-}
+const waitForHydration = (page: Page) => hydrated(slideButton(page, 0));
 
 /* "2 / 3" visible, "Image 2 of 3" for screen readers: compare the digits. */
 const counterIs = (page: Page, n: number) =>

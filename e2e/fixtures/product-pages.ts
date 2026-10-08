@@ -109,6 +109,38 @@ export const GATE_B = {
   labels: { v1: `QAXLABEL1${RUN}`, v2: `QAXLABEL2${RUN}` },
 } as const;
 
+// ---------------------------------------------------------------------------
+// e2e/product-page.spec.ts (P9, the Phase 4a exit flow)
+// ---------------------------------------------------------------------------
+/*
+ * The exit product: two variants (lens / reflector) that each name their own
+ * picture, three images stored drawing-in-the-middle (the page shows photos
+ * first: photo1, photo2, drawing), a datasheet, filled quick-panel and table
+ * columns and every default-restricted column filled with a grep-able token.
+ */
+export const EXIT = {
+  categoryId: id("64f0000000000000000000a5"),
+  productId: "64f0000000000000000000b5",
+  slug: `e2e-halo-${RUN}`,
+  name: "Halo",
+  v1: up(`HA-${RUN}-L1`),
+  v2: up(`HA-${RUN}-R2`),
+  photo1: `products/e2e/${RUN}-halo-1`,
+  photo2: `products/e2e/${RUN}-halo-2`,
+  drawing: `products/e2e/${RUN}-halo-drawing`,
+  photo2Alt: "Halo, reflector version",
+  lumen: { v1: "1500lm", v2: "1650lm" },
+  efficacy: { v1: "100lm/W", v2: "110lm/W" },
+  restricted: {
+    batchNo: `EXITBATCH${RUN}`,
+    chipType: `EXITCHIP${RUN}`,
+    holder: `EXITHOLDER${RUN}`,
+    chipEfficiency: `EXITEFF${RUN}`,
+    driverV1: `EXITDRIVER1${RUN}`,
+    driverV2: `EXITDRIVER2${RUN}`,
+  },
+} as const;
+
 /** Every default-restricted token of the gate B product. */
 export const GATE_B_RESTRICTED_TOKENS: readonly string[] = Object.values(
   GATE_B.restricted,
@@ -131,7 +163,66 @@ function productDocs(now: Date): Record<string, unknown>[] {
   const G = GALLERY;
   const R = RESTRICTED;
   const B = GATE_B;
+  const X = EXIT;
   return [
+    // --- exit flow (P9) ---
+    {
+      ...base,
+      _id: id(X.productId),
+      mainCategory: X.categoryId,
+      name: X.name,
+      slug: X.slug,
+      family: X.name,
+      modelCode: up(`HA-${RUN}`),
+      type: "Recessed downlight",
+      // Only `products.datasheetId != null` matters to the page (no file).
+      datasheetId: new ObjectId(),
+      images: [
+        { publicId: X.photo1, order: 0, kind: "gallery" },
+        { publicId: X.drawing, order: 1, kind: "dimension" },
+        { publicId: X.photo2, order: 2, kind: "gallery", alt: X.photo2Alt },
+      ],
+      specs: {
+        housingMaterial: ["Die-cast aluminium"],
+        housingFinish: ["White", "Black"],
+        cutOutSize: ["Ø75mm"],
+        cct: ["3000K", "4000K"],
+        cri: ["90"],
+        beamAngle: ["24°", "36°"],
+        ugr: ["<19"],
+        wattage: ["15W"],
+        ipRating: ["IP44"],
+        batchNo: [X.restricted.batchNo],
+        chipType: [X.restricted.chipType],
+        holder: [X.restricted.holder],
+        chipEfficiency: [X.restricted.chipEfficiency],
+      },
+      filters: { cri: [90], wattage: [15] },
+      variants: [
+        {
+          modelNo: X.v1,
+          label: "PC lens",
+          imagePublicId: X.photo1,
+          specs: {
+            lens: ["PC lens"],
+            driver: [X.restricted.driverV1],
+            lumenOutput: [X.lumen.v1],
+            lumenEfficiency: [X.efficacy.v1],
+          },
+        },
+        {
+          modelNo: X.v2,
+          label: "Reflector",
+          imagePublicId: X.photo2,
+          specs: {
+            lens: ["Reflector"],
+            driver: [X.restricted.driverV2],
+            lumenOutput: [X.lumen.v2],
+            lumenEfficiency: [X.efficacy.v2],
+          },
+        },
+      ],
+    },
     // --- switcher ---
     {
       ...base,

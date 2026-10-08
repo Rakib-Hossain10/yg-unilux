@@ -1,6 +1,7 @@
 // Unit tests for the product gallery (P6): image order and alt text, the
-// variant image lookup, and the server-rendered markup (first image only
-// preloaded, the rest lazy, fixed 4:3 frame, placeholder, single image).
+// variant image lookup, and the server-rendered markup (first image eager with
+// high fetch priority, the rest lazy, fixed 4:3 frame, placeholder, single
+// image, no lightbox before the first open).
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -100,8 +101,13 @@ describe("GalleryStage markup", () => {
     const stage = tags.slice(0, 3);
     expect(stage[0]).toContain('alt="Arc, image 1 of 3"');
     expect(stage[0]).not.toContain('loading="lazy"');
+    // The LCP image: high priority, never lazy; only image 1 gets it.
+    expect(stage[0]).toContain('fetchPriority="high"');
     expect(stage[1]).toContain('alt="Arc, image 2 of 3"');
     expect(stage[1]).toContain('loading="lazy"');
+    expect(tags.filter((tag) => tag.includes('fetchPriority="high"'))).toEqual([
+      stage[0],
+    ]);
     expect(stage[2]).toContain('loading="lazy"');
     // Thumbnails are decorative (the button text names them) and lazy.
     for (const thumb of tags.slice(3)) {
@@ -120,9 +126,9 @@ describe("GalleryStage markup", () => {
     expect(html).toContain("Show image 2 of 3");
     expect(html.match(/tabindex="0"/g)).toHaveLength(1);
     expect(html.match(/tabindex="-1"/g)).toHaveLength(2);
-    // The dialog is there but empty until opened (no image fetched).
-    expect(html).toMatch(/<dialog[^>]*data-slot="lightbox"/);
-    expect(html).not.toMatch(/<dialog[^>]*\sopen/);
+    // The lightbox is its own chunk, mounted on the first open: the server
+    // HTML has no dialog (and so no lightbox picture is fetched).
+    expect(html).not.toContain("<dialog");
   });
 
   it("a single image has no thumbnails, counter or prev/next", () => {

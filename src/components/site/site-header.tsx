@@ -21,7 +21,7 @@ function Wordmark() {
 }
 
 const iconLink =
-  "inline-flex size-10 items-center justify-center rounded-full transition-colors duration-(--duration-quick) hover:bg-grey-100";
+  "inline-flex size-11 items-center justify-center rounded-full transition-colors duration-(--duration-quick) hover:bg-grey-100";
 
 export function SiteHeader() {
   return (
@@ -50,7 +50,15 @@ export function SiteHeader() {
           <Link href="/search" aria-label="Search" className={iconLink}>
             <SearchIcon />
           </Link>
-          <Link href="/login" aria-label="Account" className={iconLink}>
+          {/* Not prefetched: the sign-in page's form code (with its schema
+              library, ~100 KB) would otherwise load on every public page
+              that shows the header. It loads on click instead. */}
+          <Link
+            href="/login"
+            prefetch={false}
+            aria-label="Account"
+            className={iconLink}
+          >
             <AccountIcon />
           </Link>
 
