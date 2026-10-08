@@ -36,6 +36,7 @@ import {
   type StripCard,
 } from "@/components/site/product/product-strip";
 import { QuickSpecPanel } from "@/components/site/product/quick-spec-panel";
+import { RestrictedDataProvider } from "@/components/site/product/restricted-block";
 import { RestrictedSpecsSlot } from "@/components/site/product/restricted-slots";
 import {
   SpecTable,
@@ -224,32 +225,38 @@ export default async function ProductPage({
       {/* The one client state of the page (selected variant, P5): panel,
           table and Models rows stay Server Components with client leaves. */}
       <ProductDetailClient variants={variants}>
-        <div
-          className={`${container} mt-4 grid gap-10 lg:grid-cols-12 lg:gap-16`}
-        >
-          <div className="lg:col-span-7">
-            <GalleryStage images={images} productName={product.name} />
-          </div>
-          <div className="lg:col-span-5">
-            <QuickSpecPanel product={product} variants={variants} />
-          </div>
-        </div>
-
-        <div className={`${container} mt-16 space-y-16 md:mt-28 md:space-y-28`}>
-          <SpecTable
-            groups={groups}
-            captionPrefix={
-              <>
-                Specifications of {product.name} {shownModel}
-              </>
-            }
+        {/* Fetches this viewer's restricted answer after hydration (P7):
+            only the product id crosses into it, never a restricted value. */}
+        <RestrictedDataProvider productId={product.id}>
+          <div
+            className={`${container} mt-4 grid gap-10 lg:grid-cols-12 lg:gap-16`}
           >
-            {/* P7 renders restricted rows here for allowed viewers. */}
-            <RestrictedSpecsSlot />
-          </SpecTable>
+            <div className="lg:col-span-7">
+              <GalleryStage images={images} productName={product.name} />
+            </div>
+            <div className="lg:col-span-5">
+              <QuickSpecPanel product={product} variants={variants} />
+            </div>
+          </div>
 
-          <ModelsTable variants={product.variants} productTitle={title} />
-        </div>
+          <div
+            className={`${container} mt-16 space-y-16 md:mt-28 md:space-y-28`}
+          >
+            <SpecTable
+              groups={groups}
+              captionPrefix={
+                <>
+                  Specifications of {product.name} {shownModel}
+                </>
+              }
+            >
+              {/* Restricted rows for allowed viewers, filled on the client. */}
+              <RestrictedSpecsSlot />
+            </SpecTable>
+
+            <ModelsTable variants={product.variants} productTitle={title} />
+          </div>
+        </RestrictedDataProvider>
       </ProductDetailClient>
 
       <div className={`${container} mt-16 space-y-16 md:mt-28 md:space-y-28`}>
