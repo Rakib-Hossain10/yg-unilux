@@ -5,7 +5,6 @@
 // checks run (Zod again in our hook, rate limits, argon2id — ADR 0022/0023).
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -50,7 +49,6 @@ const field =
   "mt-1.5 block h-11 w-full border border-grey-300 bg-paper px-3 text-sm outline-offset-0 transition-colors duration-(--duration-quick) focus:border-ink aria-invalid:border-red-700";
 
 export function LoginForm() {
-  const router = useRouter();
   const [formError, setFormError] = useState<string | null>(null);
   const {
     register,
@@ -90,10 +88,11 @@ export function LoginForm() {
       typeof body === "object" && body !== null && "user" in body
         ? (body.user as { role?: unknown } | null)?.role
         : undefined;
-    // replace + refresh: the session cookie is new, so server components
-    // must render again for the signed-in user.
-    router.replace(destinationFor(role));
-    router.refresh();
+    // A full page load, not router.replace: CSP is fixed per document, so a
+    // client-side move would keep /login's connect-src 'self' and the admin
+    // panel's direct uploads would be blocked (ADR 0045). The load also
+    // renders everything again for the new session cookie.
+    window.location.assign(destinationFor(role));
   }
 
   return (

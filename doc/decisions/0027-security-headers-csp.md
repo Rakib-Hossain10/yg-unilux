@@ -51,3 +51,10 @@
 - Override order comes from the installed docs (`01-app/03-api-reference/05-config/01-next-config-js/headers.md`, "Header Overriding Behavior"): "If two headers match the same path and set the same header key, the last header key will override the first." It is tested with Next's own matcher.
 - `adminConnectSrc` reads `process.env.R2_ACCOUNT_ID` at build time, like `cloudinaryImagePatterns`. Unset gives the Cloudinary host only. A value that isn't 32 lowercase hex fails the build without echoing it, so no malformed or injected source can be emitted.
 - Public pages' CSP is unchanged byte for byte (tested against a literal). See ADR 0045.
+
+## Note (2026-10-08): the CSP is per document, so crossing /login ↔ /admin needs a full page load
+- A browser applies the CSP of the document it loaded. A client-side navigation (`router.push/replace`, `<Link>`) keeps the old document's policy.
+- Bug found: after sign-in, `login-form.tsx` used `router.replace("/admin")`. The admin panel then ran inside the `/login` document (`connect-src 'self'`), so the direct Cloudinary and R2 uploads were blocked until a hard reload. The `/admin/:path*` headers were correct all along.
+- Rule: every navigation that crosses the public/admin boundary is a full document load. Sign-in uses `window.location.assign(destination)`, sign-out uses `window.location.replace("/")`. See ADR 0045.
+- Carried into Phase 5: `/change-password` and any public link into `/admin` (e.g. an account icon) must do the same.
+- Test: `e2e/auth-access.spec.ts` checks one CSP header per page (admin has the Cloudinary host, `/login` and `/` do not) and that the admin document reaches the upload host right after a real login.

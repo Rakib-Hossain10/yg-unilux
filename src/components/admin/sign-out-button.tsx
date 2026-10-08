@@ -4,13 +4,11 @@
 // deletes the session in the database) and returns to the home page.
 // Styled with the shadcn Button and design tokens (ADR 0034).
 
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
 export function SignOutButton() {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -39,8 +37,10 @@ export function SignOutButton() {
       setBusy(false);
       return;
     }
-    router.replace("/");
-    router.refresh();
+    // A full page load, not router.replace: CSP is fixed per document, so a
+    // client-side move would show public pages under the admin document's
+    // wider connect-src (ADR 0045). It also drops the admin's client state.
+    window.location.replace("/");
   }
 
   return (
