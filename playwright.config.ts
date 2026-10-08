@@ -28,7 +28,8 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /admin-settings-gate-d|admin-product\.spec/,
+      testIgnore:
+        /admin-settings-gate-d|admin-product\.spec|admin-import\.spec/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -48,6 +49,15 @@ export default defineConfig({
       name: "admin-exit",
       testMatch: /admin-product\.spec/,
       dependencies: ["chromium", "settings-gate-d"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // The Phase 3 exit flow (T11) imports products into the shared database
+      // (a category, an area and five draft products, removed afterwards). It
+      // runs after every other project so no list count sees them.
+      name: "admin-import",
+      testMatch: /admin-import\.spec/,
+      dependencies: ["chromium", "settings-gate-d", "admin-exit"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],
