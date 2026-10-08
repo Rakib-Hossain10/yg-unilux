@@ -54,6 +54,7 @@ vi.mock("@/lib/import", () => ({
   ...services,
   PREVIEW_AGAIN: "PREVIEW AGAIN",
   FILE_CHANGED: "FILE CHANGED",
+  STAGED_FILE_MESSAGES: { not_found: "STAGED GONE" },
 }));
 
 const { ObjectId } = mongoose.Types;
@@ -324,11 +325,12 @@ describe("as the admin", () => {
     ],
     [
       {
-        formErrors: ["The uploaded file is no longer available"],
+        formErrors: ["STAGED GONE"],
         fieldErrors: {},
       },
-      "retry",
+      "upload",
     ],
+    [{ formErrors: ["something else"], fieldErrors: {} }, "retry"],
   ])("commit failure %j → next %s", async (errors, next) => {
     services.commitImportBatch.mockResolvedValue({
       ok: false,

@@ -88,7 +88,8 @@ export function EntryDetails({
                 <span className="text-muted-foreground">
                   {change.before ?? "not set"}
                 </span>
-                <span aria-label="becomes">→</span>
+                <span aria-hidden="true">→</span>
+                <span className="sr-only">becomes</span>
                 <span>{change.after ?? "not set"}</span>
               </li>
             ))}

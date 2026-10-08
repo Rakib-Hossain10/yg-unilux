@@ -16,7 +16,7 @@ English only — no i18n library, no language switcher, no `[locale]` routes.
 - Vercel Cron for the daily access-expiry reminder job
 - Hosting: Vercel (+ Vercel Firewall for geo-block)
 - Tooling: npm ≥ 12.1 (`devEngines` warns on older npm; Node 22 ships npm 10, so run `npm i -g npm@12` first; CI pins 12.1.0), Node ≥ 22, Vitest (+ mongodb-memory-server), Playwright, ESLint, Prettier, husky + lint-staged (ADR 0010, 0011)
-- Versions: Next.js 16.3.7, React 19.2, TypeScript 5.9, Tailwind 4, Mongoose 9, Zod 4. The Next.js docs for this version are in `node_modules/next/dist/docs/`; read them before using any Next API.
+- Versions: Next.js 16.3.8, React 19.2, TypeScript 5.9, Tailwind 4, Mongoose 9, Zod 4. The Next.js docs for this version are in `node_modules/next/dist/docs/`; read them before using any Next API.
 - Security tooling (all free): Dependabot, `npm audit --audit-level=high` in CI, gitleaks in CI + pre-commit; no CodeQL (ADR 0015)
 
 ## Folder structure

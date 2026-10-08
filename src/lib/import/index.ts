@@ -55,7 +55,7 @@ export type ImportPreview =
 export const DEFAULT_CATEGORY_GONE =
   "This category no longer exists. Choose another one.";
 
-const STAGED_FILE_MESSAGES: Record<
+export const STAGED_FILE_MESSAGES: Record<
   Extract<ImportBytes, { ok: false }>["reason"],
   string
 > = {

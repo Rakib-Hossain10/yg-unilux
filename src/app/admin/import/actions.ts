@@ -28,6 +28,7 @@ import {
   FILE_CHANGED,
   finishImport,
   PREVIEW_AGAIN,
+  STAGED_FILE_MESSAGES,
   previewImport,
 } from "@/lib/import";
 import { requireAdmin } from "@/lib/permissions";
@@ -56,6 +57,14 @@ function commitNext(errors: ServiceErrors): CommitNext {
   const fields = Object.keys(errors.fieldErrors);
   if (fields.includes("acknowledgeRemovals")) return "confirm";
   if (fields.includes("defaultCategoryId")) return "upload";
+  // The staged file is gone or unusable: only a new upload helps.
+  if (
+    errors.formErrors.some((m) =>
+      Object.values(STAGED_FILE_MESSAGES).includes(m),
+    )
+  ) {
+    return "upload";
+  }
   if (
     errors.formErrors.some((m) => m === PREVIEW_AGAIN || m === FILE_CHANGED) ||
     // Hash, batch or plan-shape errors: the preview no longer fits.
