@@ -20,6 +20,7 @@ export function ImageDropZone({
   multiple,
   blocked,
   onFiles,
+  accept = IMAGE_ACCEPT,
 }: {
   /** DOM id of the button (focus target after a list change). */
   id: string;
@@ -34,6 +35,8 @@ export function ImageDropZone({
    */
   blocked: string | null;
   onFiles: (files: File[]) => void;
+  /** The file input's `accept` (default: JPG, PNG, WebP, AVIF). */
+  accept?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -100,7 +103,7 @@ export function ImageDropZone({
       <input
         ref={inputRef}
         type="file"
-        accept={IMAGE_ACCEPT}
+        accept={accept}
         multiple={multiple}
         tabIndex={-1}
         aria-label={buttonLabel}

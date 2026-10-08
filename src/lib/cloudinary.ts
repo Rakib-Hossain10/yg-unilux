@@ -54,14 +54,31 @@ export interface SignedUpload {
   fields: SignedUploadFields;
 }
 
+/** Cloudinary format names an upload may have (`format` in its answers). */
+export type ImageFormatList = readonly string[];
+
+/*
+ * A format list must be non-empty, lowercase letters/digits only: it is
+ * signed into `allowed_formats` (no "," or "&" smuggled in) and compared
+ * with Cloudinary's lowercased `format`. A bad list is a programming error.
+ */
+function assertFormatList(formats: ImageFormatList): void {
+  if (formats.length === 0 || !formats.every((f) => /^[a-z0-9]+$/.test(f))) {
+    throw new TypeError("Image format lists need lowercase format names");
+  }
+}
+
 /**
  * Signs a direct upload of one image to the server-chosen `publicId`.
  * `timestampSeconds` is the Unix time in seconds (Cloudinary refuses
- * signatures older than an hour). The API secret never leaves this function.
+ * signatures older than an hour). `formats` is what Cloudinary will accept
+ * (default jpg/png/webp/avif; category icons also allow svg). The API secret
+ * never leaves this function.
  */
 export function signImageUpload(
   publicId: string,
   timestampSeconds: number,
+  formats: ImageFormatList = ALLOWED_IMAGE_FORMATS,
 ): SignedUpload {
   if (!isPublicId(publicId)) {
     throw new TypeError("signImageUpload needs a server-built public id");
@@ -69,6 +86,7 @@ export function signImageUpload(
   if (!Number.isSafeInteger(timestampSeconds) || timestampSeconds <= 0) {
     throw new TypeError("signImageUpload needs a Unix timestamp in seconds");
   }
+  assertFormatList(formats);
   const { cloudName, apiKey, apiSecret } = configure();
 
   // The parameters that are signed: everything the browser sends except
@@ -76,7 +94,7 @@ export function signImageUpload(
   const signed = {
     timestamp: String(timestampSeconds),
     public_id: publicId,
-    allowed_formats: ALLOWED_IMAGE_FORMATS.join(","),
+    allowed_formats: formats.join(","),
     overwrite: "false" as const,
   };
   const signature = cloudinary.utils.api_sign_request(signed, apiSecret);
@@ -95,7 +113,7 @@ export type ImageRejection =
   | "missing"
   /** Larger than MAX_IMAGE_BYTES. */
   | "too_large"
-  /** Not jpg, png, webp or avif, or not an image at all. */
+  /** Not an allowed format (jpg, png, webp or avif by default), or not an image. */
   | "bad_format"
   /** Cloudinary could not be asked (network, rate limit, outage). */
   | "unavailable";
@@ -113,14 +131,17 @@ function httpCode(error: unknown): number | undefined {
   return typeof code === "number" ? code : undefined;
 }
 
-const FORMATS: ReadonlySet<string> = new Set(ALLOWED_IMAGE_FORMATS);
-
 /**
  * Asks Cloudinary's Admin API what is stored under `publicId` and checks it
- * against our limits. The signed upload cannot cap the size, so this check
- * after the upload is what enforces MAX_IMAGE_BYTES.
+ * against our limits (`formats`: default jpg/png/webp/avif). The signed
+ * upload cannot cap the size, so this check after the upload is what
+ * enforces MAX_IMAGE_BYTES.
  */
-export async function inspectImage(publicId: string): Promise<ImageCheck> {
+export async function inspectImage(
+  publicId: string,
+  formats: ImageFormatList = ALLOWED_IMAGE_FORMATS,
+): Promise<ImageCheck> {
+  assertFormatList(formats);
   configure();
   let resource: unknown;
   try {
@@ -137,7 +158,7 @@ export async function inspectImage(publicId: string): Promise<ImageCheck> {
     return { ok: false, reason: "unavailable" };
   }
 
-  return checkStoredImage(resource);
+  return checkStoredImage(resource, formats);
 }
 
 /*
@@ -145,13 +166,16 @@ export async function inspectImage(publicId: string): Promise<ImageCheck> {
  * stored: an Admin API resource (browser uploads) or the Upload API response
  * the server received itself (uploadImageBuffer). Both carry the same fields.
  */
-function checkStoredImage(resource: unknown): ImageCheck {
+function checkStoredImage(
+  resource: unknown,
+  formats: ImageFormatList = ALLOWED_IMAGE_FORMATS,
+): ImageCheck {
   const { bytes, format, width, height, resource_type } = (resource ??
     {}) as Record<string, unknown>;
   if (resource_type !== "image" || typeof format !== "string") {
     return { ok: false, reason: "bad_format" };
   }
-  if (!FORMATS.has(format.toLowerCase())) {
+  if (!formats.includes(format.toLowerCase())) {
     return { ok: false, reason: "bad_format" };
   }
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {

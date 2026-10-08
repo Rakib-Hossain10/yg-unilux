@@ -900,6 +900,9 @@ describe("category path on a damaged tree (pure)", () => {
     slug,
     parentId,
     order: 0,
+    icon: null,
+    coverImage: null,
+    description: null,
   });
   const M = "a".repeat(24);
   const A = "b".repeat(24);

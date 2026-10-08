@@ -63,23 +63,68 @@ export function formatBytes(bytes: number): string {
 
 const FORMATS_TEXT = "JPG, PNG, WebP or AVIF";
 
+/**
+ * Which files one picker takes: MIME types (the pre-sign check), the
+ * `accept` string and the formats as people read them. The server's signed
+ * `allowed_formats` and its verification stay the real gate.
+ */
+export interface ImageFileRules {
+  types: Readonly<Record<string, string>>;
+  accept: string;
+  formatsText: string;
+}
+
+/** Product and area images: JPG, PNG, WebP or AVIF. */
+export const DEFAULT_IMAGE_RULES: ImageFileRules = {
+  types: ACCEPTED_IMAGE_TYPES,
+  accept: IMAGE_ACCEPT,
+  formatsText: FORMATS_TEXT,
+};
+
+/**
+ * A category icon: PNG, SVG or WebP (Cloudinary stores the SVG; the site
+ * always gets a raster copy, never SVG markup).
+ */
+export const CATEGORY_ICON_RULES: ImageFileRules = {
+  types: { "image/png": "PNG", "image/svg+xml": "SVG", "image/webp": "WebP" },
+  accept: "image/png,image/svg+xml,image/webp,.png,.svg,.webp",
+  formatsText: "PNG, SVG or WebP",
+};
+
+/** A category cover image: JPG, PNG or WebP. */
+export const CATEGORY_COVER_RULES: ImageFileRules = {
+  types: { "image/jpeg": "JPG", "image/png": "PNG", "image/webp": "WebP" },
+  accept: "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp",
+  formatsText: "JPG, PNG or WebP",
+};
+
 /** Help text under a multi-file picker. */
 export const IMAGE_RULES_TEXT = `${FORMATS_TEXT}, up to ${formatBytes(MAX_IMAGE_BYTES)} each.`;
 
 /** Help text under a one-file picker. */
-export const SINGLE_IMAGE_RULES_TEXT = `${FORMATS_TEXT}, up to ${formatBytes(MAX_IMAGE_BYTES)}.`;
+export function singleImageRulesText(
+  rules: ImageFileRules = DEFAULT_IMAGE_RULES,
+): string {
+  return `${rules.formatsText}, up to ${formatBytes(MAX_IMAGE_BYTES)}.`;
+}
+
+/** Help text under a one-file product/area picker. */
+export const SINGLE_IMAGE_RULES_TEXT = singleImageRulesText();
 
 /**
  * Why this file can't be uploaded, or null when it may be. Runs BEFORE the
  * sign request, so a wrong file never costs a signature or an upload.
  */
-export function checkImageFile(file: {
-  name: string;
-  size: number;
-  type: string;
-}): string | null {
-  if (!Object.hasOwn(ACCEPTED_IMAGE_TYPES, file.type)) {
-    return `${file.name} is not a ${FORMATS_TEXT} image.`;
+export function checkImageFile(
+  file: {
+    name: string;
+    size: number;
+    type: string;
+  },
+  rules: ImageFileRules = DEFAULT_IMAGE_RULES,
+): string | null {
+  if (!Object.hasOwn(rules.types, file.type)) {
+    return `${file.name} is not a ${rules.formatsText} image.`;
   }
   if (file.size === 0) return `${file.name} is empty.`;
   if (file.size > MAX_IMAGE_BYTES) {
@@ -194,17 +239,23 @@ export function uploadImage(
  */
 const CLOUD_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
+/** Delivery formats a preview may ask for. */
+export type PreviewFormat = "auto" | "png";
+
 /**
  * A small admin preview of one stored image, fitted (never cropped) within
- * `width` px, in the browser's best format. Loaded straight from
- * res.cloudinary.com, which the CSP's img-src allows. Null without a cloud
- * name (Cloudinary not configured): the card shows a placeholder instead.
+ * `width` px, in the browser's best format (`f_auto`) or as PNG (`f_png`:
+ * category icons, whose SVG originals are always shown as a raster). Loaded
+ * straight from res.cloudinary.com, which the CSP's img-src allows. Null
+ * without a cloud name (Cloudinary not configured): the card shows a
+ * placeholder instead.
  */
 export function previewUrl(
   cloudName: string | null,
   publicId: string,
   width = 480,
+  format: PreviewFormat = "auto",
 ): string | null {
   if (cloudName === null || !CLOUD_NAME.test(cloudName)) return null;
-  return `https://res.cloudinary.com/${cloudName}/image/upload/c_limit,w_${width},h_${width},f_auto,q_auto/${publicId}`;
+  return `https://res.cloudinary.com/${cloudName}/image/upload/c_limit,w_${width},h_${width},f_${format},q_auto/${publicId}`;
 }

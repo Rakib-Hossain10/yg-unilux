@@ -59,6 +59,30 @@ describe("signImageUpload", () => {
     });
   });
 
+  it("signs a custom format list (category icons allow svg)", () => {
+    const signed = signImageUpload(PUBLIC_ID, TIMESTAMP, [
+      "png",
+      "svg",
+      "webp",
+    ]);
+    const toSign =
+      "allowed_formats=png,svg,webp&overwrite=false" +
+      `&public_id=${PUBLIC_ID}&timestamp=${TIMESTAMP}`;
+    expect(signed.fields.allowed_formats).toBe("png,svg,webp");
+    expect(signed.fields.signature).toBe(
+      createHash("sha1")
+        .update(toSign + SECRET)
+        .digest("hex"),
+    );
+  });
+
+  it("refuses an empty or odd format list", () => {
+    expect(() => signImageUpload(PUBLIC_ID, TIMESTAMP, [])).toThrow(TypeError);
+    expect(() =>
+      signImageUpload(PUBLIC_ID, TIMESTAMP, ["png&overwrite=true"]),
+    ).toThrow(TypeError);
+  });
+
   it("never returns the API secret", () => {
     const signed = signImageUpload(PUBLIC_ID, TIMESTAMP);
     expect(JSON.stringify(signed)).not.toContain(SECRET);
@@ -135,6 +159,18 @@ describe("inspectImage", () => {
       ok: false,
       reason: "bad_format",
     });
+  });
+
+  it("checks against a custom format list when given one", async () => {
+    resourceReturns({ resource_type: "image", format: "svg", bytes: 10 });
+    expect((await inspectImage(PUBLIC_ID, ["png", "svg", "webp"])).ok).toBe(
+      true,
+    );
+    await expect(inspectImage(PUBLIC_ID, ["PNG"])).rejects.toThrow(TypeError);
+    resourceReturns({ resource_type: "image", format: "jpg", bytes: 10 });
+    await expect(
+      inspectImage(PUBLIC_ID, ["png", "svg", "webp"]),
+    ).resolves.toEqual({ ok: false, reason: "bad_format" });
   });
 
   it("reports a 404 as missing", async () => {

@@ -12,6 +12,8 @@ import {
   MAX_CATEGORY_DESCRIPTION_LENGTH,
   MAX_CATEGORY_NAME_LENGTH,
   moveCategorySchema,
+  setCategoryImageSchema,
+  signCategoryImageSchema,
 } from "./category";
 
 const PARENT = "64b7f0c2a1b2c3d4e5f60718";
@@ -136,6 +138,58 @@ describe("moveCategorySchema", () => {
     expect(
       moveCategorySchema.safeParse({ id: PARENT, direction: "up", by: 2 })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("category image schemas", () => {
+  const ICON = `yg/categories/${PARENT}/0f8fad5b-d9cb-469f-a165-70867728950e`;
+
+  it("signs only for a known slot, with no extra keys", () => {
+    expect(
+      signCategoryImageSchema.parse({ categoryId: PARENT, slot: "icon" }),
+    ).toEqual({ categoryId: PARENT, slot: "icon" });
+    for (const input of [
+      { categoryId: PARENT, slot: "banner" },
+      { categoryId: PARENT },
+      { categoryId: PARENT, slot: "cover", formats: "svg" },
+      { categoryId: "x", slot: "icon" },
+    ]) {
+      expect(signCategoryImageSchema.safeParse(input).success).toBe(false);
+    }
+  });
+
+  it("sets an id of ours, clears with null or blank", () => {
+    expect(
+      setCategoryImageSchema.parse({
+        categoryId: PARENT,
+        slot: "icon",
+        publicId: ` ${ICON} `,
+      }).publicId,
+    ).toBe(ICON);
+    for (const publicId of [null, "", undefined]) {
+      expect(
+        setCategoryImageSchema.parse({
+          categoryId: PARENT,
+          slot: "cover",
+          publicId,
+        }).publicId,
+      ).toBeNull();
+    }
+  });
+
+  it.each([
+    ["inline SVG markup", "<svg><script>alert(1)</script></svg>"],
+    ["a URL", "https://res.cloudinary.com/demo/image/upload/x.svg"],
+    ["a data URI", "data:image/svg+xml;base64,PHN2Zz4="],
+    ["an id outside our shape", "categories/spot-icon"],
+  ])("refuses %s", (_label, publicId) => {
+    expect(
+      setCategoryImageSchema.safeParse({
+        categoryId: PARENT,
+        slot: "icon",
+        publicId,
+      }).success,
     ).toBe(false);
   });
 });

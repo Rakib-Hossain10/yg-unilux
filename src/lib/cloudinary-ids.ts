@@ -2,7 +2,11 @@
 // id belongs to. Pure (no server-only): Zod form schemas, the models and the
 // server-only upload services all check ids with these same patterns.
 
-import { CLOUDINARY_AREA_FOLDER, CLOUDINARY_PRODUCT_FOLDER } from "./constants";
+import {
+  CLOUDINARY_AREA_FOLDER,
+  CLOUDINARY_CATEGORY_FOLDER,
+  CLOUDINARY_PRODUCT_FOLDER,
+} from "./constants";
 
 /*
  * Every image the app uploads gets a server-chosen id
@@ -26,6 +30,7 @@ export const PUBLIC_ID_PATTERN = new RegExp(
 export const IMAGE_UPLOAD_FOLDERS = {
   product: CLOUDINARY_PRODUCT_FOLDER,
   area: CLOUDINARY_AREA_FOLDER,
+  category: CLOUDINARY_CATEGORY_FOLDER,
 } as const;
 export type ImageUploadTarget = keyof typeof IMAGE_UPLOAD_FOLDERS;
 export const IMAGE_UPLOAD_TARGETS = Object.keys(

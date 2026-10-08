@@ -13,6 +13,7 @@ import {
   selectOrphanImages,
   selectStaleImports,
   selectStaleIncoming,
+  SWEPT_CLOUDINARY_FOLDERS,
 } from "../src/lib/orphan-sweep";
 
 const NOW = new Date("2026-10-07T12:00:00.000Z");
@@ -26,6 +27,7 @@ const UUID_2 = "22222222-2222-4222-8222-222222222222";
 const UUID_3 = "33333333-3333-4333-8333-333333333333";
 const prod = (o: string, u: string) => `yg/products/${o}/${u}`;
 const area = (o: string, u: string) => `yg/areas/${o}/${u}`;
+const cat = (o: string, u: string) => `yg/categories/${o}/${u}`;
 
 describe("selectStaleIncoming", () => {
   it("selects only objects strictly older than 24 h (boundary)", () => {
@@ -149,6 +151,7 @@ describe("selectOrphanImages", () => {
     const referenced = collectReferencedImageIds({
       products: [{ images: [{ publicId: prod(OID_B, UUID_1) }] }],
       areas: [],
+      categories: [],
     });
     expect(
       selectOrphanImages(
@@ -174,8 +177,36 @@ describe("collectReferencedImageIds", () => {
         {},
       ],
       areas: [{ bwImage: "d" }, {}],
+      categories: [{ icon: "e", coverImage: "f" }, { icon: "g" }, {}],
     });
-    expect([...ids].sort()).toEqual(["a", "b", "c", "d"]);
+    expect([...ids].sort()).toEqual(["a", "b", "c", "d", "e", "f", "g"]);
+  });
+
+  it("keeps a category's icon and cover, sweeps its unreferenced uploads", () => {
+    expect(SWEPT_CLOUDINARY_FOLDERS).toEqual([
+      "yg/products",
+      "yg/areas",
+      "yg/categories",
+    ]);
+    const old = ago(48 * HOUR);
+    const referenced = collectReferencedImageIds({
+      products: [],
+      areas: [],
+      categories: [
+        { icon: cat(OID_A, UUID_1), coverImage: cat(OID_A, UUID_2) },
+      ],
+    });
+    expect(
+      selectOrphanImages(
+        [
+          { publicId: cat(OID_A, UUID_1), createdAt: old },
+          { publicId: cat(OID_A, UUID_2), createdAt: old },
+          { publicId: cat(OID_A, UUID_3), createdAt: old },
+        ],
+        referenced,
+        NOW,
+      ),
+    ).toEqual([cat(OID_A, UUID_3)]);
   });
 });
 

@@ -10,13 +10,24 @@ import { mongoose } from "@/lib/db";
 import { CategoryModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { setupMemoryDb } from "../../../../test/helpers/memory-db";
+import { testPublicId } from "../../../../test/helpers/public-ids";
 
 import {
   createCategoryAction,
   deleteCategoryAction,
   moveCategoryAction,
+  setCategoryImageAction,
+  signCategoryImageUploadAction,
   updateCategoryAction,
 } from "./actions";
+
+// Cloudinary is never reached: signing and verification are faked.
+const cloudinaryMock = vi.hoisted(() => ({
+  inspectImage: vi.fn(),
+  destroyImage: vi.fn(),
+  signImageUpload: vi.fn(),
+}));
+vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 
 const getSession = vi.hoisted(() => vi.fn());
 const nextCache = vi.hoisted(() => ({
@@ -85,6 +96,22 @@ beforeEach(async () => {
   nextCache.updateTag.mockReset();
   nextCache.refresh.mockReset();
   auditFails.value = false;
+  cloudinaryMock.inspectImage.mockReset().mockResolvedValue({
+    ok: true,
+    bytes: 1000,
+    format: "svg",
+    width: 64,
+    height: 64,
+  });
+  cloudinaryMock.destroyImage.mockReset().mockResolvedValue(true);
+  cloudinaryMock.signImageUpload
+    .mockReset()
+    .mockImplementation((publicId: string) => ({
+      uploadUrl: "https://api.cloudinary.com/v1_1/demo/image/upload",
+      cloudName: "demo",
+      publicId,
+      fields: {},
+    }));
   await Promise.all([
     CategoryModel.deleteMany({}),
     AuditLogModel.deleteMany({}),
@@ -121,6 +148,28 @@ const EVERY_ACTION: [string, () => Promise<unknown>][] = [
   ],
   ["move", () => moveCategoryAction(mainB, "up")],
   ["delete", () => deleteCategoryAction(mainB)],
+  [
+    "sign image upload",
+    () => signCategoryImageUploadAction({ categoryId: mainA, slot: "icon" }),
+  ],
+  [
+    "set image",
+    () =>
+      setCategoryImageAction({
+        categoryId: mainA,
+        slot: "icon",
+        publicId: testPublicId(0, mainA, "category"),
+      }),
+  ],
+  [
+    "clear image",
+    () =>
+      setCategoryImageAction({
+        categoryId: mainA,
+        slot: "cover",
+        publicId: null,
+      }),
+  ],
 ];
 
 describe.each([
@@ -146,6 +195,8 @@ describe.each([
       expect(await snapshot()).toEqual(before);
       expect(nextCache.updateTag).not.toHaveBeenCalled();
       expect(nextCache.refresh).not.toHaveBeenCalled();
+      expect(cloudinaryMock.signImageUpload).not.toHaveBeenCalled();
+      expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
     },
   );
 });
@@ -285,6 +336,63 @@ describe("as the admin", () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  it("sign image upload returns a signed id in the category's own folder", async () => {
+    const result = await signCategoryImageUploadAction({
+      categoryId: mainA,
+      slot: "icon",
+    });
+    expect(result).toMatchObject({ ok: true, data: { cloudName: "demo" } });
+    const publicId = result.ok ? result.data.publicId : "";
+    expect(publicId.startsWith(`yg/categories/${mainA}/`)).toBe(true);
+    expect(nextCache.updateTag).not.toHaveBeenCalled();
+  });
+
+  it("sign image upload refuses a bad slot", async () => {
+    expect(
+      await signCategoryImageUploadAction({ categoryId: mainA, slot: "x" }),
+    ).toMatchObject({ ok: false, saved: false });
+    expect(cloudinaryMock.signImageUpload).not.toHaveBeenCalled();
+  });
+
+  it("set image verifies, saves, audits with the session's id, expires categories and refreshes", async () => {
+    const publicId = testPublicId(1, mainA, "category");
+    expect(
+      await setCategoryImageAction({
+        categoryId: mainA,
+        slot: "icon",
+        publicId,
+      }),
+    ).toEqual({ ok: true });
+    expect((await CategoryModel.findById(mainA).lean())?.icon).toBe(publicId);
+    const audit = await AuditLogModel.findOne({}).lean();
+    expect(audit?.action).toBe("category.update");
+    expect(String(audit?.actor)).toBe(ADMIN_ID);
+    expect(nextCache.updateTag).toHaveBeenCalledWith("categories");
+    expect(nextCache.updateTag).not.toHaveBeenCalledWith("products");
+    expect(nextCache.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("set image refuses a rejected upload and changes nothing", async () => {
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: false,
+      reason: "too_large",
+    });
+    const before = await snapshot();
+    const result = await setCategoryImageAction({
+      categoryId: mainA,
+      slot: "cover",
+      publicId: testPublicId(2, mainA, "category"),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      saved: false,
+      errors: { fieldErrors: { publicId: [expect.any(String)] } },
+    });
+    expect(await snapshot()).toEqual(before);
+    expect(nextCache.updateTag).not.toHaveBeenCalled();
+    expect(nextCache.refresh).not.toHaveBeenCalled();
+  });
+
   describe("when the audit write fails", () => {
     beforeEach(() => {
       auditFails.value = true;
@@ -312,6 +420,19 @@ describe("as the admin", () => {
     it("move keeps the new order and still refreshes the tree", async () => {
       const result = await moveCategoryAction(mainB, "up");
       expect(result).toMatchObject({ ok: false, saved: true });
+      expect(nextCache.updateTag).toHaveBeenCalledWith("categories");
+      expect(nextCache.refresh).toHaveBeenCalledOnce();
+    });
+
+    it("set image keeps the image, expires categories and refreshes", async () => {
+      const publicId = testPublicId(3, mainA, "category");
+      const result = await setCategoryImageAction({
+        categoryId: mainA,
+        slot: "icon",
+        publicId,
+      });
+      expect(result).toMatchObject({ ok: false, saved: true });
+      expect((await CategoryModel.findById(mainA).lean())?.icon).toBe(publicId);
       expect(nextCache.updateTag).toHaveBeenCalledWith("categories");
       expect(nextCache.refresh).toHaveBeenCalledOnce();
     });
