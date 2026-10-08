@@ -4,4 +4,4 @@
 // Bump it on ANY change to a view type, a projection or what a reader puts
 // into its entry.
 
-export const CATALOG_CACHE_VERSION = "v3";
+export const CATALOG_CACHE_VERSION = "v4";

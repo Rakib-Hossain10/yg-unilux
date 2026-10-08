@@ -9,16 +9,23 @@ import { getDb } from "../src/lib/db";
 import {
   decideSearchIndexAction,
   definitionContains,
+  describeSearchIndexStatus,
   ensureProductSearchIndex,
   indexedPaths,
   PRODUCT_SEARCH_INDEX_DEFINITION,
   PRODUCT_SEARCH_INDEX_NAME,
+  searchIndexHealth,
   type SearchIndexCollection,
 } from "../src/lib/catalog/search-index";
 import { SPEC_KEYS } from "../src/models/spec-columns";
 import { setupMemoryDb } from "../test/helpers/memory-db";
 
-import { runSearchIndexSync } from "./search-index";
+import {
+  DEFAULT_WAIT_TIMEOUT_MS,
+  describeSearchIndexOutcome,
+  parseSearchIndexArgs,
+  runSearchIndexSync,
+} from "./search-index";
 
 setupMemoryDb("yg_search_index_test");
 
@@ -258,5 +265,222 @@ describe("runSearchIndexSync", () => {
     expect(await runSearchIndexSync(collection, log)).toBe(1);
     expect(lines.join("\n")).toMatch(/details withheld/);
     expect(lines.join("\n")).not.toContain("secret detail");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gate-A L-3: index status -> message and exit code
+// ---------------------------------------------------------------------------
+
+/* A fake whose listing answers come from `answers` in turn (last one repeats). */
+function sequenceCollection(answers: unknown[][]) {
+  let call = 0;
+  const { collection } = fakeCollection([]);
+  collection.listSearchIndexes = () => ({
+    toArray: async () => {
+      const answer = answers[Math.min(call, answers.length - 1)] ?? [];
+      call += 1;
+      return answer;
+    },
+  });
+  return { collection, listings: () => call };
+}
+
+const indexWith = (status: string, extra: Record<string, unknown> = {}) => [
+  {
+    name: PRODUCT_SEARCH_INDEX_NAME,
+    status,
+    latestDefinition: clone(PRODUCT_SEARCH_INDEX_DEFINITION),
+    ...extra,
+  },
+];
+
+describe("search index status mapping", () => {
+  it.each([
+    ["READY", undefined, "ready", 0],
+    ["ready", undefined, "ready", 0],
+    ["FAILED", undefined, "failed", 1],
+    ["failed", undefined, "failed", 1],
+    ["DOES_NOT_EXIST", undefined, "failed", 1],
+    ["DELETING", undefined, "failed", 1],
+    ["PENDING", undefined, "building", 0],
+    ["BUILDING", undefined, "building", 0],
+    ["BUILDING", false, "building", 0],
+    ["BUILDING", true, "serving", 0],
+    ["PENDING", true, "serving", 0],
+    ["STALE", true, "serving", 0],
+    ["SOMETHING_NEW", undefined, "building", 0],
+  ] as const)(
+    "%s (queryable %s) -> %s, exit %i",
+    (status, queryable, health, exitCode) => {
+      const state = { status, queryable };
+      expect(searchIndexHealth(state)).toBe(health);
+      expect(describeSearchIndexStatus(state).exitCode).toBe(exitCode);
+    },
+  );
+
+  it("a --wait that runs out exits 1 for a building AND a serving index", () => {
+    for (const state of [
+      { status: "BUILDING" },
+      { status: "BUILDING", queryable: true },
+    ]) {
+      const report = describeSearchIndexStatus(state, { waitedOut: true });
+      expect(report.exitCode).toBe(1);
+      expect(report.message).toMatch(/^ERROR: timed out waiting; /);
+    }
+  });
+
+  it("an index not listed yet (right after a create) is building, exit 0", () => {
+    expect(searchIndexHealth(undefined)).toBe("building");
+    const report = describeSearchIndexStatus(undefined);
+    expect(report.exitCode).toBe(0);
+    expect(report.message).toMatch(/not listed yet/);
+  });
+
+  it("PENDING/BUILDING warn that Atlas returns NO results (not the regex fallback)", () => {
+    for (const status of ["PENDING", "BUILDING"]) {
+      const { message } = describeSearchIndexStatus({ status });
+      expect(message).toMatch(/^WARNING: /);
+      expect(message).toContain(status);
+      expect(message).toMatch(/NO results/);
+      expect(message).toMatch(/--wait/);
+      expect(message).not.toMatch(/uses the regex fallback until/);
+    }
+  });
+
+  it("FAILED is an error with what to do next", () => {
+    const { message } = describeSearchIndexStatus({ status: "FAILED" });
+    expect(message).toMatch(/^ERROR: .*FAILED.*Atlas UI/);
+  });
+
+  it("a wait that runs out while building exits 1", () => {
+    const report = describeSearchIndexStatus(
+      { status: "BUILDING" },
+      { waitedOut: true },
+    );
+    expect(report.exitCode).toBe(1);
+    expect(report.message).toMatch(/^ERROR: timed out/);
+  });
+
+  it("the create message no longer promises the regex fallback (ADR 0066)", () => {
+    const line = describeSearchIndexOutcome(
+      "create",
+      "products_search",
+      undefined,
+    );
+    expect(line).not.toMatch(/regex fallback/);
+    expect(line).toMatch(/returns no results/);
+  });
+});
+
+describe("runSearchIndexSync status handling", () => {
+  let lines: string[];
+  beforeEach(() => {
+    lines = [];
+  });
+  const log = (line: string) => lines.push(line);
+
+  it("exits 1 when the (up-to-date) index is FAILED", async () => {
+    const { collection } = fakeCollection(indexWith("FAILED"));
+    expect(await runSearchIndexSync(collection, log)).toBe(1);
+    expect(lines.join("\n")).toMatch(
+      /ERROR: search index "products_search" is FAILED/,
+    );
+  });
+
+  it("exits 0 with a warning when the index is BUILDING", async () => {
+    const { collection } = fakeCollection(indexWith("BUILDING"));
+    expect(await runSearchIndexSync(collection, log)).toBe(0);
+    expect(lines.at(-1)).toMatch(/^WARNING: .*BUILDING.*NO results/);
+  });
+
+  it("re-reads the status after a create (pending -> warning)", async () => {
+    const { collection, listings } = sequenceCollection([
+      [],
+      indexWith("PENDING"),
+    ]);
+    expect(await runSearchIndexSync(collection, log)).toBe(0);
+    expect(listings()).toBe(2);
+    expect(lines.at(-1)).toMatch(/PENDING/);
+  });
+
+  it("--wait polls until READY and exits 0", async () => {
+    const { collection, listings } = sequenceCollection([
+      [],
+      indexWith("PENDING"),
+      indexWith("BUILDING"),
+      indexWith("READY"),
+    ]);
+    const sleeps: number[] = [];
+    const code = await runSearchIndexSync(collection, log, {
+      wait: true,
+      timeoutMs: 60_000,
+      intervalMs: 1000,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      now: () => 0,
+    });
+    expect(code).toBe(0);
+    expect(listings()).toBe(4);
+    expect(sleeps).toEqual([1000, 1000]);
+    expect(lines.at(-1)).toMatch(/is READY/);
+  });
+
+  it("--wait stops at FAILED with exit 1", async () => {
+    const { collection } = sequenceCollection([
+      [],
+      indexWith("BUILDING"),
+      indexWith("FAILED"),
+    ]);
+    const code = await runSearchIndexSync(collection, log, {
+      wait: true,
+      timeoutMs: 60_000,
+      intervalMs: 1,
+      sleep: async () => undefined,
+      now: () => 0,
+    });
+    expect(code).toBe(1);
+    expect(lines.at(-1)).toMatch(/FAILED/);
+  });
+
+  it("--wait times out (fake clock) with exit 1", async () => {
+    const { collection } = sequenceCollection([[], indexWith("BUILDING")]);
+    let clock = 0;
+    const code = await runSearchIndexSync(collection, log, {
+      wait: true,
+      timeoutMs: 5000,
+      intervalMs: 1000,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      now: () => clock,
+    });
+    expect(code).toBe(1);
+    expect(clock).toBe(5000);
+    expect(lines.at(-1)).toMatch(/^ERROR: timed out/);
+  });
+});
+
+describe("parseSearchIndexArgs", () => {
+  it("reads --wait and a bounded --timeout in seconds", () => {
+    expect(parseSearchIndexArgs([])).toEqual({
+      wait: false,
+      timeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+    });
+    expect(parseSearchIndexArgs(["--wait", "--timeout=120"])).toEqual({
+      wait: true,
+      timeoutMs: 120_000,
+    });
+    for (const bad of [
+      "--timeout=0",
+      "--timeout=99999",
+      "--timeout=-5",
+      "--timeout=1e3",
+    ]) {
+      expect(parseSearchIndexArgs(["--wait", bad]).timeoutMs).toBe(
+        DEFAULT_WAIT_TIMEOUT_MS,
+      );
+    }
   });
 });

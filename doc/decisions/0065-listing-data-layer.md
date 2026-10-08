@@ -22,3 +22,8 @@ Listing pages (`/products`, `/products/<main>/<sub>`, `/areas/<slug>`) render on
 - Category headers need `description`/`coverImage` in the cached tree (L3/L4; bump `CATALOG_CACHE_VERSION`).
 - Facet labels (`facetValueLabel`, `FACET_LABELS`) are defaults the frontend may restyle.
 - Known nit: a facet with > 50 values could lose valid options to over-precise ones before the cut; unlikely with real data.
+
+## Addendum (2026-10-08, QA gate A fixes)
+- **Unknown filter values never reach a cache key (gate-A M-1).** `narrowToKnownValues` in `listProducts` checks each value against the scope's cached facet values (`knownFilterValues`, same cache entry as `getFacets`, no new keys). Unknown values next to a known one in the same facet are dropped from `params` and the key (OR within a facet, so the result is the same). If every selected value of a facet is unknown, the answer is an uncached empty result (`total: 0`, `pageCount: 1`, no count query) that **keeps** the requested values in `params`, so the chips show which filter emptied the listing. `cat` is not narrowed (bounded by the main categories). L4 should `noindex` these empty filtered listings.
+- **Facet counts keep up to `MAX_KNOWN_FACET_VALUES` (1000) values per facet** with a `truncated` flag; `getFacets` still shows 50. For a cut list, values above the last known one count as possibly real (`above`). The 2-decimal/range check now runs in the pipeline before `$sort`/`$limit` (closes the "Known nit" above).
+- `CATALOG_CACHE_VERSION` is **v4** (facet entry shape changed).

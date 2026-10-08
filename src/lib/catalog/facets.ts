@@ -34,11 +34,20 @@ import {
   scopeMatch,
   type ListingScope,
   type NormalisedScope,
+  type ResolvedScope,
 } from "./listing-scope";
 import type { VisibilityByKey } from "./view";
 
 /** Most options one numeric facet offers (lowest values first). */
 export const MAX_FACET_OPTIONS = 50;
+
+/*
+ * Most distinct values per numeric facet the cached counts keep. Options
+ * show the first MAX_FACET_OPTIONS; the rest let listProducts tell a value
+ * no product has from one beyond the options cap (gate-A M-1). Real data has
+ * a few dozen values; a scope with more is flagged `truncated`.
+ */
+export const MAX_KNOWN_FACET_VALUES = 1000;
 
 /** One selectable value. `value` is the URL token (listing-params). */
 export interface FacetOption {
@@ -64,7 +73,10 @@ export interface ListingFacets {
 /** Counts as cached: plain tuples, no labels or names. */
 interface FacetCounts {
   total: number;
+  /** Every selectable value (ascending, up to MAX_KNOWN_FACET_VALUES). */
   numeric: Partial<Record<NumericFacetParam, [number, number][]>>;
+  /** True when a facet had more values than MAX_KNOWN_FACET_VALUES. */
+  truncated: Partial<Record<NumericFacetParam, boolean>>;
   wattage: [string, number][] | null;
   track: [number, number][] | null;
   /** [main category id, count], same order as the `mains` argument. */
@@ -83,8 +95,14 @@ const countBy = (field: string): PipelineStage.FacetPipelineStage[] => [
   { $sort: { _id: 1 } },
 ];
 
-/* Distinct numbers of one filter per product, inside the facet's bounds. */
-function numericBranch(
+/*
+ * Distinct numbers of one filter per product that the URL parser accepts
+ * back (inside the facet's bounds, at most 2 decimals), checked BEFORE the
+ * sort and limit so over-precise values never take an option's place
+ * (gate-A I-3). One more than MAX_KNOWN_FACET_VALUES is read to detect a
+ * cut.
+ */
+export function numericBranch(
   param: NumericFacetParam,
 ): PipelineStage.FacetPipelineStage[] {
   const { min, max } = NUMERIC_FACET_BOUNDS[param];
@@ -92,10 +110,17 @@ function numericBranch(
   return [
     { $project: { _id: 0, v: { $setUnion: [{ $ifNull: [field, []] }] } } },
     { $unwind: "$v" },
-    { $match: { v: { $gte: min, $lte: max } } },
+    {
+      $match: {
+        v: { $gte: min, $lte: max },
+        $expr: {
+          $and: [{ $isNumber: "$v" }, { $eq: ["$v", { $round: ["$v", 2] }] }],
+        },
+      },
+    },
     { $group: { _id: "$v", n: { $sum: 1 } } },
     { $sort: { _id: 1 } },
-    { $limit: MAX_FACET_OPTIONS },
+    { $limit: MAX_KNOWN_FACET_VALUES + 1 },
   ];
 }
 
@@ -169,11 +194,15 @@ async function readFacetCounts(
   ]);
 
   const numeric: FacetCounts["numeric"] = {};
+  const truncated: FacetCounts["truncated"] = {};
   for (const param of NUMERIC_FACET_PARAMS) {
     if (!publicFacets.has(param)) continue;
-    numeric[param] = rows(result, param)
+    const found = rows(result, param);
+    truncated[param] = found.length > MAX_KNOWN_FACET_VALUES;
+    numeric[param] = found
+      .slice(0, MAX_KNOWN_FACET_VALUES)
       .filter(
-        // Only values the URL parser accepts back can be offered.
+        // The pipeline already checks this; kept as the parser's own word.
         (row) =>
           typeof row._id === "number" && isSelectableNumber(param, row._id),
       )
@@ -182,6 +211,7 @@ async function readFacetCounts(
   return {
     total: countOf(result, "total"),
     numeric,
+    truncated,
     wattage: publicFacets.has("w")
       ? rows(result, "w").map((row) => [String(row._id), row.n])
       : null,
@@ -214,6 +244,66 @@ const option = (
   count: number,
 ): FacetOption => ({ value, label: facetValueLabel(param, value), count });
 
+/* The cached counts of a resolved scope (one entry per scope + visibility). */
+function countsFor(
+  resolved: ResolvedScope,
+  visibility: VisibilityByKey,
+): Promise<FacetCounts> {
+  const mains =
+    resolved.scope.kind === "area" ? mainCategorySubtreesIn(resolved.tree) : [];
+  return cachedFacetCounts(
+    resolved.scope,
+    restrictedSpecKeys(visibility).join(","),
+    resolved.trackApplies,
+    mains.map((main): [string, string[]] => [main.id, main.subtreeIds]),
+  );
+}
+
+/**
+ * The filter values the published products of a scope actually have (from
+ * the same cached entry as getFacets). A selected value outside these can
+ * only match nothing, so listProducts drops it before building a cache key
+ * (gate-A M-1). `above` (numeric facets): when the value list was cut,
+ * values above it are unknown and must be kept; null when it is complete.
+ * A facet that is absent (restricted, or not for this scope) is undefined
+ * or null.
+ */
+export interface KnownFilterValues {
+  numeric: Partial<
+    Record<NumericFacetParam, { values: Set<number>; above: number | null }>
+  >;
+  wattage: Set<string> | null;
+  track: Set<number> | null;
+}
+
+export async function knownFilterValues(
+  resolved: ResolvedScope,
+  visibility: VisibilityByKey,
+): Promise<KnownFilterValues> {
+  const counts = await countsFor(resolved, visibility);
+  const numeric: KnownFilterValues["numeric"] = {};
+  for (const param of NUMERIC_FACET_PARAMS) {
+    const values = counts.numeric[param];
+    if (!values) continue;
+    numeric[param] = {
+      values: new Set(values.filter(([, n]) => n > 0).map(([value]) => value)),
+      above:
+        counts.truncated[param] === true
+          ? (values.at(-1)?.[0] ?? NUMERIC_FACET_BOUNDS[param].min - 1)
+          : null,
+    };
+  }
+  return {
+    numeric,
+    wattage: counts.wattage
+      ? new Set(counts.wattage.filter(([, n]) => n > 0).map(([id]) => id))
+      : null,
+    track: counts.track
+      ? new Set(counts.track.filter(([, n]) => n > 0).map(([size]) => size))
+      : null,
+  };
+}
+
 /**
  * The facets of a scope under `visibility` (read it once with
  * getCatalogVisibility and pass the same value to listProducts). Spec facets
@@ -229,12 +319,7 @@ export async function getFacets(
   if (resolved === null) return { total: 0, groups: [] };
   const mains =
     resolved.scope.kind === "area" ? mainCategorySubtreesIn(resolved.tree) : [];
-  const counts = await cachedFacetCounts(
-    resolved.scope,
-    restrictedSpecKeys(visibility).join(","),
-    resolved.trackApplies,
-    mains.map((main): [string, string[]] => [main.id, main.subtreeIds]),
-  );
+  const counts = await countsFor(resolved, visibility);
 
   const groups: FacetGroup[] = [];
   const push = (param: ListingFacetParam, options: FacetOption[]) => {
@@ -276,7 +361,9 @@ export async function getFacets(
     if (values) {
       push(
         param,
-        values.map(([value, n]) => option(param, String(value), n)),
+        values
+          .slice(0, MAX_FACET_OPTIONS)
+          .map(([value, n]) => option(param, String(value), n)),
       );
     }
   }

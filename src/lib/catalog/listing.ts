@@ -14,8 +14,10 @@ import { ProductModel } from "@/models";
 import { restrictedSpecKeys } from "@/models/spec-columns";
 
 import { CATALOG_CACHE_VERSION } from "./cache-version";
+import { knownFilterValues, type KnownFilterValues } from "./facets";
 import {
   listingFilterKey,
+  NUMERIC_FACET_PARAMS,
   parseListingParams,
   publicSpecFacets,
   serialiseListingParams,
@@ -29,6 +31,7 @@ import {
   resolveScope,
   type ListingScope,
   type NormalisedScope,
+  type ResolvedScope,
 } from "./listing-scope";
 import {
   PRODUCT_CARD_PROJECTION,
@@ -49,8 +52,59 @@ export interface ListingResult {
   page: number;
   /** At least 1, so page 1 of an empty listing is valid (empty state). */
   pageCount: number;
-  /** The params actually applied: restricted, disallowed, unknown dropped. */
+  /**
+   * The params actually applied: restricted, disallowed and unknown values
+   * dropped, and values no product in the scope has dropped when the same
+   * facet keeps another value. When EVERY selected value of a facet is one
+   * no product has, that facet's values are kept as asked (so the chips
+   * explain the empty result) and `total` is 0 (see narrowToKnownValues).
+   */
   params: ListingParams;
+}
+
+/**
+ * Narrows parsed params to the values the scope's published products have
+ * (gate-A M-1). Facet counts cover the whole scope, so a value outside them
+ * can only match nothing:
+ * - within a facet (OR), such values are dropped when another selected value
+ *   is known: the result is the same, and the URL/chips stay canonical;
+ * - when every selected value of a facet is unknown, the AND across facets
+ *   matches nothing: `impossible` is true and the facet keeps its values so
+ *   the visitor sees which filter emptied the listing.
+ * Values above a cut value list (`above`) are kept as unknown-but-possible.
+ * Pure.
+ */
+export function narrowToKnownValues(
+  params: ListingParams,
+  known: KnownFilterValues,
+): { params: ListingParams; impossible: boolean } {
+  const next: ListingParams = { ...params };
+  let impossible = false;
+  const narrow = <T>(selected: T[], isKnown: (value: T) => boolean): T[] => {
+    if (selected.length === 0) return selected;
+    const kept = selected.filter(isKnown);
+    if (kept.length > 0) return kept;
+    impossible = true;
+    return selected;
+  };
+  for (const param of NUMERIC_FACET_PARAMS) {
+    const facet = known.numeric[param];
+    // An absent facet was already dropped by the parse (restricted).
+    if (facet === undefined) continue;
+    next[param] = narrow(
+      params[param],
+      (value) =>
+        facet.values.has(value) ||
+        (facet.above !== null && value > facet.above),
+    );
+  }
+  const wattage = known.wattage;
+  if (wattage !== null) next.w = narrow(params.w, (id) => wattage.has(id));
+  const track = known.track;
+  if (track !== null) {
+    next.track = narrow(params.track, (size) => track.has(size));
+  }
+  return { params: next, impossible };
 }
 
 /**
@@ -166,8 +220,9 @@ const cachedListingPage = unstable_cache(
  * One page of published products in `scope` matching `params`. `params` is
  * re-parsed for this scope and `visibility` (a restricted facet, `track`
  * outside Magnetic Track and `cat` outside area pages are dropped), unknown
- * category slugs are dropped, and a page past the end is answered without
- * a query or a cache entry.
+ * category slugs are dropped, values no product in the scope has are
+ * dropped or answer an empty, uncached result (narrowToKnownValues), and a
+ * page past the end is answered without a query or a cache entry.
  */
 export async function listProducts(
   scope: ListingScope,
@@ -195,13 +250,38 @@ export async function listProducts(
   const cat = resolveCatFilter(resolved.tree, applied.cat);
   applied.cat = cat.slugs;
 
+  // Values no product in the scope has never reach a cache key (gate-A M-1).
+  const narrowed = narrowToKnownValues(
+    applied,
+    await knownFilterValues(resolved, visibility),
+  );
+  if (narrowed.impossible) {
+    // Uncached and without a query: the facet counts already prove it.
+    return {
+      cards: [],
+      total: 0,
+      page: narrowed.params.page,
+      pageCount: 1,
+      params: narrowed.params,
+    };
+  }
+  return readPage(resolved, narrowed.params, cat.ids, visibility);
+}
+
+/* The cached count and page for already narrowed params. */
+async function readPage(
+  resolved: ResolvedScope,
+  applied: ListingParams,
+  catIds: string[],
+  visibility: VisibilityByKey,
+): Promise<ListingResult> {
   const restrictedKey = restrictedSpecKeys(visibility).join(",");
   const filterKey = listingFilterKey({ ...applied, cat: [] });
   const total = await cachedListingCount(
     resolved.scope,
     restrictedKey,
     filterKey,
-    cat.ids,
+    catIds,
   );
   const pageCount = Math.max(1, Math.ceil(total / LISTING_PAGE_SIZE));
   if (total === 0 || applied.page > pageCount) {
@@ -211,7 +291,7 @@ export async function listProducts(
     resolved.scope,
     restrictedKey,
     filterKey,
-    cat.ids,
+    catIds,
     applied.sort,
     applied.page,
   );

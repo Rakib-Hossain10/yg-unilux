@@ -308,39 +308,74 @@ describe("setCategoryImage: input validation", () => {
    * (either slot) are never destroyed (e.g. check `current` for both fields
    * before verifying, or refuse an id stored in the other slot).
    */
-  it.fails(
-    "never destroys the category's own live icon when it is sent as the cover",
-    async () => {
-      const icon = img(main, 4);
-      cloudinaryMock.inspectImage.mockResolvedValue({
-        ok: true,
-        bytes: 500,
-        format: "svg",
-        width: 64,
-        height: 64,
-      });
-      expect(
-        (
-          await setCategoryImage(ACTOR, {
-            categoryId: main,
-            slot: "icon",
-            publicId: icon,
-          })
-        ).ok,
-      ).toBe(true);
-      cloudinaryMock.inspectImage.mockResolvedValue({
-        ok: false,
-        reason: "bad_format",
-      });
-      await setCategoryImage(ACTOR, {
-        categoryId: main,
-        slot: "cover",
-        publicId: icon,
-      });
-      expect((await getCategoryForEdit(main))?.icon).toBe(icon);
-      expect(cloudinaryMock.destroyImage).not.toHaveBeenCalledWith(icon);
-    },
-  );
+  it("never destroys the category's own live icon when it is sent as the cover", async () => {
+    const icon = img(main, 4);
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: true,
+      bytes: 500,
+      format: "svg",
+      width: 64,
+      height: 64,
+    });
+    expect(
+      (
+        await setCategoryImage(ACTOR, {
+          categoryId: main,
+          slot: "icon",
+          publicId: icon,
+        })
+      ).ok,
+    ).toBe(true);
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: false,
+      reason: "bad_format",
+    });
+    cloudinaryMock.inspectImage.mockClear();
+    const refused = await setCategoryImage(ACTOR, {
+      categoryId: main,
+      slot: "cover",
+      publicId: icon,
+    });
+    // Fixed (gate-A L-1): a field error, no verification, no destroy.
+    expect(refused.ok).toBe(false);
+    expect(refused).toMatchObject({
+      errors: { fieldErrors: { publicId: [expect.any(String)] } },
+    });
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+    expect((await getCategoryForEdit(main))?.icon).toBe(icon);
+    expect((await getCategoryForEdit(main))?.coverImage).toBeNull();
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalledWith(icon);
+  });
+
+  it("never destroys the live cover when it is sent as the icon", async () => {
+    const cover = img(main, 6);
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: true,
+      bytes: 500,
+      format: "jpg",
+      width: 640,
+      height: 360,
+    });
+    expect(
+      (
+        await setCategoryImage(ACTOR, {
+          categoryId: main,
+          slot: "cover",
+          publicId: cover,
+        })
+      ).ok,
+    ).toBe(true);
+    cloudinaryMock.inspectImage.mockClear();
+    const refused = await setCategoryImage(ACTOR, {
+      categoryId: main,
+      slot: "icon",
+      publicId: cover,
+    });
+    expect(refused.ok).toBe(false);
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalledWith(cover);
+    expect((await getCategoryForEdit(main))?.coverImage).toBe(cover);
+  });
 });
 
 describe("description", () => {
@@ -425,8 +460,8 @@ describe("cache: an image write expires `categories` (real unstable_cache)", () 
     );
   });
 
-  it("the cache version is v3 (the view gained icon/cover/description)", () => {
-    expect(CATALOG_CACHE_VERSION).toBe("v3");
+  it("the cache version is v4 (v3: icon/cover/description; v4: gate-A facet counts)", () => {
+    expect(CATALOG_CACHE_VERSION).toBe("v4");
   });
 });
 

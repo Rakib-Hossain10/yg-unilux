@@ -662,7 +662,11 @@ describe("pagination", () => {
       page: 3,
       pageCount: 2,
     });
-    expect(aggregate).not.toHaveBeenCalled();
+    // Only the facet counts (gate-A M-1 value check) aggregate; no card read.
+    const pipelines = aggregate.mock.calls.map((call) =>
+      JSON.stringify(call[0]),
+    );
+    expect(pipelines.filter((p) => p.includes('"$skip"'))).toEqual([]);
     expect(cache.calls.map((c) => c.name)).not.toContain("listing-page");
   });
 
@@ -780,7 +784,9 @@ describe("cache keys", () => {
         parseListingParams(new URLSearchParams(query), ALL_OPTIONS),
         visibility,
       );
-      return cache.calls.filter((c) => c.name.startsWith("listing-"));
+      return cache.calls.filter(
+        (c) => c.name === "listing-count" || c.name === "listing-page",
+      );
     };
     const a = await raw("cct=4000,3000&junk=1&cat=office&track=10&page=1");
     const b = await raw("cct=3000&cct=4000&cct=3000&cct=bad");

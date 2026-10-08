@@ -141,6 +141,9 @@ beforeAll(async () => {
       slug: "bolt-bl-200",
       family: "Bolt",
       modelCode: "BL-200",
+      // Lists the product under both "Recessed" categories, so their names
+      // are category hits (empty subtrees are hidden, gate-A I-2).
+      extraCategories: [cat.recessed, cat.downRecessed],
       variants: [{ modelNo: "BL-200x" }],
     },
     {
@@ -484,6 +487,14 @@ describe("searchCatalog (fallback path)", () => {
   });
 });
 
+/* Lists Arc Mini (published) under extra categories, so they are hits. */
+async function listUnder(ids: Types.ObjectId[]): Promise<void> {
+  await ProductModel.updateOne(
+    { _id: prod.arcMini },
+    { $set: { extraCategories: ids } },
+  );
+}
+
 describe("category matches", () => {
   it("matches names case-insensitively with the main-first path", async () => {
     const { categories } = await searchCatalog("RECESSED");
@@ -511,16 +522,20 @@ describe("category matches", () => {
       "Spot Lights",
       "Down Lights",
     ]);
-    await CategoryModel.create([
+    const glow = await CategoryModel.create([
       { name: "Alpha Glow", slug: "alpha-glow", parent: null, order: 20 },
       { name: "Glow Strip", slug: "glow-strip", parent: null, order: 21 },
+      { name: "Glow Empty", slug: "glow-empty", parent: null, order: 22 },
     ]);
+    await listUnder(glow.slice(0, 2).map((c) => c._id));
     try {
+      // "Glow Empty" has no published product: hidden (gate-A I-2).
       expect(
         (await searchCatalog("glow")).categories.map((c) => c.name),
       ).toEqual(["Glow Strip", "Alpha Glow"]);
     } finally {
       await CategoryModel.deleteMany({ slug: /glow/ });
+      await listUnder([]);
     }
   });
 
@@ -531,13 +546,15 @@ describe("category matches", () => {
       parent: null,
       order: 10 + n,
     }));
-    await CategoryModel.create(extra);
+    const created = await CategoryModel.create(extra);
+    await listUnder(created.map((c) => c._id));
     try {
       expect((await searchCatalog("qux")).categories).toHaveLength(
         MAX_CATEGORY_HITS,
       );
     } finally {
       await CategoryModel.deleteMany({ slug: /^qux-/ });
+      await listUnder([]);
     }
   });
 });

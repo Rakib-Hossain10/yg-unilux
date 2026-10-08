@@ -611,11 +611,26 @@ export async function signCategoryImageUpload(
   );
 }
 
+/* The refusal when an id is already this category's image in the other slot. */
+const IMAGE_IN_OTHER_SLOT: Record<CategoryImageSlot, string> = {
+  icon: "This image is already the cover. Upload a separate icon.",
+  cover: "This image is already the icon. Upload a separate cover.",
+};
+
+/* True when `publicId` is stored in either image slot of the category. */
+function isStoredImage(
+  category: Pick<Category, "icon" | "coverImage">,
+  publicId: string,
+): boolean {
+  return category.icon === publicId || category.coverImage === publicId;
+}
+
 /**
  * Sets or clears a category's icon or cover. A new id must be an upload in
  * this category's own folder that passes verification (exists, size, the
  * slot's formats); a rejected upload is deleted from Cloudinary and nothing
- * is saved. The replaced image is not deleted (ADR 0045 point 5): the
+ * is saved. An id already stored in either slot is refused without any
+ * check, so a live image is never destroyed (gate-A L-1). The replaced image is not deleted (ADR 0045 point 5): the
  * orphan sweep removes it once nothing references it. Only the public tree
  * shows these images, so the tag is `categories`. The audit entry names the
  * field only, never the id.
@@ -638,12 +653,18 @@ export async function setCategoryImage(
   const selfId = new ObjectId(categoryId);
 
   await connectDb();
+  // Both slots: an id already stored on this category is live, so it is
+  // never verified as a new upload (a refused one would be destroyed).
   const current = await CategoryModel.findById(selfId, {
-    [field]: 1,
+    icon: 1,
+    coverImage: 1,
   }).lean<Pick<Category, "icon" | "coverImage"> | null>();
   if (!current) return formError(NOT_FOUND);
   if ((current[field] ?? null) === publicId) {
     return unchanged({ id: categoryId, slot, publicId });
+  }
+  if (publicId !== null && isStoredImage(current, publicId)) {
+    return fieldError("publicId", IMAGE_IN_OTHER_SLOT[slot]);
   }
 
   if (publicId !== null) {

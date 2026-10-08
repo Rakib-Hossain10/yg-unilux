@@ -129,6 +129,8 @@ const CACHED_MODULES = [
   "areas.ts",
   "category-path.ts",
   "search.ts",
+  // Gate-A fix I-2: published counts per category (search hides empty ones).
+  "category-counts.ts",
   // Imported by search.ts (index name); also by the CLI script.
   "search-index.ts",
   "cache-version.ts",

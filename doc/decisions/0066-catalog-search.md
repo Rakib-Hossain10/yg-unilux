@@ -18,3 +18,8 @@
 - Not yet checked on a real Atlas cluster (analyzer in autocomplete, maxGrams 20, document mapping): manual check after the user runs the script.
 - Category hits may include categories with no published products (decide in L6 / gate A).
 - Add a Vercel Firewall rate limit on `/api/catalog/search` at launch.
+
+## Addendum (2026-10-08, QA gate A fixes)
+- **Zero-hit Atlas answers are never cached (gate-A L-2):** an empty answer is asked again on the next request, so search becomes live as soon as the index is READY, and junk queries add no cache entry. Cost: one uncached `$search` (limit 12) per zero-hit request; the Firewall rate limit stays on the launch list.
+- **Categories with no published product in their subtree are hidden from search (gate-A I-2):** a draft-only category name would reveal an unreleased line. `listPublishedCategoryCounts` (`category-counts.ts`, one cache entry, tags `products` + `categories`, visibility-independent) feeds `categoriesWithPublished` (a category counts through any descendant; main and extra categories count). Resolves the Consequences note above. The mega-menu decides separately (L6).
+- **`db:search-index` reports health (gate-A L-3):** READY exit 0; FAILED / DOES_NOT_EXIST / DELETING exit 1; PENDING / BUILDING / not listed yet warn (exit 0), STALE or any queryable rebuild warns as "serving". `--wait [--timeout=<1..3600 s>, default 600]` polls until READY and exits 1 on FAILED or timeout (building or serving). Run as `npm run db:search-index -- --wait`.

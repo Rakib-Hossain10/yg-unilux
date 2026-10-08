@@ -621,27 +621,20 @@ describe("cache-key bounding (junk-param flood)", () => {
   });
 
   /*
-   * FINDING M-1: any in-range number is accepted, offered by the facets or
-   * not, and the COUNT reader is cached per filter string before the result
-   * is known. cct alone has 1.9 M valid tokens (1000-20000, 2 decimals) and
-   * 12 may be combined, times the other facets and every scope, so a crawler
-   * can create count entries (and cache-miss DB queries) without bound.
-   * Flip to `it` once values outside the scope's facet options are dropped
-   * (or short-circuit to an empty, uncached result) before keying.
+   * FINDING M-1 (fixed): values outside the scope's facet values are dropped
+   * (mixed with a known value) or answer an empty, uncached result (alone)
+   * before any key is built.
    */
-  it.fails(
-    "in-range values that no product has do not create new count entries",
-    async () => {
-      for (let i = 0; i < 200; i++) {
-        await listProducts(
-          { kind: "all" },
-          parseFor({ cct: String(1000 + i * 7 + 0.25) }, visibility),
-          visibility,
-        );
-      }
-      expect(distinctKeys("listing-count").size).toBeLessThanOrEqual(1);
-    },
-  );
+  it("in-range values that no product has do not create new count entries", async () => {
+    for (let i = 0; i < 200; i++) {
+      await listProducts(
+        { kind: "all" },
+        parseFor({ cct: String(1000 + i * 7 + 0.25) }, visibility),
+        visibility,
+      );
+    }
+    expect(distinctKeys("listing-count").size).toBeLessThanOrEqual(1);
+  });
 
   it("search cache keys: case, width and spacing variants of one query share one key", async () => {
     for (const q of [
@@ -776,16 +769,29 @@ describe("drafts never surface", () => {
   });
 
   /*
-   * Gate-A question (ADR 0066 consequence): a category that holds only drafts
-   * (or nothing) is still a category hit, so its NAME surfaces in search
-   * before launch of its products. Documented, not an `it.fails`: the
-   * recommendation is in the report (hide categories with no published
-   * product in their subtree).
+   * I-2 (decided by the main session, fixed): a category whose subtree holds
+   * only drafts (or nothing) is not a category hit, so an unreleased line's
+   * name never surfaces in search.
    */
-  it("documents: a draft-only category IS returned by category search today", async () => {
+  it("a draft-only category is NOT returned by category search", async () => {
     const result = await searchCatalog("zephyr");
     expect(result.products).toEqual([]);
-    expect(result.categories.map((c) => c.slug)).toEqual(["zephyr-collection"]);
+    expect(result.categories).toEqual([]);
+    const response = await getAll("?q=zephyr");
+    expect(await response.text()).not.toContain("Zephyr Collection");
+  });
+
+  it("a category with a published product (main or extra, or in its subtree) IS returned", async () => {
+    // Recessed: Arc's main category; Spot Lights: its parent; 10mm: Cove's extra.
+    expect(
+      (await searchCatalog("recessed")).categories.map((c) => c.slug),
+    ).toEqual(["recessed"]);
+    expect((await searchCatalog("spot")).categories.map((c) => c.slug)).toEqual(
+      ["spot-lights"],
+    );
+    expect((await searchCatalog("10mm")).categories.map((c) => c.slug)).toEqual(
+      ["10mm"],
+    );
   });
 });
 

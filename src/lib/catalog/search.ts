@@ -16,6 +16,10 @@ import { modelNoKey } from "@/models/product-constants";
 
 import { CATALOG_CACHE_VERSION } from "./cache-version";
 import { listPublicCategories, type PublicCategoryView } from "./categories";
+import {
+  categoriesWithPublished,
+  listPublishedCategoryCounts,
+} from "./category-counts";
 import { PRODUCT_SEARCH_INDEX_NAME } from "./search-index";
 import {
   PRODUCT_CARD_PROJECTION,
@@ -40,7 +44,7 @@ export interface SearchProductHit extends ListingCardView {
   matchedModelNo: string | null;
 }
 
-/** A category whose name contains the query. */
+/** A category whose name contains the query (and that lists a product). */
 export interface SearchCategoryHit {
   id: string;
   name: string;
@@ -283,6 +287,19 @@ function describeError(error: unknown): string {
     .join(" ");
 }
 
+/*
+ * Thrown inside the cache when Atlas answers with no hit, so a zero-hit
+ * answer is never cached (gate-A L-2): while the index is still PENDING or
+ * BUILDING, Atlas answers every query with nothing, and a cached empty
+ * answer would outlive the build until the next catalog write.
+ */
+class AtlasSearchNoHits extends Error {
+  override readonly name = "AtlasSearchNoHits";
+  constructor() {
+    super("Atlas Search found nothing");
+  }
+}
+
 async function readAtlasSearch(key: string): Promise<SearchProductHit[]> {
   await connectDb();
   let docs: SearchDoc[];
@@ -293,13 +310,16 @@ async function readAtlasSearch(key: string): Promise<SearchProductHit[]> {
   } catch (error) {
     throw new AtlasSearchUnavailable(describeError(error));
   }
+  if (docs.length === 0) throw new AtlasSearchNoHits();
   return docs.map((doc) => toHit(doc, key));
 }
 
 /*
  * Keyed by the lowercased normalised query (results are case-insensitive)
  * and CATALOG_CACHE_VERSION. Product writes expire `products`; `categories`
- * as well, so a tree change refreshes every search answer.
+ * as well, so a tree change refreshes every search answer. Only answers
+ * with at least one hit are stored (zero hits throw AtlasSearchNoHits), so
+ * junk queries add no entry either.
  */
 const cachedAtlasSearch = unstable_cache(
   readAtlasSearch,
@@ -316,14 +336,17 @@ async function readFallbackSearch(key: string): Promise<SearchProductHit[]> {
 }
 
 /**
- * Published products for a normalised query. Atlas results are cached; the
- * regex fallback is not (a degraded mode must not outlive the outage in the
- * cache) and logs one warning without the query text.
+ * Published products for a normalised query. Atlas results with hits are
+ * cached; a zero-hit Atlas answer is not (it costs one uncached `$search`
+ * per request); the regex fallback is not cached either (a degraded mode
+ * must not outlive the outage in the cache) and logs one warning without
+ * the query text.
  */
 async function searchProducts(key: string): Promise<SearchProductHit[]> {
   try {
     return await cachedAtlasSearch(key);
   } catch (error) {
+    if (error instanceof AtlasSearchNoHits) return [];
     if (!(error instanceof AtlasSearchUnavailable)) throw error;
     console.warn(
       `Catalog search: $search failed (${error.reason}); using the regex fallback (ADR 0006).`,
@@ -356,15 +379,19 @@ function pathOf(
 
 /**
  * Categories whose name contains the query (case-insensitive), name prefixes
- * first, then tree order. Pure over the given tree.
+ * first, then tree order. Only ids in `listed` are matched (categories whose
+ * subtree holds a published product, gate-A I-2); paths still use the whole
+ * tree. Pure over the given tree.
  */
 export function matchCategories(
   tree: readonly PublicCategoryView[],
   query: string,
+  listed: ReadonlySet<string>,
 ): SearchCategoryHit[] {
   const needle = query.toLocaleLowerCase("en");
   const byId = new Map(tree.map((category) => [category.id, category]));
   return tree
+    .filter((category) => listed.has(category.id))
     .map((category, index) => {
       const name = category.name.normalize("NFKC").toLocaleLowerCase("en");
       const at = name.indexOf(needle);
@@ -393,9 +420,18 @@ export async function searchCatalog(raw: unknown): Promise<SearchResult> {
   const query = normaliseSearchQuery(raw);
   if (query === "") return { query: "", products: [], categories: [] };
   const key = query.toLocaleLowerCase("en");
-  const [products, tree] = await Promise.all([
+  const [products, tree, counts] = await Promise.all([
     searchProducts(key),
     listPublicCategories(),
+    listPublishedCategoryCounts(),
   ]);
-  return { query, products, categories: matchCategories(tree, key) };
+  return {
+    query,
+    products,
+    categories: matchCategories(
+      tree,
+      key,
+      categoriesWithPublished(tree, counts),
+    ),
+  };
 }
