@@ -57,7 +57,16 @@ const EXPECTED_INDEXES: Record<string, ExpectedIndex[]> = {
   Area: [{ key: { slug: 1 }, unique: true }],
   // Better Auth's indexes are created separately (task 5).
   User: [],
-  AccessRequest: [{ key: { status: 1, createdAt: -1 } }],
+  AccessRequest: [
+    { key: { status: 1, createdAt: -1 } },
+    // Phase 5 P3 (ADR 0069): one pending request per email; customer page.
+    {
+      key: { email: 1, status: 1 },
+      unique: true,
+      partialFilterExpression: { status: "pending" },
+    },
+    { key: { user: 1, createdAt: -1 } },
+  ],
   DownloadLog: [
     { key: { user: 1, downloadedAt: -1 } },
     { key: { product: 1, downloadedAt: -1 } },

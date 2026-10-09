@@ -118,3 +118,30 @@ export async function auditAndFinish<T>(
   }
   return { ok: true, data, tags };
 }
+
+/**
+ * Like auditAndFinish(), for a write whose result can't be produced again:
+ * a temporary password or a copy-once invite link exists only in `data`,
+ * and every earlier link is already dead. Dropping `data` on a failed audit
+ * write would lose it, so this returns the success with
+ * `auditFailed: true` instead (logged like auditAndFinish); the UI shows
+ * AUDIT_FAILED_MESSAGE next to the result. ADR 0070's exception to ADR 0035
+ * point 5.
+ */
+export async function auditKeepingData<T extends object>(
+  audit: AuditInput,
+  data: T,
+  tags: CatalogTag[],
+): Promise<ServiceResult<T & { auditFailed: boolean }>> {
+  let auditFailed = false;
+  try {
+    await recordAudit(audit);
+  } catch (error) {
+    const kind = error instanceof Error ? error.name : typeof error;
+    console.error(
+      `[admin] audit write failed for ${audit.action} on ${audit.target.type} ${audit.target.id}: ${kind}`,
+    );
+    auditFailed = true;
+  }
+  return { ok: true, data: { ...data, auditFailed }, tags };
+}

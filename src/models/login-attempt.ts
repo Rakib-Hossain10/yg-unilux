@@ -26,6 +26,8 @@ export interface LoginAttempt {
   nextAllowedAt?: Date;
   /** Whether the most recent attempt was let through (set by every counter). */
   lastAttemptAllowed?: boolean;
+  /** Locks only (acquireLock): a random token naming the current holder. */
+  owner?: string;
 }
 
 const loginAttemptSchema = new Schema<LoginAttempt>(
@@ -46,6 +48,8 @@ const loginAttemptSchema = new Schema<LoginAttempt>(
     // stores its latest decision (src/lib/rate-limit.ts).
     nextAllowedAt: { type: Date },
     lastAttemptAllowed: { type: Boolean },
+    // Locks only: the holder's random token (src/lib/rate-limit.ts).
+    owner: { type: String, maxlength: 64 },
   },
   // Counters are updated atomically by src/lib/rate-limit.ts and
   // src/lib/sign-in-limit.ts; no

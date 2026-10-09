@@ -210,6 +210,18 @@ describe("audit log", () => {
     ).toEqual(["action", "actor"]);
   });
 
+  it("lets the cron.* run entry go without an actor (Phase 5), admin actions not", async () => {
+    expect(
+      await invalidPaths(AuditLogModel, {
+        action: "cron.expiry_reminders",
+        meta: { sent: 2 },
+      }),
+    ).toEqual([]);
+    expect(
+      await invalidPaths(AuditLogModel, { action: "customer.ban" }),
+    ).toEqual(["actor"]);
+  });
+
   it("rejects an action outside the shared vocabulary", async () => {
     expect(
       await invalidPaths(AuditLogModel, entry({ action: "product.explode" })),

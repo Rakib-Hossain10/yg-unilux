@@ -1,6 +1,7 @@
 // The ONE place that writes our own fields on Better Auth's users
-// (mustChangePassword, accessExpiresAt, company, country, deviceEpoch and the
-// Phase 5 invite/password dates) and deletes a user's reset/invite links.
+// (mustChangePassword, accessExpiresAt, company, country, deviceEpoch, the
+// Phase 5 invite/password dates and the admin-edited display name) and
+// deletes a user's reset/invite links.
 
 import "server-only";
 
@@ -69,6 +70,16 @@ const validDate = z.date().refine((d) => !Number.isNaN(d.getTime()));
  */
 export const accountFieldsSchema = z
   .object({
+    /**
+     * The display name (a Better Auth core field), edited by the admin on
+     * the customer page (P3). Better Auth requires it: never null or empty.
+     */
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[^\r\n\t\x00-\x1f\x7f]*$/),
     mustChangePassword: z.boolean(),
     /** End of datasheet access (end of a UTC day, plan Q5); null = no expiry. */
     accessExpiresAt: validDate.nullable(),

@@ -60,4 +60,40 @@ describe("one writer for our user fields", () => {
   it("no server code calls auth.api.adminUpdateUser (it would bypass the allowlist)", () => {
     expect(filesMatching(/\.adminUpdateUser\s*\(/)).toEqual([]);
   });
+
+  it("nothing writes users through Mongoose (UserModel is read-only)", () => {
+    // Write methods on the read-only model, or its raw collection.
+    const mongooseWrite = new RegExp(
+      [
+        String.raw`UserModel\s*\.\s*(create|insertMany|insertOne|updateOne|updateMany|replaceOne|deleteOne|deleteMany|findOneAndUpdate|findByIdAndUpdate|findOneAndDelete|findByIdAndDelete|findOneAndReplace|findOneAndRemove|bulkWrite|bulkSave)\s*\(`,
+        String.raw`UserModel\s*\.\s*collection\b`,
+        String.raw`new\s+UserModel\s*\(`,
+      ].join("|"),
+    );
+    expect(filesMatching(mongooseWrite)).toEqual([]);
+  });
+
+  it("nothing writes the raw users collection outside Better Auth", () => {
+    expect(
+      filesMatching(
+        /collection\(\s*["']users["']\s*\)\s*\.\s*(insert|update|replace|delete|findOneAnd|bulkWrite)/,
+      ),
+    ).toEqual([]);
+  });
+
+  it("the Phase 5 customer services use the allowed writers only", () => {
+    const services = files.filter((f) =>
+      [
+        "src/lib/admin/customers.ts",
+        "src/lib/admin/access-requests.ts",
+        "src/lib/access-requests.ts",
+      ].includes(f.name),
+    );
+    expect(services).toHaveLength(3);
+    for (const service of services) {
+      // Better Auth admin endpoints or account-writes.ts, nothing else.
+      expect(service.text, service.name).not.toMatch(/internalAdapter\s*\./);
+      expect(service.text, service.name).not.toMatch(/\.adapter\s*\./);
+    }
+  });
 });

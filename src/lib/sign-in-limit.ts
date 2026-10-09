@@ -1,7 +1,8 @@
 // Rate limits for the auth endpoints (ADR 0022): sign-in (known devices, per
 // email + network, per-email slow-down), password-reset requests, and the HMAC'd
-// storage for Better Auth's own per-network limiter. The only rate-limit code
-// that sees an IP; banned on whistleblower routes by ESLint.
+// storage for Better Auth's own per-network limiter, plus the public
+// access-request form (ADR 0069). The only rate-limit code that sees an IP;
+// banned on whistleblower routes by ESLint.
 
 import "server-only";
 
@@ -365,6 +366,82 @@ export async function consumePasswordChange(
     };
   }
   return { allowed: true, retryAfterSeconds: 0, audit: null };
+}
+
+/**
+ * Public access-request form, per network: 5 per 15 minutes. Plan Q3 asked
+ * for 5 per hour, but every IP-derived record must be gone within 15
+ * minutes (ADR 0022), so the window is 15 minutes (ADR 0069).
+ */
+export const ACCESS_REQUEST_NETWORK = {
+  limit: 5,
+  windowSeconds: 15 * 60,
+} as const satisfies RateLimitRule;
+
+/** Public access-request form, per email: 3 per day (plan Q3). No IP inside. */
+export const ACCESS_REQUEST_EMAIL = {
+  limit: 3,
+  windowSeconds: 24 * 60 * 60,
+} as const satisfies RateLimitRule;
+
+/** Which access-request limit refused a submission (never logged with data). */
+export type AccessRequestGate =
+  | { allowed: true }
+  | {
+      allowed: false;
+      namespace: "access-request-net" | "access-request-email";
+    };
+
+/*
+ * The network key of the access-request form: unlike the sign-in keys it is
+ * NOT bound to the email, because it must cap one network across all the
+ * addresses it types. A request without the trusted header (local dev,
+ * tests) falls back to a per-email "unknown network" bucket, so stripping
+ * the header never escapes a limit, and dev/e2e runs don't share one bucket.
+ */
+function accessRequestNetworkDigest(
+  emailDigest: string,
+  headers: HeaderSource,
+): string {
+  const network = clientNetwork(headers);
+  return ipHmac(
+    network === null
+      ? `access-request\n${UNKNOWN_NETWORK}\n${emailDigest}`
+      : `access-request\n${network}`,
+  );
+}
+
+/**
+ * Call BEFORE storing a public access request; store it only if `allowed`.
+ * 1. per network: ACCESS_REQUEST_NETWORK;
+ * 2. per email: ACCESS_REQUEST_EMAIL. A refusal here still costs the network
+ *    its attempt (as with resets), so polling with new emails isn't free.
+ * The caller answers a refusal exactly like a success (ADR 0069).
+ * Throws RateLimitUnavailableError or EnvError like consumeSignIn().
+ */
+export async function consumeAccessRequest(
+  request: AttemptBase,
+): Promise<AccessRequestGate> {
+  const emailDigest = hashEmail(request.email);
+  // buildKey wants a 64-hex digest: the network HMAC stands alone here.
+  const network = await consume(
+    buildKey(
+      "access-request-net",
+      accessRequestNetworkDigest(emailDigest, request.headers),
+    ),
+    ACCESS_REQUEST_NETWORK,
+  );
+  if (!network.allowed) {
+    return { allowed: false, namespace: "access-request-net" };
+  }
+  const perEmail = await consume(
+    buildKey("access-request-email", emailDigest),
+    ACCESS_REQUEST_EMAIL,
+  );
+  if (!perEmail.allowed) {
+    return { allowed: false, namespace: "access-request-email" };
+  }
+  return { allowed: true };
 }
 
 /** The rule Better Auth passes to its limiter storage (seconds, requests). */

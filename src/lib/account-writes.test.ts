@@ -69,6 +69,7 @@ beforeEach(() => stubEnv());
 describe("updateAccountFields: every allowlisted field is really stored", () => {
   const at = new Date("2026-10-09T10:00:00.000Z");
   const cases: Array<[keyof AccountFields, AccountFields]> = [
+    ["name", { name: "AW Renamed" }],
     ["mustChangePassword", { mustChangePassword: false }],
     ["accessExpiresAt", { accessExpiresAt: at }],
     ["company", { company: "Acme Lighting" }],
@@ -126,6 +127,11 @@ describe("updateAccountFields: refusals", () => {
     ["a newline in company", { company: "Acme\nBcc: x" }],
     ["a control character in country", { country: "HK\u0007" }],
     ["an overlong company", { company: "a".repeat(201) }],
+    ["an empty name", { name: "" }],
+    ["a whitespace-only name", { name: "   " }],
+    ["a null name", { name: null }],
+    ["a newline in name", { name: "A\nB" }],
+    ["an overlong name", { name: "a".repeat(201) }],
     ["an empty patch", {}],
     ["a patch of undefined values", { company: undefined }],
   ])("%s", async (_label, patch) => {
