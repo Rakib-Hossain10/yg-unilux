@@ -8,6 +8,10 @@
 @import "tailwindcss";
 /* Product page motion pass (P8): highlight, crossfades, lightbox, reveal. */
 @import "../components/motion/product/product-motion.css";
+/* Listing + header motion pass (4b L7): results crossfade, card morph crop,
+   long-facet disclosure, mega-menu reveal, search overlay + scroll lock. */
+@import "../components/motion/listing/listing-motion.css";
+@import "../components/motion/menu/menu-motion.css";
 
 /* State variants the shadcn components use (data-open, data-checked, ...).
    Copied from the shadcn package so we do not ship the package itself.
@@ -121,6 +125,16 @@
     outline-offset: 3px;
   }
 
+  /* Cormorant's default figures are old-style: "01", "13" and model codes
+     read as letters ("Listing oI"). The display face always sets lining
+     figures (ui-reviewer gate C 4b, M-1). The --tw variable keeps them when
+     a numeric utility such as tabular-nums is added to the same element
+     (Tailwind composes font-variant-numeric from these variables). */
+  .font-display {
+    --tw-numeric-figure: lining-nums;
+    font-variant-numeric: lining-nums;
+  }
+
   ::selection {
     background-color: var(--color-ink);
     color: var(--color-paper);
@@ -132,6 +146,22 @@
   ::before,
   ::after {
     border-color: var(--border);
+  }
+}
+
+/* Listing filter sheet (src/components/site/listing/filter-sheet.tsx): the
+   page behind the open modal sheet does not scroll. */
+html:has(.filter-sheet:modal) {
+  overflow: hidden;
+}
+
+/* Small-screen menu (src/components/site/mobile-menu.tsx): while it is open
+   the page behind its scrim does not scroll (the panel scrolls on its own,
+   overscroll-contain). Only below lg, where the menu is shown: a menu left
+   open across a resize to desktop must not freeze the page. */
+@media (width < 64rem) {
+  html:has(details[data-slot="mobile-menu"][open]) {
+    overflow: hidden;
   }
 }
 

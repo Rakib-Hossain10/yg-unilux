@@ -1,19 +1,26 @@
 "use server";
 
-// Server Actions for the categories module: create, edit, move up/down and
-// delete. Each one: requireAdmin() first → the T4 service with the admin's id
+// Server Actions for the categories module: create, edit, move up/down,
+// delete, and the icon / cover uploaders (sign an upload, set or clear). Each one: requireAdmin() first → the T4 service with the admin's id
 // → revalidate the returned tags on every branch → redirect last (ADR 0035).
 
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 
-import type { ActionResult } from "@/components/admin/action-result";
+import type {
+  ActionData,
+  ActionFailure,
+  ActionResult,
+} from "@/components/admin/action-result";
 import { CATEGORIES_PATH } from "@/components/admin/category-paths";
+import type { SignedImageUpload } from "@/components/admin/image-upload";
 import { withNotice } from "@/components/admin/save-notice";
 import {
   createCategory,
   deleteCategory,
   moveCategory,
+  setCategoryImage,
+  signCategoryImageUpload,
   updateCategory,
 } from "@/lib/admin/categories";
 import type { ServiceResult } from "@/lib/admin/write-result";
@@ -34,7 +41,9 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
  * `saved` tells the form the write happened (audit failure) so it does not
  * offer to submit the same values again.
  */
-function failure(result: ServiceResult<unknown> & { ok: false }): ActionResult {
+function failure(
+  result: ServiceResult<unknown> & { ok: false },
+): ActionFailure {
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
@@ -100,4 +109,35 @@ export async function deleteCategoryAction(id: unknown): Promise<ActionResult> {
     return failure(result);
   }
   redirect(withNotice(CATEGORIES_PATH, "deleted"));
+}
+
+/**
+ * Signs one direct browser upload of a category's icon or cover
+ * (`{categoryId, slot}`), under the category's own folder and limited to the
+ * slot's formats (ADR 0045). Nothing is written (no tags).
+ */
+export async function signCategoryImageUploadAction(
+  input: unknown,
+): Promise<ActionData<SignedImageUpload>> {
+  const viewer = await requireAdmin();
+  const result = await signCategoryImageUpload(viewer.user.id, input);
+  revalidateCatalogInAction(result.tags);
+  if (!result.ok) return failure(result);
+  return { ok: true, data: result.data };
+}
+
+/**
+ * Sets (`{categoryId, slot, publicId}`, a verified new upload) or clears
+ * (`publicId: null`) a category's icon or cover. Stays on the edit page;
+ * refresh() re-renders it with the stored image.
+ */
+export async function setCategoryImageAction(
+  input: unknown,
+): Promise<ActionResult> {
+  const viewer = await requireAdmin();
+  const result = await setCategoryImage(viewer.user.id, input);
+  revalidateCatalogInAction(result.tags);
+  if (result.tags.length > 0) refresh();
+  if (!result.ok) return failure(result);
+  return { ok: true };
 }

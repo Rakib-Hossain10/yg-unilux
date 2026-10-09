@@ -32,6 +32,23 @@ export const CLOUDINARY_PRODUCT_FOLDER = "yg/products";
 /** Cloudinary folder for area images: `yg/areas/<areaId>/<uuid>`. */
 export const CLOUDINARY_AREA_FOLDER = "yg/areas";
 
+/**
+ * Cloudinary folder for category images, the mega-menu icon and the cover:
+ * `yg/categories/<categoryId>/<uuid>` (Phase 4b, L3). Both slots share it;
+ * which slot an id fills is stored on the category.
+ */
+export const CLOUDINARY_CATEGORY_FOLDER = "yg/categories";
+
+/**
+ * Formats a category icon may be, as Cloudinary reports them. SVG is stored
+ * on Cloudinary only and always delivered as a raster (an explicit f_png or
+ * f_webp transform): never inline SVG markup in our HTML (Phase 4b Q7).
+ */
+export const CATEGORY_ICON_FORMATS = ["png", "svg", "webp"] as const;
+
+/** Formats a category cover image may be. */
+export const CATEGORY_COVER_FORMATS = ["jpg", "png", "webp"] as const;
+
 /** Most images one product may have (gallery, dimension and installation). */
 export const MAX_PRODUCT_IMAGES = 30;
 

@@ -13,7 +13,6 @@ import { connectDb } from "@/lib/db";
 import { CATALOG_TAGS } from "@/lib/revalidate";
 import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";
 import { AreaModel, ProductModel } from "@/models";
-import type { Area } from "@/models/area";
 import {
   restrictedSpecKeys,
   SPEC_KEYS,
@@ -23,14 +22,15 @@ import {
 import { CATALOG_CACHE_VERSION } from "./cache-version";
 
 import {
+  PUBLIC_AREA_PROJECTION,
   publicProductProjection,
+  toPublicAreaView,
   toPublicProductView,
+  type PublicAreaDoc,
   type PublicAreaView,
   type PublicProductDoc,
   type PublicProductView,
 } from "./view";
-
-type AreaDoc = Pick<Area, "_id" | "name" | "slug" | "bwImage" | "order">;
 
 async function loadAreas(
   ids: readonly Types.ObjectId[],
@@ -38,16 +38,11 @@ async function loadAreas(
   if (ids.length === 0) return [];
   const docs = await AreaModel.find(
     { _id: { $in: [...ids] } },
-    { name: 1, slug: 1, bwImage: 1, order: 1 },
+    PUBLIC_AREA_PROJECTION,
   )
     .sort({ order: 1, name: 1 })
-    .lean<AreaDoc[]>();
-  return docs.map((area) => ({
-    id: String(area._id),
-    name: area.name,
-    slug: area.slug,
-    bwImage: area.bwImage ?? null,
-  }));
+    .lean<PublicAreaDoc[]>();
+  return docs.map(toPublicAreaView);
 }
 
 /*

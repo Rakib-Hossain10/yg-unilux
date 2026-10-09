@@ -1,0 +1,74 @@
+/* Listing pages motion pass (Phase 4b L7, motion-engineer). Imported once by
+   src/app/globals.css. Same rules as the product pass:
+   - only opacity and transform animate;
+   - nothing here hides server-rendered content: the hidden start states sit
+     on view-transition pseudo-elements (they exist only during a transition
+     the code started) or on a disclosure the visitor opened;
+   - every animation sits under prefers-reduced-motion: no-preference; view
+     transitions are zeroed under reduce (product-motion.css) and the filter
+     code does not even start one then. */
+
+/* ---- Any view transition: clicks pass through to the live page --------
+   The ::view-transition overlay would otherwise swallow a second checkbox
+   click made during a crossfade. */
+::view-transition {
+  pointer-events: none;
+}
+
+/* ---- Filter result settle-in -------------------------------------------
+   A refinement (filter, sort, chip, "Clear all") marks <html> with
+   data-listing-refine (filter-transition.ts); the new results settle in on
+   the LIVE element (Web Animations, listing-results-transition.tsx), never
+   through a view-transition snapshot: Chromium does not hit-test captured
+   elements, so a click on a card during a snapshot crossfade was lost.
+   While the mark is on, the root is also kept out of any view transition
+   React may start, so the whole page never turns into an untouchable
+   snapshot during a refinement. */
+html[data-listing-refine] {
+  view-transition-name: none;
+}
+
+/* While a filter change loads, the cards dim a little (after a short delay,
+   so a fast answer shows no dim at all). Only the dimming is eased: the
+   crossfade (or, without one, the new cards) takes over at once. Reduced
+   motion keeps the dim as an instant state change. */
+[data-slot="listing-results"]:has([data-slot="filter-form"][data-pending])
+  [data-slot="listing-grid"] {
+  opacity: 0.55;
+}
+@media (prefers-reduced-motion: no-preference) {
+  [data-slot="listing-results"]:has([data-slot="filter-form"][data-pending])
+    [data-slot="listing-grid"] {
+    transition: opacity 240ms var(--ease-calm) 120ms;
+  }
+}
+
+/* ---- Card -> product morph: keep the picture's proportions ------------
+   The card frame is 4:5, the product stage 4:3. Both snapshots fill the
+   morphing box and crop (like the frames' object-cover) instead of
+   stretching or overflowing it. */
+::view-transition-old(.product-image-morph),
+::view-transition-new(.product-image-morph) {
+  height: 100%;
+  object-fit: cover;
+  overflow: clip;
+}
+
+/* ---- Long facet: "Show n more" ----------------------------------------
+   The extra values settle in when the visitor opens the disclosure. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-slot="facet-more"][open] > [data-slot="facet-more-list"] {
+    animation: facet-more-in 280ms var(--ease-calm) both;
+  }
+}
+
+@keyframes facet-more-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

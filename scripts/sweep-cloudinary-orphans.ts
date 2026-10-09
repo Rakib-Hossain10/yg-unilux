@@ -1,6 +1,7 @@
 // CLI: `npm run sweep:cloudinary` (dry run) / `npm run sweep:cloudinary -- --apply`.
-// Deletes Cloudinary images under yg/products/ and yg/areas/ that no product
-// (images, variant images) or area references and that are older than 24 h:
+// Deletes Cloudinary images under yg/products/, yg/areas/ and yg/categories/
+// that no product (images, variant images), area or category (icon, cover)
+// references and that are older than 24 h:
 // images of deleted products and signed uploads that were never saved. Dry
 // run by default. Prints public ids, the database name and the cloud name.
 // Mass-delete guard: `--apply` is refused when the database references no
@@ -22,7 +23,7 @@ import {
   parseSweepArgs,
   selectOrphanImages,
 } from "@/lib/orphan-sweep";
-import { AreaModel, ProductModel } from "@/models";
+import { AreaModel, CategoryModel, ProductModel } from "@/models";
 
 async function main(argv: string[]): Promise<number> {
   const args = parseSweepArgs(argv);
@@ -32,14 +33,19 @@ async function main(argv: string[]): Promise<number> {
   }
   await connectDb();
   try {
-    const [products, areas] = await Promise.all([
+    const [products, areas, categories] = await Promise.all([
       ProductModel.find(
         {},
         { "images.publicId": 1, "variants.imagePublicId": 1 },
       ).lean(),
       AreaModel.find({}, { bwImage: 1 }).lean(),
+      CategoryModel.find({}, { icon: 1, coverImage: 1 }).lean(),
     ]);
-    const referenced = collectReferencedImageIds({ products, areas });
+    const referenced = collectReferencedImageIds({
+      products,
+      areas,
+      categories,
+    });
 
     // An upload saved after the DB read is younger than the 24 h window, so
     // it is never selected.

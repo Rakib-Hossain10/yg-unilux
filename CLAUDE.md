@@ -110,6 +110,6 @@ Only two: `admin` and `customer` (keep the `role` field so a second admin can be
   - must-do items carried into later tasks.
   The user may run `/clear` after any task, and a fresh session must be able to continue from that section alone.
 - Build one phase at a time; plan first, then implement. Work on a `phase-N` branch; merge to `main` only when lint, typecheck, tests, build, audit and gitleaks are green and `qa-security-reviewer` passes.
-- Subagents live in `.claude/agents/` (ADR 0013). The main session orchestrates and alone edits `doc/` and this file. Every changed source file is auto-reviewed by `code-reviewer` via hooks (ADR 0014); pause it with `.claude/reviews/.disabled` during scaffolding or bulk changes.
+- Subagents live in `.claude/agents/` (ADR 0013). The read-only `ui-reviewer` judges visual polish at public-site exit gates, alongside (never instead of) `qa-security-reviewer`. The main session orchestrates and alone edits `doc/` and this file. Every changed source file is auto-reviewed by `code-reviewer` via hooks (ADR 0014); pause it with `.claude/reviews/.disabled` during scaffolding or bulk changes.
 - Server Components by default; `"use client"` only where interaction/animation needs it.
 - Keep admin UI plain and fast (shadcn); keep motion work in `components/motion/`.

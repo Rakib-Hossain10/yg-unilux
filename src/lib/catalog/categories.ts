@@ -15,19 +15,45 @@ import type { Category } from "@/models/category";
 import { CATALOG_CACHE_VERSION } from "./cache-version";
 import type { BreadcrumbItem, PublicProductView } from "./view";
 
-/** One category as the public site needs it. */
+/**
+ * One category as the public site needs it. Every field is public (no spec
+ * value, rule 9). `icon` and `coverImage` are Cloudinary public ids; the
+ * icon may be an SVG upload, so it must always be delivered with an explicit
+ * raster format (f_png / f_webp), never inlined (Phase 4b Q7).
+ */
 export interface PublicCategoryView extends BreadcrumbItem {
   parentId: string | null;
   order: number;
+  icon: string | null;
+  coverImage: string | null;
+  description: string | null;
 }
 
-type CategoryDoc = Pick<Category, "_id" | "name" | "slug" | "parent" | "order">;
+type CategoryDoc = Pick<
+  Category,
+  | "_id"
+  | "name"
+  | "slug"
+  | "parent"
+  | "order"
+  | "icon"
+  | "coverImage"
+  | "description"
+>;
 
 async function readCategories(): Promise<PublicCategoryView[]> {
   await connectDb();
   const docs = await CategoryModel.find(
     {},
-    { name: 1, slug: 1, parent: 1, order: 1 },
+    {
+      name: 1,
+      slug: 1,
+      parent: 1,
+      order: 1,
+      icon: 1,
+      coverImage: 1,
+      description: 1,
+    },
   )
     .sort({ order: 1, name: 1 })
     .lean<CategoryDoc[]>();
@@ -37,6 +63,9 @@ async function readCategories(): Promise<PublicCategoryView[]> {
     slug: doc.slug,
     parentId: doc.parent ? String(doc.parent) : null,
     order: doc.order,
+    icon: doc.icon ?? null,
+    coverImage: doc.coverImage ?? null,
+    description: doc.description ?? null,
   }));
 }
 

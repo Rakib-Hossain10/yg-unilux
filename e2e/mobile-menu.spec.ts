@@ -11,7 +11,7 @@ test("Escape closes the menu and returns focus to the toggle", async ({
 }) => {
   await page.goto("/");
   const toggle = page.locator("summary[aria-label=Menu]");
-  const menu = page.locator("header details");
+  const menu = page.locator("header details[data-slot=mobile-menu]");
   await toggle.click();
   await expect(menu).toHaveAttribute("open", "");
   await page.keyboard.press("Escape");
@@ -21,7 +21,7 @@ test("Escape closes the menu and returns focus to the toggle", async ({
 
 test("a press outside the open menu closes it", async ({ page }) => {
   await page.goto("/");
-  const menu = page.locator("header details");
+  const menu = page.locator("header details[data-slot=mobile-menu]");
   await page.locator("summary[aria-label=Menu]").click();
   await expect(menu).toHaveAttribute("open", "");
   await page.mouse.click(200, 700);

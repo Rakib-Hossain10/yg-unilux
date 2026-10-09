@@ -221,8 +221,10 @@ describe("product page: default visibility", () => {
     const html = await renderPage(HERO);
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Breadcrumb"');
-    expect(html).toContain('href="/products?category=spot-lights"');
-    expect(html).toContain('href="/products?category=recessed"');
+    // Category steps link to listing paths (Phase 4b L4, ADR 0065 Q1).
+    expect(html).toContain('href="/products/spot-lights"');
+    expect(html).toContain('href="/products/spot-lights/recessed"');
+    expect(html).not.toContain("?category=");
     expect(html).toContain('aria-current="page"');
     const panel = between(
       html,
@@ -287,6 +289,40 @@ describe("product page: default visibility", () => {
     expect(models).toContain('<th scope="row"');
   });
 
+  it("stacks the Models table on small screens without losing table semantics", async () => {
+    const html = await renderPage(HERO);
+    const models = between(
+      html,
+      'data-section="models"',
+      'data-section="downloads"',
+    );
+    // One table, so one copy of each model no. in the HTML.
+    expect(models.match(/<table/g)).toHaveLength(1);
+    expect(models.split("AR-013A2").length - 1).toBe(
+      // the row header plus the sr-only text of its "Select" button
+      2,
+    );
+    // Roles restated for the CSS display change below md.
+    expect(models).toContain('role="table"');
+    expect(models).toMatch(/<thead role="rowgroup"[^>]*max-md:sr-only/);
+    expect(models).toContain('<tbody role="rowgroup"');
+    expect(models.match(/<tr role="row"/g)?.length).toBe(1 + 2);
+    expect(models).toContain('role="rowheader"');
+    // Every data cell (except "Select") carries a visible stacked label,
+    // hidden from screen readers (they get the column header).
+    const cells = models.match(/<td role="cell"/g)?.length ?? 0;
+    const labels =
+      models.match(/<span aria-hidden="true" class="[^"]*md:hidden">/g)
+        ?.length ?? 0;
+    expect(cells).toBeGreaterThan(2);
+    expect(labels).toBe(cells - 2);
+    expect(models).toContain(">Option</span>");
+    // Only wide screens get the sideways scroll and the minimum width.
+    expect(models).toContain("md:overflow-x-auto");
+    expect(models).toContain("md:min-w-[32rem]");
+    expect(models).not.toMatch(/class="[^"]*(?<!:)min-w-\[32rem\]/);
+  });
+
   it("shows downloads, applications and both strips", async () => {
     const html = await renderPage(HERO);
     expect(html).toContain('href="https://example.com/g.pdf"');
@@ -341,7 +377,13 @@ describe("product page: default visibility", () => {
 
   it("lists only published products in the sitemap and static params", async () => {
     const entries = await sitemap();
-    expect(entries.map((e) => e.url).sort()).toEqual(
+    // Product pages only (L6 adds the home page and catalog listing paths).
+    expect(
+      entries
+        .map((e) => e.url)
+        .filter((url) => url.startsWith(`${SITE}/product/`))
+        .sort(),
+    ).toEqual(
       ["arc-ar-013a", "arc-ar-020a", "halo-ha-001", "solo-so-001"].map(
         (slug) => `${SITE}/product/${slug}`,
       ),

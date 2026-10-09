@@ -1,6 +1,7 @@
 // Admin services for the category tree: read the tree, create, edit, move
-// up/down and delete. Each write re-parses with Zod, enforces the tree rules,
-// records an audit entry and returns the cache tags it touched (ADR 0035).
+// up/down, delete, and set the icon / cover image (verified direct uploads).
+// Each write re-parses with Zod, enforces the tree rules, records an audit
+// entry and returns the cache tags it touched (ADR 0035).
 
 import "server-only";
 
@@ -9,16 +10,22 @@ import type { Types } from "mongoose";
 import { MAX_CATEGORY_DEPTH } from "@/lib/constants";
 import { connectDb, mongoose } from "@/lib/db";
 import { CATALOG_TAGS, type CatalogTag } from "@/lib/revalidate";
+import type { SignedUpload } from "@/lib/cloudinary";
 import {
+  CATEGORY_IMAGE_FORMATS,
   categoryIdSchema,
   categoryInputSchema,
   moveCategorySchema,
+  setCategoryImageSchema,
+  signCategoryImageSchema,
+  type CategoryImageSlot,
   type CategoryInput,
 } from "@/lib/schemas/category";
 import { uniqueSlug, UniqueSlugError } from "@/lib/slug";
 import { CategoryModel, ProductModel } from "@/models";
 import type { Category } from "@/models/category";
 
+import { signCloudinaryUpload, verifyUploadedImage } from "./uploads";
 import {
   assertActorId,
   auditAndFinish,
@@ -59,13 +66,17 @@ export interface CategoryTreeNode {
   children: CategoryTreeNode[];
 }
 
-/** What the edit form is filled with. */
+/** What the edit page is filled with (form fields + the two images). */
 export interface CategoryForEdit {
   id: string;
   name: string;
   slug: string;
   parentId: string | null;
   description: string | null;
+  /** Cloudinary public id of the mega-menu icon, or null. */
+  icon: string | null;
+  /** Cloudinary public id of the cover image, or null. */
+  coverImage: string | null;
 }
 
 /* Only the fields the admin tree and form show. */
@@ -80,6 +91,10 @@ type CategoryRow = Pick<
   Category,
   "_id" | "name" | "slug" | "parent" | "order" | "description"
 >;
+
+/* The edit page also shows the stored images. */
+const EDIT_PROJECTION = { ...TREE_PROJECTION, icon: 1, coverImage: 1 } as const;
+type CategoryEditRow = CategoryRow & Pick<Category, "icon" | "coverImage">;
 
 /* Siblings in display order; `_id` breaks ties so the order is stable. */
 const DISPLAY_ORDER = { order: 1, _id: 1 } as const;
@@ -134,8 +149,8 @@ export async function getCategoryForEdit(
   await connectDb();
   const row = await CategoryModel.findById(
     parsedId.data,
-    TREE_PROJECTION,
-  ).lean<CategoryRow | null>();
+    EDIT_PROJECTION,
+  ).lean<CategoryEditRow | null>();
   if (!row) return null;
   return {
     id: row._id.toHexString(),
@@ -143,6 +158,8 @@ export async function getCategoryForEdit(
     slug: row.slug,
     parentId: row.parent?.toHexString() ?? null,
     description: row.description ?? null,
+    icon: row.icon ?? null,
+    coverImage: row.coverImage ?? null,
   };
 }
 
@@ -559,6 +576,122 @@ export async function deleteCategory(
       meta: { parentId: self.parent?.toHexString() ?? null },
     },
     { id: parsedId.data },
+    TREE_TAGS,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Icon and cover image (ADR 0045 direct uploads, Phase 4b Q7)
+// ---------------------------------------------------------------------------
+
+/* The model field each slot is stored in. */
+const IMAGE_FIELD: Record<CategoryImageSlot, "icon" | "coverImage"> = {
+  icon: "icon",
+  cover: "coverImage",
+};
+
+/**
+ * Signs one direct browser upload of a category's icon or cover, under the
+ * category's own folder (`yg/categories/<id>/<uuid>`), accepting only that
+ * slot's formats (icon: png, svg, webp; cover: jpg, png, webp). Nothing is
+ * written, so there are no tags.
+ */
+export async function signCategoryImageUpload(
+  actorId: string,
+  input: unknown,
+): Promise<ServiceResult<SignedUpload>> {
+  assertActorId(actorId);
+  const parsed = signCategoryImageSchema.safeParse(input);
+  if (!parsed.success) return invalidInput(parsed.error);
+  const { categoryId, slot } = parsed.data;
+  return signCloudinaryUpload(
+    actorId,
+    { target: "category", id: categoryId },
+    { formats: CATEGORY_IMAGE_FORMATS[slot] },
+  );
+}
+
+/* The refusal when an id is already this category's image in the other slot. */
+const IMAGE_IN_OTHER_SLOT: Record<CategoryImageSlot, string> = {
+  icon: "This image is already the cover. Upload a separate icon.",
+  cover: "This image is already the icon. Upload a separate cover.",
+};
+
+/* True when `publicId` is stored in either image slot of the category. */
+function isStoredImage(
+  category: Pick<Category, "icon" | "coverImage">,
+  publicId: string,
+): boolean {
+  return category.icon === publicId || category.coverImage === publicId;
+}
+
+/**
+ * Sets or clears a category's icon or cover. A new id must be an upload in
+ * this category's own folder that passes verification (exists, size, the
+ * slot's formats); a rejected upload is deleted from Cloudinary and nothing
+ * is saved. An id already stored in either slot is refused without any
+ * check, so a live image is never destroyed (gate-A L-1). The replaced image is not deleted (ADR 0045 point 5): the
+ * orphan sweep removes it once nothing references it. Only the public tree
+ * shows these images, so the tag is `categories`. The audit entry names the
+ * field only, never the id.
+ */
+export async function setCategoryImage(
+  actorId: string,
+  input: unknown,
+): Promise<
+  ServiceResult<{
+    id: string;
+    slot: CategoryImageSlot;
+    publicId: string | null;
+  }>
+> {
+  assertActorId(actorId);
+  const parsed = setCategoryImageSchema.safeParse(input);
+  if (!parsed.success) return invalidInput(parsed.error);
+  const { categoryId, slot, publicId } = parsed.data;
+  const field = IMAGE_FIELD[slot];
+  const selfId = new ObjectId(categoryId);
+
+  await connectDb();
+  // Both slots: an id already stored on this category is live, so it is
+  // never verified as a new upload (a refused one would be destroyed).
+  const current = await CategoryModel.findById(selfId, {
+    icon: 1,
+    coverImage: 1,
+  }).lean<Pick<Category, "icon" | "coverImage"> | null>();
+  if (!current) return formError(NOT_FOUND);
+  if ((current[field] ?? null) === publicId) {
+    return unchanged({ id: categoryId, slot, publicId });
+  }
+  if (publicId !== null && isStoredImage(current, publicId)) {
+    return fieldError("publicId", IMAGE_IN_OTHER_SLOT[slot]);
+  }
+
+  if (publicId !== null) {
+    const check = await verifyUploadedImage(
+      { target: "category", id: categoryId, publicId },
+      { formats: CATEGORY_IMAGE_FORMATS[slot] },
+    );
+    if (!check.ok) return fieldError("publicId", check.message);
+  }
+
+  const result = await CategoryModel.updateOne(
+    { _id: selfId },
+    publicId === null
+      ? { $unset: { [field]: 1 } }
+      : { $set: { [field]: publicId } },
+    { runValidators: true },
+  );
+  if (result.matchedCount === 0) return formError(NOT_FOUND);
+
+  return auditAndFinish(
+    {
+      actorId,
+      action: "category.update",
+      target: { type: "category", id: categoryId },
+      meta: { fields: [field], cleared: publicId === null },
+    },
+    { id: categoryId, slot, publicId },
     TREE_TAGS,
   );
 }

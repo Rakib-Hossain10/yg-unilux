@@ -25,6 +25,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:indexes": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/sync-indexes.ts",
+    "db:search-index": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/search-index.ts",
     "check:model-nos": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-model-no-collisions.ts",
     "check:services": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/check-services.ts",
     "seed:admin": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed-admin.ts",

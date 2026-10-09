@@ -1,5 +1,7 @@
-// Edit page for one category. A category with subcategories must stay a main
-// category (depth 2, ADR 0037), so its parent picker is read-only. An unknown
+// Edit page for one category: the form (name, slug, parent, description) and
+// the icon and cover uploaders (each saved on its own). A category with
+// subcategories must stay a main category (depth 2, ADR 0037), so its parent
+// picker is read-only. An unknown
 // or malformed id shows the segment's not-found page. requireAdmin() first.
 
 import type { Metadata } from "next";
@@ -7,9 +9,12 @@ import { notFound } from "next/navigation";
 
 import { BackLink } from "@/components/admin/back-link";
 import { CategoryForm } from "@/components/admin/category-form";
+import { CategoryImageUploaders } from "@/components/admin/category-image-uploaders";
 import { CATEGORIES_PATH } from "@/components/admin/category-paths";
 import { getCategoryForEdit, listCategoryTree } from "@/lib/admin/categories";
 import { requireAdmin } from "@/lib/permissions";
+
+import { adminCloudName } from "../../cloudinary-cloud-name";
 
 // Static only (ADR 0036): never the category's name.
 export const metadata: Metadata = { title: "Edit category" };
@@ -47,6 +52,12 @@ export default async function EditCategoryPage({
             ? "This category has subcategories, so it stays a main category. Move them first to change its parent."
             : null
         }
+      />
+      <CategoryImageUploaders
+        categoryId={category.id}
+        icon={category.icon}
+        coverImage={category.coverImage}
+        cloudName={adminCloudName()}
       />
     </div>
   );

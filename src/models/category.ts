@@ -19,9 +19,13 @@ export interface Category {
   parent: Types.ObjectId | null;
   /** Position among its siblings, 0 first. */
   order: number;
-  /** Icon shown in the mega-menu strip. Its format is decided in Phase 4. */
+  /**
+   * Cloudinary public id of the icon shown in the mega-menu strip
+   * (`yg/categories/<id>/<uuid>`; PNG, SVG or WebP, always delivered as a
+   * raster, never inlined as SVG markup: Phase 4b Q7).
+   */
   icon?: string;
-  /** Cloudinary public id of the cover image. */
+  /** Cloudinary public id of the cover image (`yg/categories/<id>/<uuid>`). */
   coverImage?: string;
   description?: string;
   createdAt: Date;
@@ -34,7 +38,7 @@ const categorySchema = new Schema<Category>(
     slug: slugField,
     parent: { type: Schema.Types.ObjectId, ref: "Category", default: null },
     order: { type: Number, required: true, min: 0, default: 0 },
-    icon: { type: String, trim: true, maxlength: 255 },
+    icon: publicIdField,
     coverImage: publicIdField,
     description: { type: String, trim: true, maxlength: 2000 },
   },

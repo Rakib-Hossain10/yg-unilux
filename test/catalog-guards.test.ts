@@ -61,11 +61,19 @@ describe("catalog layer guards (TypeScript resolver, transitive)", () => {
     expect(catalogFiles.map(norm)).toEqual(
       expect.arrayContaining(
         [
+          "areas.ts",
           "categories.ts",
+          "category-path.ts",
+          "facets.ts",
           "family.ts",
+          "listing.ts",
+          "listing-params.ts",
+          "listing-scope.ts",
           "product.ts",
           "related.ts",
           "restricted.ts",
+          "search.ts",
+          "search-index.ts",
           "view.ts",
         ].map((file) => norm(path.join(CATALOG_DIR, file))),
       ),
@@ -122,6 +130,35 @@ describe("catalog layer guards (TypeScript resolver, transitive)", () => {
       );
     expect(offenders).toEqual([]);
   }, 60_000);
+
+  it("keeps listing-params.ts client-safe: pure imports only (Phase 4b L1)", () => {
+    const file = path.join(CATALOG_DIR, "listing-params.ts");
+    const allowed = new Set(
+      [
+        "lib/slug.ts",
+        "models/product-constants.ts",
+        "models/spec-columns.ts",
+      ].map((f) => norm(path.join(SRC, f))),
+    );
+    // No "server-only", no database, no Next: only Zod and pure modules.
+    for (const edge of importEdges(file)) {
+      if (edge.file === null) expect(edge.spec).toBe("zod");
+      else expect(allowed.has(norm(edge.file)), edge.spec).toBe(true);
+    }
+  });
+
+  it("keeps the search route off the session and restricted.ts (Phase 4b L2)", () => {
+    const route = path.join(SRC, "app/api/catalog/search/route.ts");
+    // No permissions/auth/headers through any chain: the answer is public.
+    expect(reachingChains(route, readsSession)).toEqual([]);
+    expect(reachingChains(route, reachesRestricted)).toEqual([]);
+    for (const file of [route, path.join(CATALOG_DIR, "search.ts")]) {
+      expect(
+        importEdges(file).map((edge) => edge.file && norm(edge.file)),
+        file,
+      ).not.toContain(norm(path.join(SRC, "lib/permissions.ts")));
+    }
+  });
 
   it("has no barrel that could re-export the restricted reader", () => {
     expect(catalogFiles.some((file) => /[\\/]index\.[jt]sx?$/.test(file))).toBe(

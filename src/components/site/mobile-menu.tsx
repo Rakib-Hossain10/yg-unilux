@@ -33,7 +33,20 @@ export function MobileMenu({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || !details.open) return;
       details.open = false;
-      details.querySelector("summary")?.focus();
+      details.querySelector<HTMLElement>(":scope > summary")?.focus();
+    };
+    // A link inside the menu closes it, even when only the query changes
+    // (the pathname effect above would not fire). So does a press on the
+    // scrim: on `click`, not `pointerdown`, because closing <details> under
+    // a pressed pointer that sits inside it crashes Chromium's renderer.
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (
+        details.open &&
+        target?.closest('a[href], [data-slot="mobile-menu-scrim"]')
+      ) {
+        details.open = false;
+      }
     };
     // A press anywhere outside the open menu closes it.
     const onPointerDown = (event: PointerEvent) => {
@@ -43,15 +56,21 @@ export function MobileMenu({
     };
 
     details.addEventListener("keydown", onKeyDown);
+    details.addEventListener("click", onClick);
     document.addEventListener("pointerdown", onPointerDown);
     return () => {
       details.removeEventListener("keydown", onKeyDown);
+      details.removeEventListener("click", onClick);
       document.removeEventListener("pointerdown", onPointerDown);
     };
   }, []);
 
   return (
-    <details ref={detailsRef} className="group lg:hidden">
+    <details
+      ref={detailsRef}
+      className="group lg:hidden"
+      data-slot="mobile-menu"
+    >
       <summary
         className={`${summaryClassName} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
         aria-label="Menu"
@@ -59,6 +78,17 @@ export function MobileMenu({
         <MenuIcon className="group-open:hidden" />
         <CloseIcon className="hidden group-open:block" />
       </summary>
+      {/* Scrim under the panel: dims the page below the header so the open
+          menu reads as a layer, and a press on it closes the menu. Positioned
+          against the sticky header (the nearest positioned ancestor, like the
+          panel), so it starts at the header's bottom edge. The
+          page behind does not scroll while it is open (globals.css). Fades
+          in only when motion is allowed; the panel itself never fades. */}
+      <div
+        aria-hidden="true"
+        data-slot="mobile-menu-scrim"
+        className="absolute inset-x-0 top-16 h-dvh bg-ink/40 motion-safe:transition-opacity motion-safe:duration-(--duration-quick) motion-safe:starting:opacity-0"
+      />
       {children}
     </details>
   );

@@ -49,7 +49,7 @@ vi.mock("@/lib/auth", async (importOriginal) => ({
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
-import { getBreadcrumb } from "./categories";
+import { getBreadcrumb, listPublicCategories } from "./categories";
 import { getFamilyProducts } from "./family";
 import { getPublicProduct, listPublishedSlugs } from "./product";
 import { getRelatedProducts } from "./related";
@@ -391,6 +391,33 @@ describe("getRelatedProducts", () => {
       "neighbour-ne-001",
       "solo-so-001",
     ]);
+  });
+});
+
+describe("listPublicCategories", () => {
+  it("carries the icon, cover and description (null when unset)", async () => {
+    const icon = testPublicId(1, ids.main.toHexString(), "category");
+    const cover = testPublicId(2, ids.main.toHexString(), "category");
+    await CategoryModel.updateOne(
+      { _id: ids.main },
+      { $set: { icon, coverImage: cover, description: "Narrow beams." } },
+    );
+    const tree = await listPublicCategories();
+    expect(tree.find((c) => c.id === ids.main.toHexString())).toEqual({
+      id: ids.main.toHexString(),
+      name: "Spot Lights",
+      slug: "spot-lights",
+      parentId: null,
+      order: 0,
+      icon,
+      coverImage: cover,
+      description: "Narrow beams.",
+    });
+    expect(tree.find((c) => c.id === ids.sub.toHexString())).toMatchObject({
+      icon: null,
+      coverImage: null,
+      description: null,
+    });
   });
 });
 

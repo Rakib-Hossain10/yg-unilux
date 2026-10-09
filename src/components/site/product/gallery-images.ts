@@ -33,6 +33,19 @@ export function frameFitClass(kind: ProductImageKind): string {
   return FIT[kind];
 }
 
+/*
+ * How a small product thumbnail fits its frame (listing cards, "More from"
+ * strip, search results; ui-reviewer gate C 4b, H-1). The client's pictures
+ * are mostly studio cut-outs on a transparent or white ground, many of them
+ * 3:2 landscape: cropped to a 4:5 card they lost the luminaire's ends. Every
+ * kind is shown whole, inset 10% on the grey frame, and multiplied onto it
+ * so a white ground melts into the frame instead of reading as a box. The
+ * padding shrinks the image's content box, so `object-contain` fits inside
+ * the inset with no extra wrapper (the shared-element transition still
+ * wraps the same frame).
+ */
+export const THUMB_FIT = "object-contain p-[10%] mix-blend-multiply";
+
 /* How a non-photo kind is named in the alt text. */
 const KIND_LABEL: Record<Exclude<ProductImageKind, "gallery">, string> = {
   dimension: "dimension drawing",

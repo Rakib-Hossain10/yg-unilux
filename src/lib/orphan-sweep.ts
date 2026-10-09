@@ -4,14 +4,12 @@
 // with fake data. Nothing here ever builds a URL.
 
 import {
-  CLOUDINARY_AREA_FOLDER,
-  CLOUDINARY_PRODUCT_FOLDER,
   IMPORT_STAGED_MAX_AGE_MS,
   R2_DATASHEETS_PREFIX,
   R2_IMPORTS_PREFIX,
   R2_INCOMING_PREFIX,
 } from "./constants";
-import { isPublicId } from "./cloudinary-ids";
+import { IMAGE_UPLOAD_FOLDERS, isPublicId } from "./cloudinary-ids";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -25,11 +23,13 @@ export const CLOUDINARY_MIN_AGE_MS = 24 * HOUR_MS;
  */
 export const DATASHEET_REPORT_GRACE_MS = HOUR_MS;
 
-/** The Cloudinary folders the sweep looks at, and nothing else. */
-export const SWEPT_CLOUDINARY_FOLDERS = [
-  CLOUDINARY_PRODUCT_FOLDER,
-  CLOUDINARY_AREA_FOLDER,
-] as const;
+/**
+ * The Cloudinary folders the sweep looks at, and nothing else: every upload
+ * folder (products, areas, categories), derived so a new upload target can
+ * never be left out of the sweep or its reference list.
+ */
+export const SWEPT_CLOUDINARY_FOLDERS: readonly string[] =
+  Object.values(IMAGE_UPLOAD_FOLDERS);
 
 export interface StoredObject {
   key: string;
@@ -119,13 +119,17 @@ export function selectOrphanImages(
     .map((asset) => asset.publicId);
 }
 
-/** Every Cloudinary id the catalog uses: product images, variant images, area images. */
+/**
+ * Every Cloudinary id the catalog uses: product images, variant images, area
+ * images, category icons and covers.
+ */
 export function collectReferencedImageIds(sources: {
   products: readonly {
     images?: readonly { publicId?: string }[];
     variants?: readonly { imagePublicId?: string }[];
   }[];
   areas: readonly { bwImage?: string }[];
+  categories: readonly { icon?: string; coverImage?: string }[];
 }): Set<string> {
   const ids = new Set<string>();
   const add = (id: string | undefined) => {
@@ -136,6 +140,10 @@ export function collectReferencedImageIds(sources: {
     for (const variant of product.variants ?? []) add(variant.imagePublicId);
   }
   for (const area of sources.areas) add(area.bwImage);
+  for (const category of sources.categories) {
+    add(category.icon);
+    add(category.coverImage);
+  }
   return ids;
 }
 

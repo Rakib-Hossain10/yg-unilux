@@ -1,11 +1,14 @@
 // Zod schemas for the admin categories module: the create/edit form, a
-// category id, and a move up/down request. Pure (no server-only), shared by
+// category id, a move up/down request and the icon/cover image uploads. Pure (no server-only), shared by
 // the React Hook Form resolver and re-parsed by src/lib/admin/categories.ts.
 
 import { z } from "zod";
 
+import { CATEGORY_COVER_FORMATS, CATEGORY_ICON_FORMATS } from "@/lib/constants";
+
 import {
   objectIdSchema,
+  optionalPublicIdSchema,
   optionalSlugSchema,
   optionalTextSchema,
 } from "./common";
@@ -67,3 +70,33 @@ export const moveCategorySchema = z.strictObject({
   direction: z.enum(MOVE_DIRECTIONS),
 });
 export type MoveCategoryInput = z.output<typeof moveCategorySchema>;
+
+/**
+ * The two images a category can have: the mega-menu `icon` and the `cover`
+ * (stored in the model's `icon` / `coverImage`).
+ */
+export const CATEGORY_IMAGE_SLOTS = ["icon", "cover"] as const;
+export type CategoryImageSlot = (typeof CATEGORY_IMAGE_SLOTS)[number];
+
+/** The Cloudinary formats each slot accepts (signed and re-checked). */
+export const CATEGORY_IMAGE_FORMATS: Record<
+  CategoryImageSlot,
+  readonly string[]
+> = {
+  icon: CATEGORY_ICON_FORMATS,
+  cover: CATEGORY_COVER_FORMATS,
+};
+
+/** Sign one direct upload for a category's icon or cover. */
+export const signCategoryImageSchema = z.strictObject({
+  categoryId: objectIdSchema,
+  slot: z.enum(CATEGORY_IMAGE_SLOTS),
+});
+
+/** Set (a verified new upload) or clear (null / "") a category image. */
+export const setCategoryImageSchema = z.strictObject({
+  categoryId: objectIdSchema,
+  slot: z.enum(CATEGORY_IMAGE_SLOTS),
+  publicId: optionalPublicIdSchema.nullable().transform((id) => id ?? null),
+});
+export type SetCategoryImageInput = z.output<typeof setCategoryImageSchema>;

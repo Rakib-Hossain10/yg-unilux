@@ -18,13 +18,14 @@ import {
   destroyImage,
   inspectImage,
   signImageUpload,
+  type ImageFormatList,
   type ImageRejection,
   type SignedUpload,
 } from "@/lib/cloudinary";
 import { ALLOWED_IMAGE_FORMATS, MAX_IMAGE_BYTES } from "@/lib/constants";
 import { connectDb, mongoose } from "@/lib/db";
 import { objectIdSchema } from "@/lib/schemas/common";
-import { AreaModel, ProductModel } from "@/models";
+import { AreaModel, CategoryModel, ProductModel } from "@/models";
 
 import {
   assertActorId,
@@ -35,7 +36,10 @@ import {
 
 const { ObjectId } = mongoose.Types;
 
-/** What the upload is for: a product's images or an area's b/w image. */
+/**
+ * What the upload is for: a product's images, an area's b/w image or a
+ * category's icon/cover.
+ */
 export const signUploadSchema = z.strictObject({
   target: z.enum(IMAGE_UPLOAD_TARGETS),
   id: objectIdSchema,
@@ -44,19 +48,29 @@ export const signUploadSchema = z.strictObject({
 const OWNER_GONE: Record<ImageUploadTarget, string> = {
   product: "This product no longer exists. Reload the page.",
   area: "This area no longer exists. Reload the page.",
+  category: "This category no longer exists. Reload the page.",
 };
 
-/* True when the product or area the upload is for exists. */
+/* True when the product, area or category the upload is for exists. */
 async function ownerExists(
   target: ImageUploadTarget,
   id: string,
 ): Promise<boolean> {
   const filter = { _id: new ObjectId(id) };
-  const found =
-    target === "product"
-      ? await ProductModel.exists(filter)
-      : await AreaModel.exists(filter);
-  return found !== null;
+  switch (target) {
+    case "product":
+      return (await ProductModel.exists(filter)) !== null;
+    case "area":
+      return (await AreaModel.exists(filter)) !== null;
+    case "category":
+      return (await CategoryModel.exists(filter)) !== null;
+  }
+}
+
+/** Server-chosen upload options; never taken from the browser. */
+export interface UploadFormatOptions {
+  /** Cloudinary formats accepted (default jpg/png/webp/avif). */
+  formats?: ImageFormatList;
 }
 
 /**
@@ -70,6 +84,7 @@ async function ownerExists(
 export async function signCloudinaryUpload(
   actorId: string,
   input: unknown,
+  options: UploadFormatOptions = {},
 ): Promise<ServiceResult<SignedUpload>> {
   assertActorId(actorId);
   const parsed = signUploadSchema.safeParse(input);
@@ -80,7 +95,11 @@ export async function signCloudinaryUpload(
   if (!(await ownerExists(target, id))) return formError(OWNER_GONE[target]);
 
   const publicId = buildPublicId(target, id, randomUUID());
-  const signed = signImageUpload(publicId, Math.floor(Date.now() / 1000));
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signed =
+    options.formats === undefined
+      ? signImageUpload(publicId, timestamp)
+      : signImageUpload(publicId, timestamp, options.formats);
   return { ok: true, data: signed, tags: [] };
 }
 
@@ -93,6 +112,11 @@ export const IMAGE_REJECTED: Record<ImageRejection | "foreign", string> = {
   unavailable:
     "The image could not be checked right now. Try saving again in a minute.",
 };
+
+/** The bad-format message for a custom format list, e.g. "png, svg, webp". */
+export function badFormatMessage(formats: ImageFormatList): string {
+  return `Only ${formats.join(", ")} images are accepted. The file was removed.`;
+}
 
 export const verifyUploadSchema = signUploadSchema.extend({
   publicId: z.string().max(255),
@@ -112,6 +136,7 @@ export type VerifyResult =
  */
 export async function verifyUploadedImage(
   input: unknown,
+  options: UploadFormatOptions = {},
 ): Promise<VerifyResult> {
   const parsed = verifyUploadSchema.safeParse(input);
   if (!parsed.success) {
@@ -122,12 +147,18 @@ export async function verifyUploadedImage(
     return { ok: false, reason: "foreign", message: IMAGE_REJECTED.foreign };
   }
 
-  const check = await inspectImage(publicId);
+  const check =
+    options.formats === undefined
+      ? await inspectImage(publicId)
+      : await inspectImage(publicId, options.formats);
   if (check.ok) return { ok: true, publicId };
   if (check.reason !== "unavailable") await destroyImage(publicId);
   return {
     ok: false,
     reason: check.reason,
-    message: IMAGE_REJECTED[check.reason],
+    message:
+      check.reason === "bad_format" && options.formats !== undefined
+        ? badFormatMessage(options.formats)
+        : IMAGE_REJECTED[check.reason],
   };
 }

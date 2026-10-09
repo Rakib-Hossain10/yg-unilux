@@ -3,15 +3,22 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MAX_IMAGE_BYTES } from "@/lib/constants";
+import {
+  CATEGORY_COVER_FORMATS,
+  CATEGORY_ICON_FORMATS,
+  MAX_IMAGE_BYTES,
+} from "@/lib/constants";
 
 import {
+  CATEGORY_COVER_RULES,
+  CATEGORY_ICON_RULES,
   checkImageFile,
   formatBytes,
   IMAGE_ACCEPT,
   previewUrl,
   progressPercent,
   readUploadResponse,
+  singleImageRulesText,
   UPLOAD_FAILED,
   UPLOAD_MISMATCH,
 } from "./image-upload";
@@ -142,8 +149,76 @@ describe("previewUrl", () => {
     );
   });
 
+  it("asks for a PNG copy when told to (category icons: never SVG)", () => {
+    expect(previewUrl("demo", ID, 320, "png")).toBe(
+      `https://res.cloudinary.com/demo/image/upload/c_limit,w_320,h_320,f_png,q_auto/${ID}`,
+    );
+  });
+
   it("gives no URL without a valid cloud name", () => {
     expect(previewUrl(null, ID)).toBeNull();
     expect(previewUrl("evil.com/x", ID)).toBeNull();
+  });
+});
+
+describe("category image rules", () => {
+  it("lets an icon be PNG, SVG or WebP, nothing else", () => {
+    for (const type of ["image/png", "image/svg+xml", "image/webp"]) {
+      expect(
+        checkImageFile({ name: "i", size: 100, type }, CATEGORY_ICON_RULES),
+      ).toBeNull();
+    }
+    for (const type of ["image/jpeg", "image/avif", "text/html"]) {
+      expect(
+        checkImageFile({ name: "i", size: 100, type }, CATEGORY_ICON_RULES),
+      ).toBe("i is not a PNG, SVG or WebP image.");
+    }
+    expect(CATEGORY_ICON_RULES.accept).toContain("image/svg+xml");
+  });
+
+  it("lets a cover be JPG, PNG or WebP, never SVG", () => {
+    for (const type of ["image/jpeg", "image/png", "image/webp"]) {
+      expect(
+        checkImageFile({ name: "c", size: 100, type }, CATEGORY_COVER_RULES),
+      ).toBeNull();
+    }
+    expect(
+      checkImageFile(
+        { name: "c", size: 100, type: "image/svg+xml" },
+        CATEGORY_COVER_RULES,
+      ),
+    ).not.toBeNull();
+    expect(CATEGORY_COVER_RULES.accept).not.toContain("svg");
+  });
+
+  it("keeps the same 10 MB cap and says so in the help text", () => {
+    expect(
+      checkImageFile(
+        { name: "big", size: MAX_IMAGE_BYTES + 1, type: "image/png" },
+        CATEGORY_ICON_RULES,
+      ),
+    ).toMatch(/limit is 10 MB/);
+    expect(singleImageRulesText(CATEGORY_ICON_RULES)).toBe(
+      "PNG, SVG or WebP, up to 10 MB.",
+    );
+  });
+});
+
+describe("category rules match the server's format lists", () => {
+  // Cloudinary format name -> the MIME type a browser reports.
+  const MIME: Record<string, string> = {
+    jpg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    avif: "image/avif",
+    svg: "image/svg+xml",
+  };
+  it.each([
+    ["icon", CATEGORY_ICON_RULES, CATEGORY_ICON_FORMATS],
+    ["cover", CATEGORY_COVER_RULES, CATEGORY_COVER_FORMATS],
+  ] as const)("%s", (_slot, rules, formats) => {
+    expect(Object.keys(rules.types).sort()).toEqual(
+      formats.map((f) => MIME[f]).sort(),
+    );
   });
 });

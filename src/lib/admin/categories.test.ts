@@ -1,6 +1,7 @@
 // Tests for the category services (src/lib/admin/categories.ts) on an
 // in-memory MongoDB: tree depth and parent rules, per-parent slugs, move
-// up/down, the in-use delete block, audit entries and the returned tags.
+// up/down, the in-use delete block, the icon/cover images (verified uploads
+// only), audit entries and the returned tags. Cloudinary is mocked.
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,7 +9,9 @@ import { MAX_CATEGORY_DEPTH } from "@/lib/constants";
 import { mongoose } from "@/lib/db";
 import { CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { MAX_CATEGORY_DESCRIPTION_LENGTH } from "@/lib/schemas/category";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
+import { testPublicId } from "../../../test/helpers/public-ids";
 
 import {
   createCategory,
@@ -16,9 +19,19 @@ import {
   getCategoryForEdit,
   listCategoryTree,
   moveCategory,
+  setCategoryImage,
+  signCategoryImageUpload,
   updateCategory,
 } from "./categories";
+import { badFormatMessage, IMAGE_REJECTED } from "./uploads";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
+
+const cloudinaryMock = vi.hoisted(() => ({
+  inspectImage: vi.fn(),
+  destroyImage: vi.fn(),
+  signImageUpload: vi.fn(),
+}));
+vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 
 setupMemoryDb("yg_admin_categories_test");
 
@@ -32,6 +45,17 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  cloudinaryMock.inspectImage.mockReset().mockResolvedValue({
+    ok: true,
+    bytes: 1000,
+    format: "png",
+    width: 10,
+    height: 10,
+  });
+  cloudinaryMock.destroyImage.mockReset().mockResolvedValue(true);
+  cloudinaryMock.signImageUpload
+    .mockReset()
+    .mockImplementation((publicId: string) => ({ publicId }));
   await Promise.all([
     CategoryModel.deleteMany({}),
     ProductModel.deleteMany({}),
@@ -621,8 +645,321 @@ describe("reads", () => {
       slug: "recessed",
       parentId: spot,
       description: null,
+      icon: null,
+      coverImage: null,
     });
     expect(await getCategoryForEdit(new ObjectId().toHexString())).toBeNull();
     expect(await getCategoryForEdit({ $ne: null })).toBeNull();
+  });
+});
+
+describe("description", () => {
+  it("trims it, caps it at 2000 characters and stores nothing for blank", async () => {
+    const id = await create("Spot Lights");
+    expectOk(
+      await updateCategory(ADMIN, id, {
+        name: "Spot Lights",
+        description: "  Narrow beams.  ",
+      }),
+    );
+    expect((await CategoryModel.findById(id).lean())?.description).toBe(
+      "Narrow beams.",
+    );
+
+    const tooLong = await updateCategory(ADMIN, id, {
+      name: "Spot Lights",
+      description: "x".repeat(MAX_CATEGORY_DESCRIPTION_LENGTH + 1),
+    });
+    expect(tooLong.ok).toBe(false);
+    expect(tooLong.ok ? {} : tooLong.errors.fieldErrors).toHaveProperty(
+      "description",
+    );
+    expect(
+      (
+        await updateCategory(ADMIN, id, {
+          name: "Spot Lights",
+          description: "x".repeat(MAX_CATEGORY_DESCRIPTION_LENGTH),
+        })
+      ).ok,
+    ).toBe(true);
+
+    expectOk(
+      await updateCategory(ADMIN, id, {
+        name: "Spot Lights",
+        description: " ",
+      }),
+    );
+    expect(await CategoryModel.findById(id).lean()).not.toHaveProperty(
+      "description",
+    );
+  });
+});
+
+describe("category icon and cover", () => {
+  /* An image id in this category's own folder. */
+  const img = (categoryId: string, n = 0) =>
+    testPublicId(n, categoryId, "category");
+
+  it("signs an icon upload with png/svg/webp and a cover with jpg/png/webp", async () => {
+    const id = await create("Spot Lights");
+    const icon = expectOk(
+      await signCategoryImageUpload(ADMIN, { categoryId: id, slot: "icon" }),
+    );
+    expect(icon.publicId).toMatch(
+      new RegExp(`^yg/categories/${id}/[0-9a-f-]{36}$`),
+    );
+    expect(cloudinaryMock.signImageUpload).toHaveBeenLastCalledWith(
+      icon.publicId,
+      expect.any(Number),
+      ["png", "svg", "webp"],
+    );
+    expectOk(
+      await signCategoryImageUpload(ADMIN, { categoryId: id, slot: "cover" }),
+    );
+    expect(cloudinaryMock.signImageUpload).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(Number),
+      ["jpg", "png", "webp"],
+    );
+  });
+
+  it("refuses to sign for an unknown category, a bad slot or extra fields", async () => {
+    const id = await create("Spot Lights");
+    for (const input of [
+      { categoryId: new ObjectId().toHexString(), slot: "icon" },
+      { categoryId: id, slot: "logo" },
+      { categoryId: id, slot: "icon", publicId: "yg/x" },
+      { categoryId: { $ne: null }, slot: "icon" },
+    ]) {
+      expect((await signCategoryImageUpload(ADMIN, input)).ok).toBe(false);
+    }
+    expect(cloudinaryMock.signImageUpload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["icon" as const, "icon" as const, ["png", "svg", "webp"]],
+    ["cover" as const, "coverImage" as const, ["jpg", "png", "webp"]],
+  ])(
+    "saves a verified %s, audits the field name only and returns the categories tag",
+    async (slot, field, formats) => {
+      const id = await create("Spot Lights");
+      await AuditLogModel.deleteMany({});
+      const publicId = img(id);
+      const result = await setCategoryImage(ADMIN, {
+        categoryId: id,
+        slot,
+        publicId,
+      });
+      expect(result).toEqual({
+        ok: true,
+        data: { id, slot, publicId },
+        tags: ["categories"],
+      });
+      expect(cloudinaryMock.inspectImage).toHaveBeenCalledWith(
+        publicId,
+        formats,
+      );
+      expect((await CategoryModel.findById(id).lean())?.[field]).toBe(publicId);
+      const entry = await AuditLogModel.findOne({}).lean();
+      expect(entry?.action).toBe("category.update");
+      expect(entry?.target?.id?.toString()).toBe(id);
+      expect(entry?.meta).toEqual({ fields: [field], cleared: false });
+      expect(JSON.stringify(entry)).not.toContain(publicId);
+    },
+  );
+
+  it("keeps the two slots apart", async () => {
+    const id = await create("Spot Lights");
+    expectOk(
+      await setCategoryImage(ADMIN, {
+        categoryId: id,
+        slot: "icon",
+        publicId: img(id, 1),
+      }),
+    );
+    expectOk(
+      await setCategoryImage(ADMIN, {
+        categoryId: id,
+        slot: "cover",
+        publicId: img(id, 2),
+      }),
+    );
+    expect(await getCategoryForEdit(id)).toMatchObject({
+      icon: img(id, 1),
+      coverImage: img(id, 2),
+    });
+  });
+
+  it("clears an image with null or blank, without asking Cloudinary or deleting it", async () => {
+    const id = await create("Spot Lights");
+    for (const publicId of [null, ""]) {
+      await CategoryModel.updateOne(
+        { _id: id },
+        { $set: { coverImage: img(id) } },
+      );
+      const result = await setCategoryImage(ADMIN, {
+        categoryId: id,
+        slot: "cover",
+        publicId,
+      });
+      expect(result).toMatchObject({ ok: true, tags: ["categories"] });
+      expect(await CategoryModel.findById(id).lean()).not.toHaveProperty(
+        "coverImage",
+      );
+    }
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
+    const last = await AuditLogModel.findOne({}).sort({ _id: -1 }).lean();
+    expect(last?.meta).toEqual({ fields: ["coverImage"], cleared: true });
+  });
+
+  it("changes nothing when the stored id is sent again", async () => {
+    const id = await create("Spot Lights");
+    await CategoryModel.updateOne({ _id: id }, { $set: { icon: img(id) } });
+    expect(
+      await setCategoryImage(ADMIN, {
+        categoryId: id,
+        slot: "icon",
+        publicId: img(id),
+      }),
+    ).toEqual({
+      ok: true,
+      data: { id, slot: "icon", publicId: img(id) },
+      tags: [],
+    });
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+  });
+
+  it.each([["too_large" as const], ["missing" as const]])(
+    "deletes and refuses an upload that is %s, saving and auditing nothing",
+    async (reason) => {
+      const id = await create("Spot Lights");
+      await AuditLogModel.deleteMany({});
+      cloudinaryMock.inspectImage.mockResolvedValue({ ok: false, reason });
+      const publicId = img(id, 3);
+      expect(
+        await setCategoryImage(ADMIN, {
+          categoryId: id,
+          slot: "icon",
+          publicId,
+        }),
+      ).toEqual({
+        ok: false,
+        errors: {
+          formErrors: [],
+          fieldErrors: { publicId: [IMAGE_REJECTED[reason]] },
+        },
+        tags: [],
+      });
+      expect(cloudinaryMock.destroyImage).toHaveBeenCalledWith(publicId);
+      expect(await CategoryModel.findById(id).lean()).not.toHaveProperty(
+        "icon",
+      );
+      expect(await AuditLogModel.countDocuments()).toBe(0);
+    },
+  );
+
+  it("names the slot's formats when the upload has the wrong format (e.g. an SVG cover)", async () => {
+    const id = await create("Spot Lights");
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: false,
+      reason: "bad_format",
+    });
+    const result = await setCategoryImage(ADMIN, {
+      categoryId: id,
+      slot: "cover",
+      publicId: img(id),
+    });
+    expect(result.ok ? null : result.errors.fieldErrors).toEqual({
+      publicId: [badFormatMessage(["jpg", "png", "webp"])],
+    });
+    expect(cloudinaryMock.destroyImage).toHaveBeenCalledWith(img(id));
+  });
+
+  it("keeps the upload when Cloudinary can't be reached", async () => {
+    const id = await create("Spot Lights");
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: false,
+      reason: "unavailable",
+    });
+    const result = await setCategoryImage(ADMIN, {
+      categoryId: id,
+      slot: "icon",
+      publicId: img(id),
+    });
+    expect(result.ok).toBe(false);
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
+  });
+
+  it("refuses another category's, an area's or a product's id and never deletes it", async () => {
+    const id = await create("Spot Lights");
+    const other = await create("Downlights");
+    for (const publicId of [
+      img(other),
+      testPublicId(0, id, "area"),
+      testPublicId(0, id, "product"),
+    ]) {
+      expect(
+        await setCategoryImage(ADMIN, {
+          categoryId: id,
+          slot: "icon",
+          publicId,
+        }),
+      ).toEqual({
+        ok: false,
+        errors: {
+          formErrors: [],
+          fieldErrors: { publicId: [IMAGE_REJECTED.foreign] },
+        },
+        tags: [],
+      });
+    }
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+    expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
+  });
+
+  it("refuses raw SVG markup, a URL, an unknown category and extra fields", async () => {
+    const id = await create("Spot Lights");
+    const missing = new ObjectId().toHexString();
+    for (const input of [
+      { categoryId: id, slot: "icon", publicId: "<svg onload=alert(1)>" },
+      { categoryId: id, slot: "icon", publicId: "https://evil.example/x.svg" },
+      { categoryId: id, slot: "banner", publicId: img(id) },
+      { categoryId: missing, slot: "icon", publicId: img(missing) },
+      { categoryId: id, slot: "icon", publicId: null, order: 1 },
+    ]) {
+      expect((await setCategoryImage(ADMIN, input)).ok).toBe(false);
+    }
+    expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
+    expect(await CategoryModel.findById(id).lean()).not.toHaveProperty("icon");
+  });
+
+  it("the model refuses an icon that is not one of our ids", async () => {
+    const id = await create("Spot Lights");
+    await expect(
+      CategoryModel.updateOne(
+        { _id: id },
+        { $set: { icon: "<svg/>" } },
+        { runValidators: true },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("keeps the image and still returns the tag when the audit write fails", async () => {
+    const id = await create("Spot Lights");
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("down"));
+    const result = await setCategoryImage(ADMIN, {
+      categoryId: id,
+      slot: "icon",
+      publicId: img(id),
+    });
+    log.mockRestore();
+    expect(result).toEqual({
+      ok: false,
+      errors: { formErrors: [AUDIT_FAILED_MESSAGE], fieldErrors: {} },
+      tags: ["categories"],
+    });
+    expect((await CategoryModel.findById(id).lean())?.icon).toBe(img(id));
   });
 });

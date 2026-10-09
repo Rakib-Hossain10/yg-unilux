@@ -13,6 +13,7 @@ import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
 import {
+  badFormatMessage,
   IMAGE_REJECTED,
   signCloudinaryUpload,
   verifyUploadedImage,
@@ -35,6 +36,7 @@ const SECRET = "Abc_secret-123";
 
 let product: string;
 let area: string;
+let category: string;
 
 beforeEach(async () => {
   vi.stubEnv(
@@ -54,17 +56,18 @@ beforeEach(async () => {
     AreaModel.deleteMany({}),
     CategoryModel.deleteMany({}),
   ]);
-  const category = await CategoryModel.create({
+  const categoryDoc = await CategoryModel.create({
     name: "Spot Lights",
     slug: "spot-lights",
     parent: null,
     order: 0,
   });
+  category = categoryDoc._id.toHexString();
   product = (
     await ProductModel.create({
       name: "Arc",
       slug: "arc",
-      mainCategory: category._id,
+      mainCategory: categoryDoc._id,
     })
   )._id.toHexString();
   area = (
@@ -76,6 +79,7 @@ describe("signCloudinaryUpload", () => {
   it.each([
     ["product" as const, () => product],
     ["area" as const, () => area],
+    ["category" as const, () => category],
   ])("signs a new id in the %s's own folder", async (target, owner) => {
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_999);
     const result = await signCloudinaryUpload(ADMIN, {
@@ -124,10 +128,21 @@ describe("signCloudinaryUpload", () => {
     expect(gone.ok ? null : gone.errors.formErrors).toEqual([
       "This product no longer exists. Reload the page.",
     ]);
-    // An area id is not a product.
+    // An area id is not a product, and a category id is not an area (or
+    // the other way round): each target is looked up in its own collection.
     expect(
       (await signCloudinaryUpload(ADMIN, { target: "product", id: area })).ok,
     ).toBe(false);
+    expect(
+      (await signCloudinaryUpload(ADMIN, { target: "area", id: category })).ok,
+    ).toBe(false);
+    const noCategory = await signCloudinaryUpload(ADMIN, {
+      target: "category",
+      id: area,
+    });
+    expect(noCategory.ok ? null : noCategory.errors.formErrors).toEqual([
+      "This category no longer exists. Reload the page.",
+    ]);
     for (const input of [
       { target: "leader", id: product },
       { target: "product", id: { $ne: null } },
@@ -171,6 +186,35 @@ describe("verifyUploadedImage", () => {
       expect(cloudinaryMock.destroyImage).toHaveBeenCalledWith(publicId);
     },
   );
+
+  it("checks a custom format list and names it when the format is wrong", async () => {
+    const publicId = testPublicId(0, category, "category");
+    const formats = ["png", "svg", "webp"];
+    await expect(
+      verifyUploadedImage(
+        { target: "category", id: category, publicId },
+        { formats },
+      ),
+    ).resolves.toEqual({ ok: true, publicId });
+    expect(cloudinaryMock.inspectImage).toHaveBeenCalledWith(publicId, formats);
+
+    cloudinaryMock.inspectImage.mockResolvedValue({
+      ok: false,
+      reason: "bad_format",
+    });
+    await expect(
+      verifyUploadedImage(
+        { target: "category", id: category, publicId },
+        { formats },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "bad_format",
+      message: badFormatMessage(formats),
+    });
+    expect(badFormatMessage(formats)).toContain("png, svg, webp");
+    expect(cloudinaryMock.destroyImage).toHaveBeenCalledWith(publicId);
+  });
 
   it("does not delete when Cloudinary can't be reached", async () => {
     cloudinaryMock.inspectImage.mockResolvedValue({
