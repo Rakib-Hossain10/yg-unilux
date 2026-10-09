@@ -21,7 +21,12 @@ import { MongoMemoryReplSet } from "mongodb-memory-server";
 import {
   E2E_ADMIN,
   E2E_CUSTOMER,
+  E2E_EXPIRED_ACCESS_ENDED,
+  E2E_EXPIRED_CUSTOMER,
   E2E_MAIL_CUSTOMER,
+  E2E_READY_ACCESS_UNTIL,
+  E2E_READY_CUSTOMER,
+  E2E_TEMP_CUSTOMER,
 } from "./fixtures/accounts";
 import { seedAreaPages } from "./fixtures/area-pages";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
@@ -78,6 +83,7 @@ async function seed(uri: string): Promise<void> {
   const { indexedModels } = await import("@/models");
   const { createAuth } = await import("@/lib/auth");
   const { seedAdmin } = await import("@/lib/seed-admin");
+  const { updateAccountFields } = await import("@/lib/account-writes");
 
   await connectDb();
   try {
@@ -90,6 +96,22 @@ async function seed(uri: string): Promise<void> {
     await auth.api.createUser({ body: { ...E2E_CUSTOMER } });
     // The email specs' own customer (reset/invite links, Resend sink).
     await auth.api.createUser({ body: { ...E2E_MAIL_CUSTOMER } });
+    // Phase 5 P2 account pages: one account per flow (accounts.ts).
+    await auth.api.createUser({ body: { ...E2E_TEMP_CUSTOMER } });
+    const context = await auth.$context;
+    for (const [account, accessExpiresAt] of [
+      [E2E_READY_CUSTOMER, E2E_READY_ACCESS_UNTIL],
+      [E2E_EXPIRED_CUSTOMER, E2E_EXPIRED_ACCESS_ENDED],
+    ] as const) {
+      const { user } = await auth.api.createUser({ body: { ...account } });
+      // As if the customer had already chosen their own password, through
+      // the one writer of our user fields (ADR 0068).
+      await updateAccountFields(context, user.id, {
+        mustChangePassword: false,
+        passwordSetAt: new Date(),
+        accessExpiresAt,
+      });
+    }
     // Every product-page spec's products, BEFORE `next start`: the cached
     // published-slug list fills on the first product-page visit, so a
     // product a spec inserted later would 404 (gate B harness fix).

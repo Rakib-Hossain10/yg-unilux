@@ -72,3 +72,20 @@ The P1 spikes checked better-auth 1.7.7 in `node_modules`. Before P1, nothing cl
 - ADR 0032's gap is closed; `remember-me.qa.test.ts` asserts it with a plain `it`.
 - **Accepted limit:** the device-epoch bump is read-then-write. A device token issued during a concurrent ban or set-password can survive, but it only chooses the sign-in rate-limit path, never access.
 - **Open for P3:** decide whether the admin's "set temporary password" also sets `mustChangePassword: true` and deletes invite links (expected: yes). The "invite expired" list filter needs a `$expr` comparing `passwordSetAt` and `invitedAt`. The request form's Zod should keep name, company and country to a short plain character set.
+
+## P2 addendum (2026-10-09, account pages)
+1. **Destination rule** `destinationAfterSignIn` (`src/lib/account-destination.ts`, pure, used by the login form and the server pages):
+   - anything but an explicit `mustChangePassword: false` → `/change-password` (carrying `?next=`); fails closed;
+   - admin → `/admin`, never `next`;
+   - everyone else → a safe `next`, else `/my-downloads`.
+   - `accountNextPath` = `safeNextPath` + refuses `/login`, `/change-password`, `/forgot-password`, `/reset-password`, `/api` (no loops, no JSON destinations).
+   - A signed-in user on `/login` gets a server `redirect()`. The DB is read only when a session cookie is present; a failed read shows the form.
+2. **Guards:** `/change-password` = `requireSignedIn()`; `/my-downloads` = `requireSignedIn("/my-downloads")`. No `loading.tsx`. Every account page is dynamic + noindex except `/forgot-password`, which is static (nothing per visitor).
+3. **Full page loads:** the header Account icon is a plain `<a href="/login">` (it may land on `/admin`, ADR 0027). Sign out POSTs `/api/auth/sign-out`, then `location.replace("/")`; on failure it stays with an alert.
+4. **Reset page** (`resetPageState`): any `error` param, a missing/repeated token, or a token not matching `^[A-Za-z0-9_-]{16,128}$` → expired view without a round trip; `invite=1` → "Set your password". A 400 `INVALID_TOKEN`/`USER_NOT_FOUND` swaps in the same view. Success → `/login?reset=1`. The expired view never says whether the account exists; WhatsApp only when a number is set.
+5. **Referrer:** `/reset-password` metadata `referrer: "no-referrer"`, links `rel="noreferrer"`, fetch `referrerPolicy: "no-referrer"`. The token is never logged or copied into another URL. A `Referrer-Policy` response header for this path is an optional second layer (not done).
+6. **Forms:** `method="post"` with no action (ADR 0029), so a no-JS submit never puts a secret in the URL; they need JS to work. New password asked twice (browser-only match), 12–128 characters, must differ from the current one. One 429 text. A 401 on change-password → "session ended" + sign-in link.
+7. **History reader** `getDownloadHistory(userId, page)` (`src/lib/download-history.ts`): `countDocuments` + `find().lean()` with projection, sort `{downloadedAt:-1,_id:-1}`, then one `$in` each for products and datasheets; 20 per page, page 1–1000, past the end → last page; no spec values or storage keys (tested); called only with the session's own id. "Download again" only when the viewer can download now and the product is published with a datasheet; drafts "(no longer listed)", deleted products "A product that has been removed".
+8. **Access line** `accessStatus` (on `checkDatasheetAccess`): admin / active until / no end date / ended (→ `/request-access?renew=1`) / paused / none; UTC dates.
+9. **WhatsApp:** `src/lib/contact-settings.ts` (`getWhatsappNumber`, `whatsappLink`): uncached, fails soft to null, `wa.me` links only from 8–15 digits. P6 reuses it.
+10. **e2e:** new accounts `E2E_TEMP_CUSTOMER`, `E2E_READY_CUSTOMER`, `E2E_EXPIRED_CUSTOMER`; `E2E_SEEDED_CUSTOMERS` drives the dashboard count (P1 had silently broken `admin-shell.spec.ts`).

@@ -117,7 +117,9 @@ test.describe("admin access", () => {
 
   test("a customer gets a real 403 on /admin", async ({ page }) => {
     await signIn(page, E2E_CUSTOMER.email, E2E_CUSTOMER.password);
-    await expect(page).toHaveURL(/\/$/);
+    // Still on its temporary password: /login sends it to change it first
+    // (Phase 5 plan Q7).
+    await expect(page).toHaveURL(/\/change-password$/);
     const response = await page.goto("/admin");
     expect(response?.status()).toBe(403);
     await expect(
@@ -191,7 +193,7 @@ test.describe("keep me signed in (same for every role)", () => {
     context,
   }) => {
     await signIn(page, E2E_CUSTOMER.email, E2E_CUSTOMER.password, true);
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/change-password$/);
     const session = (await context.cookies()).find((c) =>
       c.name.endsWith("session_token"),
     );

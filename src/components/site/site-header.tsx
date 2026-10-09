@@ -91,17 +91,13 @@ export function SiteHeader({
               })) ?? []
             }
           />
-          {/* Not prefetched: the sign-in page's form code (with its schema
-              library, ~100 KB) would otherwise load on every public page
-              that shows the header. It loads on click instead. */}
-          <Link
-            href="/login"
-            prefetch={false}
-            aria-label="Account"
-            className={iconLink}
-          >
+          {/* A plain <a>, a full page load: /login sends a signed-in admin
+              straight on to /admin, which must arrive as its own document
+              with its own CSP (ADR 0027 note). Nothing is prefetched, so the
+              form code (~100 KB) loads only on click. */}
+          <a href="/login" aria-label="Account" className={iconLink}>
             <AccountIcon />
-          </Link>
+          </a>
 
           {/* Mobile menu: native disclosure that also closes on navigation,
               Escape and outside clicks; the panel is rendered here. */}

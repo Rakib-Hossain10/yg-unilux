@@ -3,11 +3,21 @@
 // The sign-in form: React Hook Form + Zod in the browser for quick feedback,
 // then a JSON POST to Better Auth's /api/auth/sign-in/email, where the real
 // checks run (Zod again in our hook, rate limits, argon2id — ADR 0022/0023).
+// Afterwards the shared destination rule (plan Q7) picks the next page.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+
+import { destinationAfterSignIn } from "@/lib/account-destination";
+
+import {
+  FormAlert,
+  FormField,
+  primaryButton,
+  textLink,
+} from "./account/account-ui";
 
 /* The same limits as the server's sign-in schema (email 254, password 1–128). */
 const loginSchema = z.object({
@@ -39,16 +49,21 @@ function messageFor(status: number): string {
   }
 }
 
-/* Where to go after signing in. Customer pages arrive in Phase 5. */
-function destinationFor(role: unknown): string {
-  const roles = typeof role === "string" ? role.split(",") : [];
-  return roles.map((r) => r.trim()).includes("admin") ? "/admin" : "/";
+/* The fields of the returned user that the destination rule reads. */
+function signedInUser(body: unknown): {
+  role?: unknown;
+  mustChangePassword?: unknown;
+} {
+  if (typeof body !== "object" || body === null || !("user" in body)) {
+    return {};
+  }
+  const user = (body as { user?: unknown }).user;
+  if (typeof user !== "object" || user === null) return {};
+  const { role, mustChangePassword } = user as Record<string, unknown>;
+  return { role, mustChangePassword };
 }
 
-const field =
-  "mt-1.5 block h-11 w-full border border-grey-300 bg-paper px-3 text-sm outline-offset-0 transition-colors duration-(--duration-quick) focus:border-ink aria-invalid:border-red-700";
-
-export function LoginForm() {
+export function LoginForm({ next }: { next: string | null }) {
   const [formError, setFormError] = useState<string | null>(null);
   const {
     register,
@@ -84,15 +99,13 @@ export function LoginForm() {
       return;
     }
     const body: unknown = await response.json().catch(() => null);
-    const role =
-      typeof body === "object" && body !== null && "user" in body
-        ? (body.user as { role?: unknown } | null)?.role
-        : undefined;
     // A full page load, not router.replace: CSP is fixed per document, so a
     // client-side move would keep /login's connect-src 'self' and the admin
     // panel's direct uploads would be blocked (ADR 0045). The load also
-    // renders everything again for the new session cookie.
-    window.location.assign(destinationFor(role));
+    // renders everything again for the new session cookie. The rule checks
+    // `next` again (same-origin, not an auth page) and fails closed: a
+    // missing mustChangePassword goes to /change-password.
+    window.location.assign(destinationAfterSignIn(signedInUser(body), next));
   }
 
   return (
@@ -106,51 +119,36 @@ export function LoginForm() {
       noValidate
       className="mt-10 space-y-5"
     >
-      <div>
-        <label htmlFor="email" className="text-xs tracking-[0.14em] uppercase">
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="username"
-          inputMode="email"
-          aria-invalid={errors.email ? true : undefined}
-          aria-describedby={errors.email ? "email-error" : undefined}
-          className={field}
-          {...register("email")}
-        />
-        {errors.email ? (
-          <p id="email-error" className="mt-1.5 text-sm text-red-700">
-            {errors.email.message}
-          </p>
-        ) : null}
-      </div>
+      <FormField
+        id="email"
+        label="Email"
+        error={errors.email?.message}
+        inputProps={{
+          type: "email",
+          autoComplete: "username",
+          inputMode: "email",
+          spellCheck: false,
+          ...register("email"),
+        }}
+      />
 
       <div>
-        <label
-          htmlFor="password"
-          className="text-xs tracking-[0.14em] uppercase"
-        >
-          Password
-        </label>
-        <input
+        <FormField
           id="password"
-          type="password"
-          autoComplete="current-password"
-          aria-invalid={errors.password ? true : undefined}
-          aria-describedby={errors.password ? "password-error" : undefined}
-          className={field}
-          {...register("password")}
+          label="Password"
+          error={errors.password?.message}
+          inputProps={{
+            type: "password",
+            autoComplete: "current-password",
+            ...register("password"),
+          }}
         />
-        {errors.password ? (
-          <p id="password-error" className="mt-1.5 text-sm text-red-700">
-            {errors.password.message}
-          </p>
-        ) : null}
+        <a href="/forgot-password" className={`${textLink} text-sm`}>
+          Forgot your password?
+        </a>
       </div>
 
-      <div className="flex items-center gap-2.5">
+      <div className="flex min-h-11 items-center gap-2.5">
         <input
           id="remember-me"
           type="checkbox"
@@ -163,15 +161,9 @@ export function LoginForm() {
       </div>
 
       {/* Announced to screen readers when it appears. */}
-      <p role="alert" className="min-h-5 text-sm text-red-700">
-        {formError}
-      </p>
+      <FormAlert>{formError}</FormAlert>
 
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="h-11 w-full bg-ink text-xs tracking-[0.16em] text-paper uppercase transition-opacity duration-(--duration-quick) hover:opacity-90 disabled:opacity-60"
-      >
+      <button type="submit" disabled={isSubmitting} className={primaryButton}>
         {isSubmitting ? "Signing in…" : "Sign in"}
       </button>
     </form>
