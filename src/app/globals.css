@@ -8,6 +8,10 @@
 @import "tailwindcss";
 /* Product page motion pass (P8): highlight, crossfades, lightbox, reveal. */
 @import "../components/motion/product/product-motion.css";
+/* Listing + header motion pass (4b L7): results crossfade, card morph crop,
+   long-facet disclosure, mega-menu reveal, search overlay + scroll lock. */
+@import "../components/motion/listing/listing-motion.css";
+@import "../components/motion/menu/menu-motion.css";
 
 /* State variants the shadcn components use (data-open, data-checked, ...).
    Copied from the shadcn package so we do not ship the package itself.

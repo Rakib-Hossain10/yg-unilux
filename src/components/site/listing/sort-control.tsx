@@ -8,6 +8,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type FormEvent } from "react";
 
+import { beginListingRefine } from "@/components/motion/listing/filter-transition";
+
 import { formHref } from "./form-query";
 import { useHydrated } from "./use-hydrated";
 
@@ -46,6 +48,7 @@ export function SortControl({
 
   const apply = (form: HTMLFormElement) => {
     const href = formHref(action, new FormData(form));
+    beginListingRefine(form);
     startTransition(() => {
       router.replace(href, { scroll: false });
     });

@@ -22,6 +22,7 @@ import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 import { seedAreaPages } from "./fixtures/area-pages";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
 import { seedListingGateB } from "./fixtures/listing-gate-b";
+import { seedListingMotion } from "./fixtures/listing-motion";
 import { seedListingPages } from "./fixtures/listing-pages";
 import { seedProductPages } from "./fixtures/product-pages";
 import {
@@ -95,6 +96,8 @@ async function seed(uri: string): Promise<void> {
     await seedAreaPages(getDb());
     // QA gate B (4b): every-column leak data for listing, search and menu.
     await seedListingGateB(getDb());
+    // 4b L7: a category with a long CCT facet (listing motion spec).
+    await seedListingMotion(getDb());
   } finally {
     await disconnectDb();
   }

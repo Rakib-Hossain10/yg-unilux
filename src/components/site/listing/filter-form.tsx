@@ -9,7 +9,14 @@
 // every id carries `idPrefix`.
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition, type FormEvent } from "react";
+import { type FormEvent, type ReactNode, useState, useTransition } from "react";
+
+import {
+  moreHasSelected,
+  showMoreLabel,
+  splitFacetOptions,
+} from "@/components/motion/listing/facet-collapse";
+import { beginListingRefine } from "@/components/motion/listing/filter-transition";
 
 import { formHref } from "./form-query";
 import { useHydrated } from "./use-hydrated";
@@ -74,6 +81,8 @@ export function FilterForm({
 
   const apply = (form: HTMLFormElement) => {
     const href = formHref(action, new FormData(form));
+    // The results crossfade (L7); not from the sheet or under reduced motion.
+    beginListingRefine(form);
     setChanged(true);
     startTransition(() => {
       router.replace(href, { scroll: false });
@@ -110,6 +119,44 @@ export function FilterForm({
         <input type="hidden" name="sort" value={sort} />
       ) : null}
       {groups.map((group) => {
+        const { visible, more } = splitFacetOptions(group.options);
+        const renderOption = (option: FilterFormOption) => {
+          const token = tokenOf(group.param, option.value);
+          const inputId = `${idPrefix}-${group.param}-${option.value}`;
+          return (
+            <li key={option.value}>
+              <label
+                htmlFor={inputId}
+                className="group flex min-h-11 cursor-pointer items-center gap-3 text-[0.9375rem] text-grey-800 hover:text-ink"
+              >
+                <input
+                  id={inputId}
+                  type="checkbox"
+                  name={group.param}
+                  value={option.value}
+                  checked={checked.has(token)}
+                  onChange={(event) =>
+                    onToggle(
+                      token,
+                      event.currentTarget.checked,
+                      event.currentTarget.form,
+                    )
+                  }
+                  className="size-4 shrink-0 cursor-pointer accent-ink"
+                />
+                <span className="min-w-0 flex-1 break-words">
+                  {option.label}
+                </span>
+                <span className="text-sm text-grey-600 tabular-nums">
+                  {option.count}
+                  <span className="sr-only">
+                    {option.count === 1 ? " product" : " products"}
+                  </span>
+                </span>
+              </label>
+            </li>
+          );
+        };
         return (
           <fieldset
             key={group.param}
@@ -118,45 +165,18 @@ export function FilterForm({
             <legend className="float-left w-full text-sm font-medium text-ink">
               {group.label}
             </legend>
-            <ul className="clear-both pt-2">
-              {group.options.map((option) => {
-                const token = tokenOf(group.param, option.value);
-                const inputId = `${idPrefix}-${group.param}-${option.value}`;
-                return (
-                  <li key={option.value}>
-                    <label
-                      htmlFor={inputId}
-                      className="group flex min-h-11 cursor-pointer items-center gap-3 text-[0.9375rem] text-grey-800 hover:text-ink"
-                    >
-                      <input
-                        id={inputId}
-                        type="checkbox"
-                        name={group.param}
-                        value={option.value}
-                        checked={checked.has(token)}
-                        onChange={(event) =>
-                          onToggle(
-                            token,
-                            event.currentTarget.checked,
-                            event.currentTarget.form,
-                          )
-                        }
-                        className="size-4 shrink-0 cursor-pointer accent-ink"
-                      />
-                      <span className="min-w-0 flex-1 break-words">
-                        {option.label}
-                      </span>
-                      <span className="text-sm text-grey-600 tabular-nums">
-                        {option.count}
-                        <span className="sr-only">
-                          {option.count === 1 ? " product" : " products"}
-                        </span>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
+            <ul className="clear-both pt-2">{visible.map(renderOption)}</ul>
+            {more.length > 0 ? (
+              <FacetMore
+                count={more.length}
+                facetLabel={group.label}
+                hasSelected={moreHasSelected(more, (value) =>
+                  checked.has(tokenOf(group.param, value)),
+                )}
+              >
+                {more.map(renderOption)}
+              </FacetMore>
+            ) : null}
           </fieldset>
         );
       })}
@@ -174,5 +194,47 @@ export function FilterForm({
         {changed && !pending ? `${productsLabel(total)} found` : ""}
       </p>
     </form>
+  );
+}
+
+/*
+ * The rest of a long facet behind a native disclosure (L7): works without
+ * JavaScript, is in the server HTML (no shift after hydration), and the
+ * boxes inside still submit while it is closed. It starts open, and opens
+ * itself, whenever one of its values is checked, so a checked box is never
+ * hidden; once opened it stays open until the visitor closes it.
+ */
+function FacetMore({
+  count,
+  facetLabel,
+  hasSelected,
+  children,
+}: {
+  count: number;
+  facetLabel: string;
+  hasSelected: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(hasSelected);
+  if (hasSelected && !open) setOpen(true);
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      data-slot="facet-more"
+      className="group/more"
+    >
+      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center text-sm text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink [&::-webkit-details-marker]:hidden">
+        <span className="group-open/more:hidden">
+          {showMoreLabel(count)}
+          <span className="sr-only"> {facetLabel} values</span>
+        </span>
+        <span className="hidden group-open/more:inline">
+          Show fewer
+          <span className="sr-only"> {facetLabel} values</span>
+        </span>
+      </summary>
+      <ul data-slot="facet-more-list">{children}</ul>
+    </details>
   );
 }

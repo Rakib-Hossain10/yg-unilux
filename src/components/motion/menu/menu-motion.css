@@ -1,0 +1,164 @@
+/* Header motion pass (Phase 4b L7, motion-engineer): the product mega-menu
+   reveal and the search overlay open/close, plus the scroll lock behind the
+   overlay. Imported once by src/app/globals.css. Rules:
+   - only opacity and transform animate (plus the discrete display/overlay
+     hand-off that lets a hidden panel or a closing dialog fade out);
+   - nothing here hides server-rendered content: the mega-menu panel and the
+     overlay only exist (or open) after hydration and a visitor action;
+   - every animation sits under prefers-reduced-motion: no-preference: with
+     reduce, or in a browser without @starting-style / allow-discrete, the
+     panel and the overlay simply appear and disappear. */
+
+/* ---- Mega-menu: panel and scrim ----------------------------------------
+   The panel and scrim use the `hidden` attribute (display: none). The
+   display hand-off keeps them rendered while they fade out; a closing panel
+   takes no pointer input. */
+[data-slot="mega-menu-panel"][hidden],
+[data-slot="mega-menu-scrim"][hidden] {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-slot="mega-menu-panel"],
+  [data-slot="mega-menu-scrim"] {
+    transition:
+      opacity 220ms var(--ease-calm),
+      display 220ms allow-discrete;
+  }
+  [data-slot="mega-menu-panel"][hidden],
+  [data-slot="mega-menu-scrim"][hidden] {
+    opacity: 0;
+  }
+  /* Opening fades only the scrim: the panel's text is at full contrast
+     from its first frame (it drops in, below); closing fades both. */
+  @starting-style {
+    [data-slot="mega-menu-scrim"]:not([hidden]) {
+      opacity: 0;
+    }
+  }
+
+  /* The panel's content drops in a few pixels, the category strip follows
+     in a short left-to-right cascade (first ten; later ones arrive with the
+     tenth). The delay is a custom property, so the `animation` shorthand
+     above does not reset it. */
+  [data-slot="mega-menu-panel"] > div {
+    transition: transform 320ms var(--ease-calm);
+  }
+  [data-slot="mega-menu-panel"][hidden] > div {
+    transform: translateY(-0.5rem);
+  }
+  @starting-style {
+    [data-slot="mega-menu-panel"]:not([hidden]) > div {
+      transform: translateY(-0.5rem);
+    }
+  }
+
+  [data-slot="mega-menu-panel"]:not([hidden]) [data-menu-category] {
+    animation: menu-item-in 360ms var(--ease-calm) var(--menu-delay, 0ms) both;
+  }
+  [data-menu-category]:nth-of-type(2) {
+    --menu-delay: 25ms;
+  }
+  [data-menu-category]:nth-of-type(3) {
+    --menu-delay: 50ms;
+  }
+  [data-menu-category]:nth-of-type(4) {
+    --menu-delay: 75ms;
+  }
+  [data-menu-category]:nth-of-type(5) {
+    --menu-delay: 100ms;
+  }
+  [data-menu-category]:nth-of-type(6) {
+    --menu-delay: 125ms;
+  }
+  [data-menu-category]:nth-of-type(7) {
+    --menu-delay: 150ms;
+  }
+  [data-menu-category]:nth-of-type(8) {
+    --menu-delay: 175ms;
+  }
+  [data-menu-category]:nth-of-type(9) {
+    --menu-delay: 200ms;
+  }
+  [data-menu-category]:nth-of-type(n + 10) {
+    --menu-delay: 225ms;
+  }
+
+  /* The active category's block settles in on open and on every switch
+     (a block becomes rendered when it stops being hidden). */
+  [data-slot="mega-menu-panel"]:not([hidden])
+    [data-slot="mega-menu-detail"]:not([hidden]) {
+    animation: menu-detail-in 280ms var(--ease-calm) both;
+  }
+}
+
+/* Transform only: the panel's own fade carries the opacity, so a category
+   name is never drawn at reduced contrast after the panel has faded in
+   (axe runs right after opening, and so do quick readers). */
+@keyframes menu-item-in {
+  from {
+    transform: translateY(0.375rem);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes menu-detail-in {
+  from {
+    transform: translateY(0.375rem);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* ---- Search overlay: open / close -------------------------------------
+   Open: the backdrop fades in from @starting-style and the sheet slides
+   down a little from the header. Close: dialog and backdrop fade out
+   through the display/overlay hand-off (it stays in the top layer while it
+   fades). */
+@media (prefers-reduced-motion: no-preference) {
+  dialog[data-slot="search-overlay"],
+  dialog[data-slot="search-overlay"]::backdrop {
+    opacity: 0;
+    transition:
+      opacity 220ms var(--ease-calm),
+      display 220ms allow-discrete,
+      overlay 220ms allow-discrete;
+  }
+  dialog[data-slot="search-overlay"][open],
+  dialog[data-slot="search-overlay"][open]::backdrop {
+    opacity: 1;
+  }
+  /* Opening fades only the backdrop: the sheet's text is at full contrast
+     from its first frame (it slides down, below); closing fades both. */
+  @starting-style {
+    dialog[data-slot="search-overlay"][open]::backdrop {
+      opacity: 0;
+    }
+  }
+
+  dialog[data-slot="search-overlay"] > [data-slot="search-sheet"] {
+    transform: translateY(-1rem);
+    transition: transform 320ms var(--ease-calm);
+  }
+  dialog[data-slot="search-overlay"][open] > [data-slot="search-sheet"] {
+    transform: none;
+  }
+  @starting-style {
+    dialog[data-slot="search-overlay"][open] > [data-slot="search-sheet"] {
+      transform: translateY(-1rem);
+    }
+  }
+}
+
+/* ---- Scroll lock behind the open overlay ------------------------------
+   The page under the modal does not scroll (the results list scrolls on its
+   own, overscroll-contain); the same rule as the filter sheet and the
+   lightbox (globals.css). No scrollbar-gutter: it would leave the page
+   narrower than its content while open, and the dimmed page behind the
+   sheet makes the scrollbar's disappearance hard to notice. Lifted the
+   moment the dialog closes (:modal ends before the fade-out). */
+html:has(dialog[data-slot="search-overlay"]:modal) {
+  overflow: hidden;
+}

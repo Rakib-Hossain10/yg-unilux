@@ -5,8 +5,8 @@
 // (FilterForm, FilterSheet, SortControl). It renders only card data and
 // facet counts: no spec value can reach it.
 
-import Link from "next/link";
-
+import { ListingResultsTransition } from "@/components/motion/listing/listing-results-transition";
+import { RefineLink } from "@/components/motion/listing/refine-link";
 import type { ListingFacets } from "@/lib/catalog/facets";
 import { countActiveFilters } from "@/lib/catalog/listing-params";
 import type { ListingResult } from "@/lib/catalog/listing";
@@ -105,22 +105,21 @@ export function ListingResults({
           <ul className="flex flex-wrap gap-2" data-slot="filter-chips">
             {chips.map((chip) => (
               <li key={`${chip.param}=${chip.value}`}>
-                <Link
+                <RefineLink
                   href={chip.href}
-                  scroll={false}
                   aria-label={`Remove filter ${chip.facetLabel} ${chip.label}`}
                   className="inline-flex h-11 items-center gap-2 border border-grey-300 bg-grey-50 pr-3 pl-4 text-sm text-ink transition-colors duration-(--duration-quick) hover:border-ink"
                 >
                   {chip.label}
                   <CloseIcon className="size-3.5 text-grey-600" />
-                </Link>
+                </RefineLink>
               </li>
             ))}
           </ul>
           {clearHref ? (
-            <Link href={clearHref} scroll={false} className={textLink}>
+            <RefineLink href={clearHref} className={textLink}>
               Clear all
-            </Link>
+            </RefineLink>
           ) : null}
         </div>
       ) : null}
@@ -142,48 +141,51 @@ export function ListingResults({
                 Filters
               </h2>
               {clearHref ? (
-                <Link href={clearHref} scroll={false} className={textLink}>
+                <RefineLink href={clearHref} className={textLink}>
                   Clear all
-                </Link>
+                </RefineLink>
               ) : null}
             </div>
             <FilterForm idPrefix="rail" {...formProps} />
           </aside>
         ) : null}
 
-        <section
-          aria-labelledby="listing-results-heading"
-          className={hasFilters ? "lg:col-span-9" : ""}
-        >
-          <h2 id="listing-results-heading" className="sr-only">
-            Products
-          </h2>
-          {cards.length > 0 ? (
-            <>
-              <ListingGrid cards={cards} />
-              <Pagination
-                basePath={basePath}
-                params={params}
-                page={result.page}
-                pageCount={result.pageCount}
+        {/* Crossfades on a filter / sort / chip change (L7); no DOM. */}
+        <ListingResultsTransition>
+          <section
+            aria-labelledby="listing-results-heading"
+            className={hasFilters ? "lg:col-span-9" : ""}
+          >
+            <h2 id="listing-results-heading" className="sr-only">
+              Products
+            </h2>
+            {cards.length > 0 ? (
+              <>
+                <ListingGrid cards={cards} />
+                <Pagination
+                  basePath={basePath}
+                  params={params}
+                  page={result.page}
+                  pageCount={result.pageCount}
+                />
+              </>
+            ) : activeCount > 0 ? (
+              <EmptyState
+                title="No products match these filters"
+                message="Remove a filter above, or clear them all to see every product here."
+                href={clearHref ?? basePath}
+                linkLabel="Clear all filters"
               />
-            </>
-          ) : activeCount > 0 ? (
-            <EmptyState
-              title="No products match these filters"
-              message="Remove a filter above, or clear them all to see every product here."
-              href={clearHref ?? basePath}
-              linkLabel="Clear all filters"
-            />
-          ) : (
-            <EmptyState
-              title="Nothing here yet"
-              message={emptyScope.message}
-              href={emptyScope.href}
-              linkLabel={emptyScope.linkLabel}
-            />
-          )}
-        </section>
+            ) : (
+              <EmptyState
+                title="Nothing here yet"
+                message={emptyScope.message}
+                href={emptyScope.href}
+                linkLabel={emptyScope.linkLabel}
+              />
+            )}
+          </section>
+        </ListingResultsTransition>
       </div>
     </div>
   );
@@ -209,13 +211,12 @@ function EmptyState({
         {title}
       </p>
       <p className="mt-3 max-w-md text-grey-600">{message}</p>
-      <Link
+      <RefineLink
         href={href}
-        scroll={false}
         className="mt-8 inline-flex h-11 items-center border border-ink px-6 text-sm transition-colors duration-(--duration-quick) hover:bg-ink hover:text-paper"
       >
         {linkLabel}
-      </Link>
+      </RefineLink>
     </div>
   );
 }
