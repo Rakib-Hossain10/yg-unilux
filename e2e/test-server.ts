@@ -18,7 +18,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
-import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import {
+  E2E_ADMIN,
+  E2E_CUSTOMER,
+  E2E_MAIL_CUSTOMER,
+} from "./fixtures/accounts";
 import { seedAreaPages } from "./fixtures/area-pages";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
 import { seedListingGateB } from "./fixtures/listing-gate-b";
@@ -84,6 +88,8 @@ async function seed(uri: string): Promise<void> {
     // A customer straight from createUser keeps mustChangePassword: true,
     // like a real new account; /admin must still answer 403.
     await auth.api.createUser({ body: { ...E2E_CUSTOMER } });
+    // The email specs' own customer (reset/invite links, Resend sink).
+    await auth.api.createUser({ body: { ...E2E_MAIL_CUSTOMER } });
     // Every product-page spec's products, BEFORE `next start`: the cached
     // published-slug list fills on the first product-page visit, so a
     // product a spec inserted later would 404 (gate B harness fix).

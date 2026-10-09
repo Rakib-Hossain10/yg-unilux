@@ -9,6 +9,7 @@ import { forbidden, redirect } from "next/navigation";
 import { cache } from "react";
 
 import { getSessionFromDb, hasRole } from "./auth";
+import { safeNextPath } from "./safe-next-path";
 
 // ---------------------------------------------------------------------------
 // Pure rules (no request, no database: unit-tested directly)
@@ -149,6 +150,36 @@ export async function requireAdmin(): Promise<Viewer> {
   if (!viewer) redirect(LOGIN_PATH);
   if (!isActiveAdmin(viewer.user, new Date())) forbidden();
   if (needsPasswordChange(viewer.user)) redirect(CHANGE_PASSWORD_PATH);
+  return viewer;
+}
+
+/**
+ * The login URL that brings the user back to `nextPath` afterwards:
+ * `/login?next=<path>` when the path is safe (same-origin, safeNextPath),
+ * plain `/login` otherwise.
+ */
+export function loginPathFor(nextPath?: string | null): string {
+  const next = nextPath ? safeNextPath(nextPath) : null;
+  return next
+    ? `${LOGIN_PATH}?${new URLSearchParams({ next }).toString()}`
+    : LOGIN_PATH;
+}
+
+/**
+ * Guard for pages and Server Actions that need any signed-in user, such as
+ * /change-password and /my-downloads. Signed out → redirect to the login
+ * page with `?next=` set to `nextPath` (the caller passes its own path; an
+ * unsafe one is dropped). Returns the viewer, read from the database.
+ *
+ * It does NOT redirect a user who is still on a temporary password, and it
+ * does not check role, ban or expiry: callers decide. /change-password must
+ * accept exactly those users, and /my-downloads shows the reason a download
+ * is locked instead of hiding the page. Like requireAdmin(), it works by
+ * throwing: await it outside any try/catch.
+ */
+export async function requireSignedIn(nextPath?: string): Promise<Viewer> {
+  const viewer = await getViewer();
+  if (!viewer) redirect(loginPathFor(nextPath));
   return viewer;
 }
 

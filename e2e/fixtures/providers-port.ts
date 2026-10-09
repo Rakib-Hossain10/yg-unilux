@@ -1,4 +1,4 @@
-// The loopback port of the in-memory R2/Cloudinary fakes (e2e/fake-providers).
+// The loopback port of the in-memory R2/Cloudinary/Resend fakes (e2e/fake-providers).
 // Shared by the test server, which starts them, and the specs, which forward
 // the browser's provider calls to them. Loopback only; never a real host.
 
@@ -17,4 +17,7 @@ export const E2E_PROVIDER_ENV = {
   R2_ACCESS_KEY_ID: "e2e-access-key",
   R2_SECRET_ACCESS_KEY: "e2e-not-a-secret",
   R2_BUCKET: "e2e-private",
+  // Resend goes to the fake's email sink (e2e/fixtures/emails.ts reads it).
+  RESEND_API_KEY: "e2e-not-a-secret",
+  EMAIL_FROM: "YG UniLUX <no-reply@e2e.invalid>",
 } as const;

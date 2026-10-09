@@ -10,7 +10,9 @@ import {
   checkDatasheetAccess,
   isActiveAdmin,
   isBanned,
+  loginPathFor,
   requireAdmin,
+  requireSignedIn,
   requireAdminForRoute,
   requireCustomerAccess,
   viewerCanSeeRestricted,
@@ -195,6 +197,53 @@ describe("requireAdmin", () => {
   it("lets a database failure through instead of allowing or signing out", async () => {
     getSession.mockRejectedValue(new Error("db down"));
     await expect(requireAdmin()).rejects.toThrow("db down");
+  });
+});
+
+describe("requireSignedIn", () => {
+  it("sends a signed-out visitor to the login page with a safe next", async () => {
+    getSession.mockResolvedValue(null);
+    await expect(requireSignedIn("/my-downloads")).rejects.toThrow(
+      "REDIRECT /login?next=%2Fmy-downloads",
+    );
+  });
+
+  it("drops an unsafe next and sends plain /login", async () => {
+    getSession.mockResolvedValue(null);
+    await expect(requireSignedIn("//evil.example")).rejects.toThrow(
+      /^REDIRECT \/login$/,
+    );
+    await expect(requireSignedIn()).rejects.toThrow(/^REDIRECT \/login$/);
+  });
+
+  it("returns a temporary-password user without redirecting (callers decide)", async () => {
+    signedInAs({ mustChangePassword: true });
+    const viewer = await requireSignedIn("/change-password");
+    expect(viewer.user.mustChangePassword).toBe(true);
+  });
+
+  it("returns banned and expired users too (no access check here)", async () => {
+    signedInAs({ banned: true, accessExpiresAt: PAST });
+    expect((await requireSignedIn()).user.banned).toBe(true);
+  });
+
+  it("lets a database failure through", async () => {
+    getSession.mockRejectedValue(new Error("db down"));
+    await expect(requireSignedIn()).rejects.toThrow("db down");
+  });
+});
+
+describe("loginPathFor", () => {
+  it("keeps a query in next, encoded", () => {
+    expect(loginPathFor("/product/arc-ar-013a?model=AR-013A2")).toBe(
+      "/login?next=%2Fproduct%2Farc-ar-013a%3Fmodel%3DAR-013A2",
+    );
+  });
+
+  it("falls back to /login for null, empty or unsafe values", () => {
+    expect(loginPathFor(null)).toBe("/login");
+    expect(loginPathFor("")).toBe("/login");
+    expect(loginPathFor("https://evil.example/")).toBe("/login");
   });
 });
 

@@ -1,6 +1,7 @@
 // Server-only transactional email on Resend. One generic sender, sendEmail(),
-// plus one function per template (only the password reset for now); later
-// templates (account created, expiry reminder, whistleblower alert) go here too.
+// plus one function per template: password reset, and the Phase 5 account
+// emails (invite, expiry reminder, access extended, request alert, decline,
+// admin digest). Nothing here logs; errors never carry an address or a link.
 
 import "server-only";
 
@@ -165,11 +166,30 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+/*
+ * True when the site itself runs on http://localhost (AUTH_URL), e.g. a
+ * local production build for the e2e suite. A link to that same origin then
+ * points at the machine the site runs on, not somewhere else. A missing or
+ * invalid AUTH_URL counts as false (fail closed).
+ */
+function siteIsLocalhostOrigin(url: URL): boolean {
+  try {
+    const site = new URL(env.auth().url);
+    return site.protocol === "http:" && site.hostname === "localhost"
+      ? site.origin === url.origin
+      : false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Validates a link before it goes into an email: it must be an absolute
  * https URL without embedded credentials. http is allowed only for
- * `localhost` and only outside production, for local development. Anything
- * else (javascript:, data:, relative links) is refused, so an unsafe link can
+ * `localhost`: outside production, or in a production build whose own
+ * AUTH_URL is that same http://localhost origin (local `next start`, the
+ * e2e suite; a real deployment's AUTH_URL is https). Anything else
+ * (javascript:, data:, relative links) is refused, so an unsafe link can
  * never be sent. Returns the normalised URL.
  */
 function requireSafeLink(raw: string): string {
@@ -183,7 +203,7 @@ function requireSafeLink(raw: string): string {
   const isLocalDev =
     url.protocol === "http:" &&
     url.hostname === "localhost" &&
-    !env.isProduction();
+    (!env.isProduction() || siteIsLocalhostOrigin(url));
   if (!(isHttps || isLocalDev) || url.username !== "" || url.password !== "") {
     throw new EmailSendError("invalid_link");
   }
@@ -295,4 +315,429 @@ export async function sendPasswordResetEmail(input: {
   );
 
   return sendEmail({ to: input.to, subject, text, html });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 account emails
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifetime of an invite ("Set your password") link, 72 hours (plan Q1). The
+ * single source of truth: src/lib/invite.ts sets the token's expiry from it
+ * and the invite email's copy is derived from it.
+ */
+export const INVITE_TOKEN_TTL_SECONDS = 72 * 60 * 60;
+
+/* Dates in emails are always UTC and spelled out ("12 October 2026"), so a
+ * reader in any country reads the same day (plan Q5). */
+const UTC_DATE = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+const UTC_TIME = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** "12 October 2026" (the UTC calendar day). */
+export function formatUtcDate(date: Date): string {
+  return UTC_DATE.format(date);
+}
+
+/** "12 October 2026, 14:05 UTC". */
+export function formatUtcDateTime(date: Date): string {
+  return `${UTC_DATE.format(date)}, ${UTC_TIME.format(date)} UTC`;
+}
+
+/*
+ * Access ends at the END of a UTC day (23:59:59.999, plan Q5), so the
+ * sentence names that day: "until the end of 12 October 2026 (UTC)".
+ */
+function accessUntilText(date: Date): string {
+  return `until the end of ${formatUtcDate(date)} (UTC)`;
+}
+
+/*
+ * An absolute link to one of our own pages. Built from AUTH_URL, the same
+ * fixed origin Better Auth uses for reset links (never a request's Host
+ * header), then checked like every other link.
+ */
+function siteLink(pathWithQuery: string): string {
+  return requireSafeLink(new URL(pathWithQuery, env.auth().url).href);
+}
+
+/*
+ * A link a caller passed in (the invite URL holds a token): it must be safe
+ * AND point at our own origin, so a bug upstream can never mail a customer a
+ * link to somewhere else.
+ */
+function requireOwnLink(raw: string): string {
+  const link = requireSafeLink(raw);
+  if (new URL(link).origin !== new URL(env.auth().url).origin) {
+    throw new EmailSendError("invalid_link");
+  }
+  return link;
+}
+
+/* A one-line profile value (name, company, country) for an email body. */
+function oneLine(value: string | null | undefined, max = 200): string {
+  return (value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/*
+ * Requester text from the PUBLIC form (name, company, country) reaches the
+ * company inbox and, as the greeting, the requester's own mailbox. Mail clients turn URL-looking text into links, so a
+ * "company" of "verify at https://evil.example" would arrive as a clickable
+ * phishing link from our own sender. Defang it: break schemes, "www.",
+ * "@" and dots before a domain-like ending, so nothing is linkified.
+ */
+function defang(value: string): string {
+  return value
+    .replace(/:\/\//g, "[:]//")
+    .replace(/@/g, "[at]")
+    .replace(/\bwww\./gi, "www[.]")
+    .replace(/([a-z0-9-])\.(?=[a-z]{2,}(?:\b|[/?#:]))/gi, "$1[.]");
+}
+
+/* Building blocks of the account emails; each renders to text and HTML. */
+type Block =
+  | { kind: "p"; text: string }
+  | { kind: "button"; label: string; href: string }
+  | { kind: "list"; items: readonly string[] };
+
+const P_STYLE = "margin:0 0 16px;";
+
+/*
+ * Renders blocks into the plain-text and HTML bodies. Every value is
+ * escaped here, so templates pass plain strings only.
+ */
+function renderBlocks(
+  subject: string,
+  blocks: readonly Block[],
+): { text: string; html: string } {
+  const text: string[] = [];
+  const html: string[] = [];
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "p":
+        text.push(block.text, "");
+        html.push(`<p style="${P_STYLE}">${escapeHtml(block.text)}</p>`);
+        break;
+      case "button": {
+        const href = escapeHtml(block.href);
+        text.push(`${block.label}:`, block.href, "");
+        html.push(
+          `<p style="${P_STYLE}"><a href="${href}" style="display:inline-block;padding:12px 20px;background:#1a1a1a;color:#ffffff;text-decoration:none;">${escapeHtml(block.label)}</a></p>`,
+          `<p style="${P_STYLE}">If the button does not work, copy this link into your browser:<br><a href="${href}" style="color:#1a1a1a;word-break:break-all;">${href}</a></p>`,
+        );
+        break;
+      }
+      case "list":
+        text.push(...block.items.map((item) => `- ${item}`), "");
+        html.push(
+          `<ul style="${P_STYLE}padding-left:20px;">${block.items
+            .map((item) => `<li>${escapeHtml(item)}</li>`)
+            .join("")}</ul>`,
+        );
+        break;
+    }
+  }
+  text.push(BRAND);
+  return { text: text.join("\n"), html: htmlLayout(subject, html.join("\n")) };
+}
+
+/* Names can come from the public request form: defanged like the alert. */
+function greeting(name: string | null | undefined): string {
+  const clean = defang(oneLine(name, 100));
+  return clean ? `Hello ${clean},` : "Hello,";
+}
+
+/* Validates a template's input; a failure names no value (ADR 0021). */
+function parseInput<T>(schema: z.ZodType<T>, input: unknown): T {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) throw new EmailSendError("invalid_input");
+  return parsed.data;
+}
+
+const recipient = z.email().max(254);
+const personName = z.string().max(200);
+const profileValue = z.string().max(200).nullable().optional();
+const realDate = z.date().refine((d) => !Number.isNaN(d.getTime()));
+const idempotencyKey = z.string().min(1).max(256).optional();
+
+const INVITE_LIFETIME_TEXT = describeDuration(INVITE_TOKEN_TTL_SECONDS);
+
+/**
+ * "Set your password" (plan Q1): the invite a new customer gets on approval
+ * or creation. `url` is the invite link from createInviteLink() and holds a
+ * single-use token: a credential, never logged or placed in an error.
+ */
+export async function sendInviteEmail(input: {
+  to: string;
+  name: string;
+  url: string;
+  expiresAt: Date;
+}): Promise<{ id: string }> {
+  const data = parseInput(
+    z.object({
+      to: recipient,
+      name: personName,
+      url: z.string().max(2048),
+      expiresAt: realDate,
+    }),
+    input,
+  );
+  const link = requireOwnLink(data.url);
+  const subject = `Set your ${BRAND} password`;
+  const body = renderBlocks(subject, [
+    { kind: "p", text: greeting(data.name) },
+    {
+      kind: "p",
+      text: `An account has been created for you on the ${BRAND} website. It lets you download our product datasheets.`,
+    },
+    { kind: "p", text: "Open this link to choose your password:" },
+    { kind: "button", label: "Set your password", href: link },
+    {
+      kind: "p",
+      text: `The link works once and expires in ${INVITE_LIFETIME_TEXT} (${formatUtcDateTime(data.expiresAt)}). If it has expired, ask us for a new one.`,
+    },
+    {
+      kind: "p",
+      text: "If you didn't expect this email, you can ignore it.",
+    },
+  ]);
+  return sendEmail({ to: data.to, subject, ...body });
+}
+
+/**
+ * The 7-day expiry reminder (cron, P5). Links to the renewal form. Pass an
+ * idempotency key (user id + expiry) so a retried run never sends twice.
+ */
+export async function sendExpiryReminderEmail(input: {
+  to: string;
+  name: string;
+  accessExpiresAt: Date;
+  idempotencyKey?: string;
+}): Promise<{ id: string }> {
+  const data = parseInput(
+    z.object({
+      to: recipient,
+      name: personName,
+      accessExpiresAt: realDate,
+      idempotencyKey,
+    }),
+    input,
+  );
+  const subject = `Your ${BRAND} datasheet access ends soon`;
+  const body = renderBlocks(subject, [
+    { kind: "p", text: greeting(data.name) },
+    {
+      kind: "p",
+      text: `Your access to ${BRAND} datasheets is valid ${accessUntilText(data.accessExpiresAt)}.`,
+    },
+    {
+      kind: "p",
+      text: "To keep downloading after that date, ask us to renew it:",
+    },
+    {
+      kind: "button",
+      label: "Renew access",
+      href: siteLink("/request-access?renew=1"),
+    },
+    {
+      kind: "p",
+      text: "You can still sign in after that date; only downloads stop.",
+    },
+  ]);
+  return sendEmail({
+    to: data.to,
+    subject,
+    ...body,
+    ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey } : {}),
+  });
+}
+
+/** "Access extended" (plan Q4): the new end date, or no expiry (null). */
+export async function sendAccessExtendedEmail(input: {
+  to: string;
+  name: string;
+  accessExpiresAt: Date | null;
+}): Promise<{ id: string }> {
+  const data = parseInput(
+    z.object({
+      to: recipient,
+      name: personName,
+      accessExpiresAt: realDate.nullable(),
+    }),
+    input,
+  );
+  const subject = `Your ${BRAND} datasheet access has been extended`;
+  const body = renderBlocks(subject, [
+    { kind: "p", text: greeting(data.name) },
+    {
+      kind: "p",
+      text:
+        data.accessExpiresAt === null
+          ? `Your access to ${BRAND} datasheets no longer has an end date.`
+          : `Your access to ${BRAND} datasheets is now valid ${accessUntilText(data.accessExpiresAt)}.`,
+    },
+    {
+      kind: "button",
+      label: "Go to your downloads",
+      href: siteLink("/my-downloads"),
+    },
+  ]);
+  return sendEmail({ to: data.to, subject, ...body });
+}
+
+/**
+ * Alert to the company inbox on a new access request (plan Q4). Holds name,
+ * company and country plus a link to the admin queue. Never the requester's
+ * message, email or phone (the inbox keeps less personal data), and the
+ * subject holds no personal data at all.
+ */
+export async function sendAccessRequestAlertEmail(input: {
+  to: string;
+  name: string;
+  company?: string | null;
+  country?: string | null;
+  kind: "new" | "renewal";
+}): Promise<{ id: string }> {
+  const data = parseInput(
+    z.object({
+      to: recipient,
+      name: personName,
+      company: profileValue,
+      country: profileValue,
+      kind: z.enum(["new", "renewal"]),
+    }),
+    input,
+  );
+  const subject =
+    data.kind === "renewal"
+      ? "New datasheet access renewal request"
+      : "New datasheet access request";
+  const body = renderBlocks(subject, [
+    {
+      kind: "p",
+      text:
+        data.kind === "renewal"
+          ? "A customer has asked to renew datasheet access:"
+          : "Someone has asked for datasheet access:",
+    },
+    {
+      kind: "list",
+      items: [
+        `Name: ${defang(oneLine(data.name)) || "-"}`,
+        `Company: ${defang(oneLine(data.company)) || "-"}`,
+        `Country: ${defang(oneLine(data.country)) || "-"}`,
+      ],
+    },
+    {
+      kind: "button",
+      label: "Open the request queue",
+      href: siteLink("/admin/access-requests"),
+    },
+  ]);
+  return sendEmail({ to: data.to, subject, ...body });
+}
+
+/**
+ * The optional, polite decline (plan Q4: off by default in the reject
+ * dialog). It never includes the admin's internal reject reason.
+ */
+export async function sendAccessDeclinedEmail(input: {
+  to: string;
+  name: string;
+}): Promise<{ id: string }> {
+  const data = parseInput(z.object({ to: recipient, name: personName }), input);
+  const subject = `Your ${BRAND} datasheet access request`;
+  const body = renderBlocks(subject, [
+    { kind: "p", text: greeting(data.name) },
+    {
+      kind: "p",
+      text: `Thank you for your interest in ${BRAND}. We are unable to offer datasheet access for this request at the moment.`,
+    },
+    {
+      kind: "p",
+      text: "If you think this is a mistake or your situation changes, you are welcome to contact us.",
+    },
+  ]);
+  return sendEmail({ to: data.to, subject, ...body });
+}
+
+/** One customer in the admin's daily expiry digest. */
+export interface ExpiryDigestEntry {
+  name: string;
+  company?: string | null;
+  accessExpiresAt: Date;
+}
+
+/** At most this many customers are listed; the rest are counted. */
+export const EXPIRY_DIGEST_MAX_ROWS = 200;
+
+/**
+ * The admin's daily digest (plan Q11): customers whose access ends within
+ * 7 days, to the company inbox. Only sent when there is at least one; an
+ * empty list is refused as invalid input.
+ */
+export async function sendExpiryDigestEmail(input: {
+  to: string;
+  customers: readonly ExpiryDigestEntry[];
+  idempotencyKey?: string;
+}): Promise<{ id: string }> {
+  const data = parseInput(
+    z.object({
+      to: recipient,
+      customers: z
+        .array(
+          z.object({
+            name: personName,
+            company: profileValue,
+            accessExpiresAt: realDate,
+          }),
+        )
+        .min(1)
+        .max(10_000),
+      idempotencyKey,
+    }),
+    input,
+  );
+  const shown = data.customers.slice(0, EXPIRY_DIGEST_MAX_ROWS);
+  const hidden = data.customers.length - shown.length;
+  const count = data.customers.length;
+  const subject =
+    count === 1
+      ? "1 customer's datasheet access ends within 7 days"
+      : `${count} customers' datasheet access ends within 7 days`;
+  const blocks: Block[] = [
+    {
+      kind: "p",
+      text: "Datasheet access for these customers ends within the next 7 days (dates in UTC):",
+    },
+    {
+      kind: "list",
+      items: shown.map((entry) => {
+        const company = defang(oneLine(entry.company));
+        return `${defang(oneLine(entry.name)) || "-"}${company ? ` (${company})` : ""}: ${formatUtcDate(entry.accessExpiresAt)}`;
+      }),
+    },
+  ];
+  if (hidden > 0) blocks.push({ kind: "p", text: `And ${hidden} more.` });
+  blocks.push({
+    kind: "button",
+    label: "Open customers",
+    href: siteLink("/admin/customers"),
+  });
+  const body = renderBlocks(subject, blocks);
+  return sendEmail({
+    to: data.to,
+    subject,
+    ...body,
+    ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey } : {}),
+  });
 }

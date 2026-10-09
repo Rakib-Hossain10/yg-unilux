@@ -19,8 +19,10 @@ const { Schema } = mongoose;
  *   converts the string id to an ObjectId on insert), so other collections
  *   store user ids as ObjectId too;
  * - dates are BSON Dates and booleans are booleans (the adapter keeps both).
- * mustChangePassword, accessExpiresAt, company, country and deviceEpoch are
- * our own `additionalFields`, configured in src/lib/auth.ts.
+ * mustChangePassword, accessExpiresAt, company, country, deviceEpoch and the
+ * Phase 5 dates (expiryReminderFor, invitedAt, inviteExpiresAt,
+ * passwordSetAt) are our own `additionalFields`, configured in
+ * src/lib/auth.ts and written only by src/lib/account-writes.ts.
  *
  * No indexes are declared here: Better Auth's indexes are created by
  * syncBetterAuthIndexes() (src/lib/db-indexes.ts), and this model is skipped
@@ -57,6 +59,14 @@ export interface User {
    * issued before. Missing = 0. Never sent to the browser.
    */
   deviceEpoch?: number | null;
+  /** The accessExpiresAt value the last 7-day reminder was sent for (cron). */
+  expiryReminderFor?: Date | null;
+  /** When the latest invite link was made; null/missing = never invited. */
+  invitedAt?: Date | null;
+  /** When that invite link stops working (invitedAt + 72 h). */
+  inviteExpiresAt?: Date | null;
+  /** When the user last chose their own password (reset, invite or change). */
+  passwordSetAt?: Date | null;
 }
 
 /** Thrown when code tries to write to Better Auth's users through Mongoose. */
@@ -90,6 +100,10 @@ const userSchema = new Schema<User>(
     company: String,
     country: String,
     deviceEpoch: Number,
+    expiryReminderFor: Date,
+    invitedAt: Date,
+    inviteExpiresAt: Date,
+    passwordSetAt: Date,
   },
   {
     collection: "users",

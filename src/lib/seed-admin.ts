@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { SystemAuditAction } from "@/models/audit-actions";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { recoverAdminFromCli } from "./account-writes";
 import { type Auth, hasRole } from "./auth";
 import { clearAllForEmail } from "./rate-limit";
 
@@ -136,7 +137,6 @@ export async function seedAdmin(
   const user = existing.user as typeof existing.user & {
     role?: string | null;
     banned?: boolean | null;
-    deviceEpoch?: unknown;
   };
   if (!hasRole(user, "admin")) {
     throw new SeedAdminError(
@@ -161,17 +161,9 @@ export async function seedAdmin(
   await context.internalAdapter.deleteUserSessions(user.id);
 
   const wasBanned = user.banned === true;
-  const epoch = user.deviceEpoch;
-  await context.internalAdapter.updateUser(user.id, {
-    mustChangePassword: false,
-    banned: false,
-    banReason: null,
-    banExpires: null,
-    deviceEpoch:
-      (typeof epoch === "number" && Number.isSafeInteger(epoch) && epoch >= 0
-        ? epoch
-        : 0) + 1,
-  });
+  // One write: flag cleared, ban lifted, device epoch bumped (account-writes.ts
+  // is the only writer of our user fields).
+  await recoverAdminFromCli(context, user.id);
   await audit(user.id, "admin.cli_reset_password", { unbanned: wasBanned });
   await clearAllForEmail(input.email);
   return {

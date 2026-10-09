@@ -9,11 +9,27 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - answers recorded in the plan;
     - **user addition to Q1:** the admin can regenerate an invite at any time (expired or lost): a fresh 72 h link, earlier links deleted, "Email it" or "Show once to copy" for WhatsApp, statuses "Invite pending"/"Invite expired" with a list filter, an expired link shows a neutral "ask us for a new one" page, and regenerating never changes `accessExpiresAt`;
     - Better Auth skills installed (`.claude/skills/better-auth-*`, `skills-lock.json`), given to `backend-architect` + `qa-security-reviewer`; ADR 0013 note lists the parts that conflict with our rules.
-  - **▶ NEXT: P1 account backend** (`backend-architect`/Opus). Start with two spikes in the installed `better-auth` 1.7.7 sources:
-    1. a 72 h invite token through Better Auth's reset mechanism (verification row `reset-password:<token>` with a longer `expiresAt`; also how to delete a user's earlier invite rows); fallback: our own hashed invite-token table;
-    2. whether `auth.api.adminUpdateUser` writes `input: false` fields, else `internalAdapter.updateUser` inside `src/lib/account-writes.ts`.
-
-    Then the P1 list in the plan: hooks clear `mustChangePassword` + `passwordSetAt`, ADR 0032 24 h cap, `invite.ts` with `inviteStatus`, `safeNextPath`, `requireSignedIn`, new user fields, email templates. ADR 0068. P1 also starts the Resend sink in `e2e/fake-providers/` if P2 needs it.
+  - **P1 done** (2026-10-09, `backend-architect`/Opus, **ADR 0068**). Both spikes passed, so no fallback table.
+    - New: `src/lib/{account-writes,invite,safe-next-path}.ts`, plus tests (`account-flows`, `account-writes` + guard, `invite`, `safe-next-path` with a 20k-case property test).
+    - Hooks clear `mustChangePassword` and set `passwordSetAt`. The 24 h cap is fixed (ADR 0032 `it.fails` → `it`).
+    - New user fields: `invitedAt`, `inviteExpiresAt`, `passwordSetAt`, `expiryReminderFor`.
+    - Six email templates.
+    - e2e Resend sink (`e2e/fixtures/emails.ts`: `waitForEmail`, `linkIn`; account `E2E_MAIL_CUSTOMER`).
+    - Results: full unit 4297 passed (1 expected-fail, 3 skipped), lint/typecheck OK, `e2e/email-sink.spec.ts` 2/2. Code review: all PASS/WARN; the High (undeclared fields silently dropped) was fixed and is tested by a raw-document read-back.
+  - **▶ NEXT: P2 account pages** (`site-frontend`/Opus): `/login` destinations (Q7), `/change-password`, `/forgot-password`, `/reset-password` (also invites), `/my-downloads`, sign out. **Contract from P1 (ADR 0068 Consequences):**
+    - invite link `/reset-password?token=<t>&invite=1`;
+    - forgot-password posts `/api/auth/request-password-reset` `{email, redirectTo:"/reset-password"}`; the email link 302s to `/reset-password?token=` (or `?error=INVALID_TOKEN`);
+    - the page POSTs `{token,newPassword}` to `/api/auth/reset-password`: 200 → `/login?reset=1` (all sessions are revoked); 400 `INVALID_TOKEN` (expired, used or unknown, identical) → neutral "This link has expired. Ask us for a new one" with WhatsApp + `/request-access`; `PASSWORD_TOO_SHORT` (min 12); 429 generic;
+    - change-password POSTs `{currentPassword,newPassword,revokeOtherSessions:true}` to `/api/auth/change-password` (full page load);
+    - guards `requireSignedIn(path)`; destinations through `safeNextPath`; `loginPathFor`;
+    - e2e uses `E2E_MAIL_CUSTOMER` or new dedicated accounts for email flows.
+    - `/my-downloads` needs a small reader for the user's `downloadLogs` (P2 may add it in `src/lib/`, or ask `backend-architect`).
+  - **Open for P3 (from P1):**
+    - "set temporary password" should also set `mustChangePassword: true` and delete invite links;
+    - "invite expired" filter via `$expr` (`passwordSetAt` vs `invitedAt`);
+    - regenerate rate limit + disabled while pending;
+    - request-form Zod keeps name/company/country to a short plain character set;
+    - audit vocabulary.
   - **Tasks:**
     - P1 account backend, P2 account pages, P3 services (requests + customers), P4 `/api/datasheet/[productId]`, P5 expiry cron; **QA gate A after P5**;
     - P6 request-access UI, P7 admin queue, P8 admin customers; **QA gate B after P8**;
@@ -461,7 +477,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 **Plan: [phase-5-plan.md](phase-5-plan.md) (P0–P9, QA gates A after P5, B after P8, C at exit; ADRs 0068–0072). Approved 2026-10-09.**
 - [x] Plan drafted, `/find-skills` run (2026-10-09)
 - [x] P0: plan approved (defaults + invite-regenerate addition), branch `phase-5`, Better Auth skills installed (ADR 0013 note)
-- [ ] P1 account backend (ADR 0068)
+- [x] P1 account backend (ADR 0068)
 - [ ] P2 account pages
 - [ ] P3 services: access requests + customers (ADR 0069, 0070)
 - [ ] P4 `/api/datasheet/[productId]` (ADR 0071)
@@ -596,4 +612,5 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-09: L6 mega-menu + search UI + sitemap done (`site-frontend`/Opus; ADR 0065 L6 addendum); code-review findings (scrim close, touch first-tap, Esc, e2e) fixed; 4106 unit + 237 e2e green. Next: QA gate B.
 - 2026-10-09: Phase 4b merged (PR #16). Phase 5 planned: `doc/phase-5-plan.md` (P0–P9, Q0–Q12 with defaults). `/find-skills`: official `better-auth-best-practices` + `better-auth-security-best-practices` recommended (Q0), nothing for filter/search/menu UI. Existing subagents reused, none new. Waiting for the user's review; no code written.
 - 2026-10-09: Phase 5 plan approved (all defaults; user added invite regeneration for expired/lost 72 h links, now explicit in Q1/P1/P3/P8). P0 done on `phase-5`: Better Auth skills installed and reviewed (Markdown only; conflicts with our rules listed in ADR 0013). Next: P1.
+- 2026-10-09: P1 account backend done (ADR 0068): 72 h invite = Better Auth reset token (spike passed, one live link per user), one user-field writer, `mustChangePassword` finally cleared by change/reset, ADR 0032 gap closed, `safeNextPath`, six email templates, e2e Resend sink. Auto-review caught undeclared user fields being silently dropped by the adapter; fixed and tested. 4297 unit green. Next: P2 account pages.
 - 2026-10-09: QA gate B on L4–L6 failed on 3 findings (L-1 comment, M-1 draft category link, L-2 menu close), all fixed; gate B tests added. 4119 unit + 254 e2e green. Next: L7.

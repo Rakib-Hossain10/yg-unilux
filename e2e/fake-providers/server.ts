@@ -1,5 +1,6 @@
-// In-memory stand-in for Cloudflare R2 (S3 API) and Cloudinary (upload + Admin
-// API) for the Playwright run. Started by e2e/test-server.ts on 127.0.0.1; the
+// In-memory stand-in for Cloudflare R2 (S3 API), Cloudinary (upload + Admin
+// API) and Resend (send email: a sink specs read links from) for the
+// Playwright run. Started by e2e/test-server.ts on 127.0.0.1; the
 // app's server reaches it through e2e/fake-providers/preload.mjs, and the
 // browser's own calls are forwarded here by e2e/fixtures/providers.ts. Holds
 // bytes in memory only; nothing real is contacted and nothing is persisted.
@@ -24,7 +25,19 @@ interface StoredImage {
   createdAt: Date;
 }
 
+/** An email the app "sent" through Resend, as specs read it back. */
+export interface SentEmail {
+  id: string;
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+  sentAt: string;
+}
+
 const objects = new Map<string, StoredObject>();
+const emails: SentEmail[] = [];
 const images = new Map<string, StoredImage>();
 /** Object keys whose DELETE must fail (to test "storage unreachable"). */
 const failingDeletes = new Set<string>();
@@ -278,6 +291,58 @@ async function handleCloudinary(
   return json(response, 404, { error: { message: "not handled by the fake" } });
 }
 
+/* ---- Resend: POST /emails (the only call the app makes) ---- */
+
+const asText = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+
+async function handleResend(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+): Promise<void> {
+  if (request.method !== "POST" || url.pathname !== "/emails") {
+    return json(response, 404, {
+      name: "not_found",
+      message: "not handled by the fake",
+      statusCode: 404,
+    });
+  }
+  // Like Resend: a key is required (the app sends `Bearer <RESEND_API_KEY>`).
+  if (!/^Bearer \S+/.test(String(request.headers.authorization ?? ""))) {
+    return json(response, 401, {
+      name: "missing_api_key",
+      message: "Missing API key",
+      statusCode: 401,
+    });
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse((await readBody(request)).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return json(response, 422, {
+      name: "validation_error",
+      message: "Invalid JSON",
+      statusCode: 422,
+    });
+  }
+  const to = (Array.isArray(body.to) ? body.to : [body.to]).map(asText);
+  const email: SentEmail = {
+    id: `e2e-email-${emails.length + 1}`,
+    from: asText(body.from),
+    to,
+    subject: asText(body.subject),
+    text: asText(body.text),
+    html: asText(body.html),
+    sentAt: new Date().toISOString(),
+  };
+  emails.push(email);
+  return json(response, 200, { id: email.id });
+}
+
 /* ---- Control endpoints for specs (never reached by the app) ---- */
 
 async function handleControl(
@@ -287,6 +352,20 @@ async function handleControl(
 ): Promise<void> {
   const what = url.pathname.replace("/__e2e/", "");
   const key = url.searchParams.get("key") ?? "";
+  if (what === "emails") {
+    // GET: the emails sent to ?to= (all when absent), oldest first.
+    // DELETE: forget every email (a spec starting clean).
+    if (request.method === "DELETE") {
+      emails.length = 0;
+      return json(response, 200, { ok: true });
+    }
+    const to = (url.searchParams.get("to") ?? "").toLowerCase();
+    return json(response, 200, {
+      emails: to
+        ? emails.filter((e) => e.to.some((t) => t.toLowerCase() === to))
+        : emails,
+    });
+  }
   if (what === "fail-delete") {
     failingDeletes.add(key);
     return json(response, 200, { ok: true });
@@ -333,6 +412,9 @@ export function startFakeProviders(port: number): Promise<Server> {
         }
         if (/r2\.cloudflarestorage\.com$/.test(host)) {
           return await handleS3(request, response, url);
+        }
+        if (host === "api.resend.com") {
+          return await handleResend(request, response, url);
         }
         return send(response, 404);
       } catch {
