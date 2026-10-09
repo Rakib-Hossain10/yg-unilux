@@ -145,6 +145,16 @@ html:has(.filter-sheet:modal) {
   overflow: hidden;
 }
 
+/* Small-screen menu (src/components/site/mobile-menu.tsx): while it is open
+   the page behind its scrim does not scroll (the panel scrolls on its own,
+   overscroll-contain). Only below lg, where the menu is shown: a menu left
+   open across a resize to desktop must not freeze the page. */
+@media (width < 64rem) {
+  html:has(details[data-slot="mobile-menu"][open]) {
+    overflow: hidden;
+  }
+}
+
 /* Respect the visitor's motion setting site-wide (CLAUDE.md "Design"):
    transitions and animations collapse to an instant change. */
 @media (prefers-reduced-motion: reduce) {

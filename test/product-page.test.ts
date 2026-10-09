@@ -289,6 +289,40 @@ describe("product page: default visibility", () => {
     expect(models).toContain('<th scope="row"');
   });
 
+  it("stacks the Models table on small screens without losing table semantics", async () => {
+    const html = await renderPage(HERO);
+    const models = between(
+      html,
+      'data-section="models"',
+      'data-section="downloads"',
+    );
+    // One table, so one copy of each model no. in the HTML.
+    expect(models.match(/<table/g)).toHaveLength(1);
+    expect(models.split("AR-013A2").length - 1).toBe(
+      // the row header plus the sr-only text of its "Select" button
+      2,
+    );
+    // Roles restated for the CSS display change below md.
+    expect(models).toContain('role="table"');
+    expect(models).toMatch(/<thead role="rowgroup"[^>]*max-md:sr-only/);
+    expect(models).toContain('<tbody role="rowgroup"');
+    expect(models.match(/<tr role="row"/g)?.length).toBe(1 + 2);
+    expect(models).toContain('role="rowheader"');
+    // Every data cell (except "Select") carries a visible stacked label,
+    // hidden from screen readers (they get the column header).
+    const cells = models.match(/<td role="cell"/g)?.length ?? 0;
+    const labels =
+      models.match(/<span aria-hidden="true" class="[^"]*md:hidden">/g)
+        ?.length ?? 0;
+    expect(cells).toBeGreaterThan(2);
+    expect(labels).toBe(cells - 2);
+    expect(models).toContain(">Option</span>");
+    // Only wide screens get the sideways scroll and the minimum width.
+    expect(models).toContain("md:overflow-x-auto");
+    expect(models).toContain("md:min-w-[32rem]");
+    expect(models).not.toMatch(/class="[^"]*(?<!:)min-w-\[32rem\]/);
+  });
+
   it("shows downloads, applications and both strips", async () => {
     const html = await renderPage(HERO);
     expect(html).toContain('href="https://example.com/g.pdf"');

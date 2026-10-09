@@ -1,6 +1,8 @@
 // The site's navigation targets, in one place for the header and the footer
-// (CLAUDE.md "Design": Product, Services, OEM/ODM, R&D, About us). Pages
-// behind these links arrive in later phases; until then they show the 404.
+// (CLAUDE.md "Design": Product, Services, OEM/ODM, R&D, About us). Some
+// pages behind these links arrive in later phases; until then they show the
+// 404 and carry `prefetch: false` (nav-links.test.ts checks the flag against
+// the routes that exist under src/app).
 
 export interface NavLink {
   label: string;
@@ -32,26 +34,26 @@ export const FOOTER_NAV: readonly {
     links: [
       { label: "Products", href: "/products" },
       { label: "Applications", href: "/areas" },
-      { label: "Services", href: "/services" },
-      { label: "OEM/ODM", href: "/oem-odm" },
+      { label: "Services", href: "/services", prefetch: false },
+      { label: "OEM/ODM", href: "/oem-odm", prefetch: false },
     ],
   },
   {
     title: "Company",
     links: [
-      { label: "About us", href: "/about" },
-      { label: "R&D", href: "/rnd" },
-      { label: "Contact", href: "/contact" },
-      { label: "Whistleblower", href: "/whistleblower" },
+      { label: "About us", href: "/about", prefetch: false },
+      { label: "R&D", href: "/rnd", prefetch: false },
+      { label: "Contact", href: "/contact", prefetch: false },
+      { label: "Whistleblower", href: "/whistleblower", prefetch: false },
     ],
   },
   {
     title: "Legal",
     links: [
-      { label: "Terms", href: "/legal/terms" },
-      { label: "Privacy", href: "/legal/privacy" },
-      { label: "Cookies", href: "/legal/cookies" },
-      { label: "Legal notice", href: "/legal" },
+      { label: "Terms", href: "/legal/terms", prefetch: false },
+      { label: "Privacy", href: "/legal/privacy", prefetch: false },
+      { label: "Cookies", href: "/legal/cookies", prefetch: false },
+      { label: "Legal notice", href: "/legal", prefetch: false },
     ],
   },
 ];

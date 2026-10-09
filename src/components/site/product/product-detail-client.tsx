@@ -240,7 +240,11 @@ export function VariantTableRow({
   const selection = useVariantSelection();
   const selected = selection.index === index;
   return (
+    // role="row" is restated on purpose: below md the Models table lays its
+    // rows out as grids, and a CSS display change drops the implicit table
+    // roles in some browsers (models-table.tsx).
     <tr
+      role="row"
       data-variant-index={index}
       data-selected={selected ? "" : undefined}
       className={className}

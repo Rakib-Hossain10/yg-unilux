@@ -16,8 +16,8 @@ export function SiteFooter() {
 
   return (
     <footer className="mt-auto bg-ink text-grey-300">
-      <div className="mx-auto grid max-w-(--container-site) gap-12 px-4 py-16 md:grid-cols-[2fr_repeat(3,1fr)] md:px-8">
-        <div>
+      <div className="mx-auto grid max-w-(--container-site) grid-cols-2 gap-x-6 gap-y-10 px-4 py-16 md:grid-cols-[2fr_repeat(3,1fr)] md:gap-12 md:px-8">
+        <div className="col-span-2 md:col-span-1">
           <p className="font-display text-2xl tracking-[0.12em] text-paper">
             YG UniLUX
           </p>
@@ -29,18 +29,21 @@ export function SiteFooter() {
 
         {FOOTER_NAV.map((column) => (
           <nav key={column.title} aria-label={column.title}>
-            <h2 className="mb-4 text-xs tracking-[0.16em] text-grey-400 uppercase">
+            <h2 className="mb-2 text-xs tracking-[0.16em] text-grey-400 uppercase">
               {column.title}
             </h2>
-            <ul className="space-y-2.5 text-sm">
+            {/* Each link is a 44 px row (touch target), so the rows carry the
+                rhythm and the list needs no extra spacing. */}
+            <ul className="text-sm">
               {column.links.map((link) => (
                 <li key={link.href}>
-                  {/* No prefetch: footer links are rarely used, and
-                      prefetching every one costs a request each. */}
+                  {/* Built pages keep the default prefetch; pages not built
+                      yet opt out (nav-links.ts), or each prefetch would log
+                      a 404 on every page. */}
                   <Link
                     href={link.href}
-                    prefetch={false}
-                    className="transition-colors duration-(--duration-quick) hover:text-paper"
+                    prefetch={link.prefetch}
+                    className="inline-flex min-h-11 items-center transition-colors duration-(--duration-quick) hover:text-paper"
                   >
                     {link.label}
                   </Link>

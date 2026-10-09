@@ -74,3 +74,11 @@ Listing pages (`/products`, `/products/<main>/<sub>`, `/areas/<slug>`) render on
 - **Facet collapse:** above 8 values, show 6; the rest in a server-rendered native `<details>` "Show n more" (works without JS, opens when a hidden value is checked).
 - Tests: `listing-motion.test.ts` (34), `e2e/listing-motion.spec.ts` (12). 4141 unit, full e2e 266.
 - **Open:** "More from Arc" strip cards do not morph (product-to-product would fly the image below the fold); Q8 polish not yet done (Models table stacked on mobile, mobile menu scrim, 44 px footer links, footer `prefetch={false}`, favicon); back-navigation morph untested; Performance-panel check and real photos/icons at gate C.
+
+## Addendum (2026-10-09, Q8 polish)
+- **Models table:** one `<table>` that stacks into one block per model below `md` (Model No. + Select line, then label/value lines). Table roles are written out explicitly because the CSS display change drops them; visible labels are `aria-hidden`, header row screen-reader-only; sideways scroll and min-width only from `md`. Public values only.
+- **Mobile menu scrim:** inside the `<details>`, below the header; closes on scrim `click` (closing a `<details>` on `pointerdown` from inside it crashes Chromium's renderer); page scroll locked below `lg`; fade-in only when motion is allowed.
+- **Footer:** 44 px link rows, two columns on mobile. A link's `prefetch: false` lives in `nav-links.ts` and `nav-links.test.ts` checks it against the pages that exist under `src/app` (remove the flag when a page is built). Only `/products` and `/areas` prefetch today.
+- **Favicon:** still the create-next-app default; waits for the client's logo (user to-do).
+- Tests: `nav-links.test.ts` (17), `e2e/site-polish.spec.ts` (7), +1 in `test/product-page.test.ts`. 4160 unit, full e2e 273.
+- **Open:** extra tab stop on the mobile Models box; "Option" row repeats the Lens value when the option name comes from the optic; 4a leftovers (duplicate mobile gallery controls, lone expand icon on single-image products, "–" union rows, empty application tiles, datasheet below the fold with a long name, admin CSS utilities shipped globally).
