@@ -82,3 +82,10 @@ Listing pages (`/products`, `/products/<main>/<sub>`, `/areas/<slug>`) render on
 - **Favicon:** still the create-next-app default; waits for the client's logo (user to-do).
 - Tests: `nav-links.test.ts` (17), `e2e/site-polish.spec.ts` (7), +1 in `test/product-page.test.ts`. 4160 unit, full e2e 273.
 - **Open:** extra tab stop on the mobile Models box; "Option" row repeats the Lens value when the option name comes from the optic; 4a leftovers (duplicate mobile gallery controls, lone expand icon on single-image products, "–" union rows, empty application tiles, datasheet below the fold with a long name, admin CSS utilities shipped globally).
+
+## Addendum (2026-10-09, L8 exit e2e and results settle-in)
+- **Listing refinements animate the live results (Web Animations), not a view-transition snapshot.** Chromium does not hit-test captured elements, so a click in the first ~0.4 s after a filter change missed the card (reproduced 4/4). `ListingResultsTransition` now runs a 340 ms opacity + translateY settle-in on the live `<section>` (`settleResults`, id `listing-results-in`, `fill: "backwards"`); `<html data-listing-refine>` still keeps the root out of any view transition. View transitions stay for navigation morphs. Supersedes the L7 "filter crossfade" wording above. Reduced motion and the mobile filter sheet swap at once.
+- **Exit e2e:** `e2e/listing.spec.ts` (10): browse/filter/open/back keeps filters and scroll, model-no search (overlay and `/search`), keyboard-only run, axe at 360/1280 on `/products`, a category page and an area page (+ no restricted token in HTML). Regression test in `e2e/listing-motion.spec.ts`.
+- **Lighthouse mobile** (fixture pages, no real photos): `/products` 93 perf, category page 93, product page 91; a11y and SEO 100; best practices 96 on listings (fake Cloudinary 404s).
+- 4163 unit; 64 targeted e2e green after the fix (full suite 283 before it).
+- **Open:** Firefox/Safari untested for the settle-in; product-page view transitions (gallery jump, card morph) can have the same short un-clickable window; family-name search on Atlas and Lighthouse with real photos at gate C.

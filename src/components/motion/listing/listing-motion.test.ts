@@ -1,6 +1,6 @@
 // Listing + header motion pass (Phase 4b L7): the long-facet split, the
-// transition types a refinement carries, the results crossfade boundary
-// (no DOM of its own), the facet disclosure in the server HTML, and the
+// transition types a refinement carries, the results settle-in (no DOM of
+// its own, live element only), the facet disclosure in the server HTML, and the
 // motion CSS contract for listing-motion.css and menu-motion.css (only
 // opacity/transform, all behind prefers-reduced-motion).
 
@@ -36,7 +36,11 @@ import {
   resetListingRefine,
   shouldCrossfade,
 } from "./filter-transition";
-import { ListingResultsTransition } from "./listing-results-transition";
+import {
+  LISTING_RESULTS_ANIMATION_ID,
+  ListingResultsTransition,
+  settleResults,
+} from "./listing-results-transition";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -167,6 +171,59 @@ describe("ListingResultsTransition", () => {
         createElement(ListingResultsTransition, null, section),
       ),
     ).toBe(renderToStaticMarkup(section));
+  });
+});
+
+describe("settleResults (live element, never a snapshot)", () => {
+  function fakeElement() {
+    const running: { id: string; cancel: () => void }[] = [];
+    const calls: {
+      keyframes: Keyframe[];
+      options: KeyframeAnimationOptions;
+    }[] = [];
+    const el = {
+      getAnimations: () => running,
+      animate: (keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
+        calls.push({ keyframes, options });
+        const animation = {
+          id: String(options.id),
+          cancel: vi.fn(() => running.splice(running.indexOf(animation), 1)),
+        };
+        running.push(animation);
+        return animation;
+      },
+    };
+    return { el: el as unknown as HTMLElement, calls, running };
+  }
+
+  it("animates only opacity and transform, leaving no fill behind", () => {
+    stubMotion(false);
+    const { el, calls } = fakeElement();
+    settleResults(el);
+    expect(calls).toHaveLength(1);
+    const { keyframes, options } = calls[0]!;
+    for (const frame of keyframes) {
+      expect(Object.keys(frame).sort()).toEqual(["opacity", "transform"]);
+    }
+    expect(options.id).toBe(LISTING_RESULTS_ANIMATION_ID);
+    expect(options.fill).toBe("backwards");
+  });
+
+  it("replaces a settle-in still running", () => {
+    stubMotion(false);
+    const { el, calls, running } = fakeElement();
+    settleResults(el);
+    settleResults(el);
+    expect(calls).toHaveLength(2);
+    expect(running).toHaveLength(1);
+  });
+
+  it("does nothing under reduced motion or without an element", () => {
+    stubMotion(true);
+    const { el, calls } = fakeElement();
+    settleResults(el);
+    settleResults(null);
+    expect(calls).toEqual([]);
   });
 });
 

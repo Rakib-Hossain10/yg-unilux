@@ -1,40 +1,72 @@
 "use client";
 
-// Filter result crossfade (Phase 4b L7): the results half of a listing page
-// (cards, pagination or the empty state) crossfades when a filter, a chip,
+// Filter result settle-in (Phase 4b L7): the results half of a listing page
+// (cards, pagination or the empty state) settles in when a filter, a chip,
 // "Clear all" or the sort changes the listing.
 
 /*
- * A React <ViewTransition> whose `update` class is set only for the render
- * that brings refined results (the flag in filter-transition.ts, raised by
- * the filter form, the sort select and RefineLink). Every other transition
- * (pagination, back/forward, a route change, a revalidation, the card ->
- * product morph) leaves it alone (`default="none"`). It renders no DOM of
- * its own, so the server HTML is the same with or without it; it wraps ONE
- * element (the results <section>, a Server Component passed as children) so
- * React names exactly one snapshot.
+ * Why the live element and not a view transition: while a view transition
+ * runs, Chromium does not hit-test the elements it captured, so for the
+ * ~0.4 s of a results crossfade a mouse click or a tap on a new card landed
+ * on the grid container and was lost (QA, keyboard was fine). Here the new
+ * results are the real DOM from the first frame: they fade and rise in with
+ * the Web Animations API (opacity + transform only), and every card is
+ * clickable throughout.
  *
- * The cards' shared-element boundaries (ProductImageTransition, update
- * "none") get no name during this update, so the whole results block is one
- * picture that crossfades (CSS in listing-motion.css). Without the App
- * Router's React (unit tests) the children render on their own.
+ * Only the render that brings refined results animates (the flag in
+ * filter-transition.ts, raised by the filter form, the sort select and
+ * RefineLink); pagination, back/forward, a route change, a revalidation and
+ * the card -> product morph are left alone. The flag is never raised under
+ * reduced motion or from the mobile filter sheet, so those swap at once.
+ *
+ * It renders no DOM of its own (it only attaches a ref to its ONE child, the
+ * results <section>), so the server HTML is the same with or without it.
  */
 
-import * as React from "react";
-import { type ReactNode, useEffect, useLayoutEffect } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "react";
 
+import { prefersReducedMotion } from "../product/reduced-motion";
 import {
   endListingRefine,
   isListingRefinePending,
   resetListingRefine,
 } from "./filter-transition";
 
-const ViewTransition = (
-  React as { ViewTransition?: typeof React.ViewTransition }
-).ViewTransition;
+/** The Web Animations id of the settle-in (tests and re-runs find it). */
+export const LISTING_RESULTS_ANIMATION_ID = "listing-results-in";
 
-/** The view-transition class of the results block (CSS hook). */
-export const LISTING_RESULTS_CLASS = "listing-results";
+const SETTLE_KEYFRAMES: Keyframe[] = [
+  { opacity: 0, transform: "translateY(0.5rem)" },
+  { opacity: 1, transform: "none" },
+];
+const SETTLE_MS = 340;
+/* Same curve as --ease-calm (globals.css). */
+const SETTLE_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+/** Runs the settle-in on `element`, replacing one still running. */
+export function settleResults(element: HTMLElement | null): void {
+  if (!element || typeof element.animate !== "function") return;
+  if (prefersReducedMotion()) return;
+  for (const animation of element.getAnimations()) {
+    if (animation.id === LISTING_RESULTS_ANIMATION_ID) animation.cancel();
+  }
+  element.animate(SETTLE_KEYFRAMES, {
+    id: LISTING_RESULTS_ANIMATION_ID,
+    duration: SETTLE_MS,
+    easing: SETTLE_EASING,
+    // No fill after the end: nothing stays on the element once it settles.
+    fill: "backwards",
+  });
+}
 
 export function ListingResultsTransition({
   children,
@@ -42,25 +74,25 @@ export function ListingResultsTransition({
   /** One element: the results section. */
   children: ReactNode;
 }) {
+  // The results element, through its (stable) state setter as a callback
+  // ref: render never reads a ref object.
+  const [section, setSection] = useState<HTMLElement | null>(null);
   // Read (never written) during render: true only while a refinement the
-  // visitor started is on its way, so only that commit gets the class.
+  // visitor started is on its way, so only that commit animates.
   const refining = isListingRefinePending();
 
-  // The refined results are committed (layout effects run inside the view
-  // transition's update, after the class was read): lower the flag.
+  // The refined results are in the DOM (before paint): lower the flag and
+  // start the settle-in from the first frame they show.
   useLayoutEffect(() => {
-    if (refining) endListingRefine();
+    if (!refining) return;
+    endListingRefine();
+    settleResults(section);
   });
   // Leaving the listing drops anything still raised.
   useEffect(() => resetListingRefine, []);
 
-  if (!ViewTransition) return <>{children}</>;
-  return (
-    <ViewTransition
-      update={refining ? LISTING_RESULTS_CLASS : "none"}
-      default="none"
-    >
-      {children}
-    </ViewTransition>
-  );
+  if (!isValidElement(children)) return <>{children}</>;
+  return cloneElement(children as ReactElement<{ ref?: Ref<HTMLElement> }>, {
+    ref: setSection,
+  });
 }

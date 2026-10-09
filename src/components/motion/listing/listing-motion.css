@@ -15,43 +15,17 @@
   pointer-events: none;
 }
 
-/* ---- Filter result crossfade -------------------------------------------
+/* ---- Filter result settle-in -------------------------------------------
    A refinement (filter, sort, chip, "Clear all") marks <html> with
-   data-listing-refine (filter-transition.ts) and the results block gets the
-   "listing-results" class for that one update. The root is left out, so only
-   the results are captured: the rail, the toolbar and the checkbox that was
-   just used stay live. The old results leave quickly, the new ones settle. */
+   data-listing-refine (filter-transition.ts); the new results settle in on
+   the LIVE element (Web Animations, listing-results-transition.tsx), never
+   through a view-transition snapshot: Chromium does not hit-test captured
+   elements, so a click on a card during a snapshot crossfade was lost.
+   While the mark is on, the root is also kept out of any view transition
+   React may start, so the whole page never turns into an untouchable
+   snapshot during a refinement. */
 html[data-listing-refine] {
   view-transition-name: none;
-}
-::view-transition-group(.listing-results) {
-  animation-duration: 340ms;
-  animation-timing-function: var(--ease-calm);
-}
-::view-transition-old(.listing-results) {
-  animation: listing-results-out 160ms var(--ease-calm) both;
-}
-::view-transition-new(.listing-results) {
-  animation: listing-results-in 340ms var(--ease-calm) 80ms both;
-}
-
-@keyframes listing-results-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-@keyframes listing-results-in {
-  from {
-    opacity: 0;
-    transform: translateY(0.5rem);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 /* While a filter change loads, the cards dim a little (after a short delay,

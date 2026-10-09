@@ -1,4 +1,4 @@
-// The "a refinement is on its way" flag for the filter result crossfade
+// The "a refinement is on its way" flag for the filter result settle-in
 // (Phase 4b L7). Browser code.
 //
 // Why a flag and not a view-transition type: the listing renders on request,
@@ -7,29 +7,28 @@
 // half the time (seen in e2e). Instead, the code that starts a refinement
 // (filter checkbox, sort select, RefineLink) raises this flag right before
 // the navigation; ListingResultsTransition reads it while it renders the new
-// results, uses the crossfade class for that one commit and lowers it.
-// The same flag marks <html data-listing-refine> so the CSS can leave the
-// page root out of that view transition (only the results animate, the rail
-// stays live); the mark stays a little longer than the animation and is then
-// removed.
+// results, animates that one commit (on the live element, so the cards stay
+// clickable) and lowers it. The same flag marks <html data-listing-refine>
+// so the CSS keeps the page root out of any view transition React starts
+// meanwhile (the page never becomes an untouchable snapshot); the mark stays
+// a little longer than the animation and is then removed.
 
 import { prefersReducedMotion } from "../product/reduced-motion";
 
-/** The attribute on <html> while a refinement crossfade may run. */
+/** The attribute on <html> while a refinement settle-in may run. */
 export const LISTING_REFINE_ATTR = "data-listing-refine";
 
-/** How long the <html> mark outlives the commit (crossfade is 420 ms). */
+/** How long the <html> mark outlives the commit (settle-in is 340 ms). */
 const MARK_HOLD_MS = 900;
 
 let pending = false;
 let markTimer: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * True when a refinement started at `origin` should crossfade the results:
- * not under reduced motion (no view transition at all then), and not from
- * inside a dialog (the small-screen filter sheet hides the grid, and
- * view-transition snapshots paint above the top layer, so a crossfade would
- * flash the grid over the sheet).
+ * True when a refinement started at `origin` should animate the results:
+ * not under reduced motion (the results swap at once then), and not from
+ * inside a dialog (the small-screen filter sheet covers the grid, so the
+ * settle-in would play unseen; the results simply swap behind the sheet).
  */
 export function shouldCrossfade(origin: Element | null): boolean {
   if (prefersReducedMotion()) return false;

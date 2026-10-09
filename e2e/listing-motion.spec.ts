@@ -1,9 +1,10 @@
 // Phase 4b L7: the listing + header motion pass. Motion is an enhancement:
 //   - card -> product: the card's frame and the product stage share one
 //     view-transition name and morph (no-preference);
-//   - a filter or chip change crossfades only the results block (<html
-//     data-listing-refine>, root left out); reduced motion and the mobile
-//     sheet start no crossfade;
+//   - a filter or chip change settles the results in on the LIVE element
+//     (no view-transition snapshot, so a card stays clickable with the mouse
+//     right after the change); reduced motion and the mobile sheet swap at
+//     once;
 //   - mega-menu panel fades/drops in and fades out; reduced motion shows and
 //     hides it at once;
 //   - search overlay fades in/out, the page behind it does not scroll, the
@@ -38,7 +39,21 @@ async function instrument(page: Page) {
     const w = window as unknown as Record<string, unknown>;
     const vts: { refine: boolean; pseudos: string[] }[] = [];
     const listeners = new Map<string, number>();
-    w.__l7 = { vts, listeners };
+    const settles: number[] = [];
+    w.__l7 = { vts, listeners, settles };
+
+    // Every results settle-in (a Web Animation on the live results).
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (
+      this: Element,
+      ...args: Parameters<Element["animate"]>
+    ) {
+      const options = args[1];
+      if (typeof options === "object" && options?.id === "listing-results-in") {
+        settles.push(performance.now());
+      }
+      return animate.apply(this, args);
+    };
 
     const start = document.startViewTransition?.bind(document);
     if (start) {
@@ -88,6 +103,13 @@ const viewTransitions = (page: Page): Promise<VtRecord[]> =>
       refine: v.refine,
       pseudos: [...v.pseudos],
     })),
+  );
+
+const settleCount = (page: Page): Promise<number> =>
+  page.evaluate(
+    () =>
+      (window as unknown as { __l7: { settles: number[] } }).__l7.settles
+        .length,
   );
 
 const documentListeners = (page: Page): Promise<Record<string, number>> =>
@@ -206,8 +228,8 @@ test.describe("card -> product morph", () => {
   });
 });
 
-test.describe("filter result crossfade", () => {
-  test("a filter change crossfades the results only; focus stays", async ({
+test.describe("filter result settle-in", () => {
+  test("a filter change settles the live results in; focus stays", async ({
     browser,
   }) => {
     const { context, page, errors } = await newPage(browser, false);
@@ -220,32 +242,64 @@ test.describe("filter result crossfade", () => {
       `${LISTING.cct3000} of ${LISTING.count} products`,
     );
     await expect(box).toBeFocused();
-    await expect
-      .poll(async () => {
-        const typed = (await viewTransitions(page)).filter((v) => v.refine);
-        return typed.length > 0 && typed.every((v) => v.pseudos.length > 0);
-      })
-      .toBe(true);
-    const typed = (await viewTransitions(page)).filter((v) => v.refine);
-    for (const vt of typed) {
-      // The page root is left out: only the results block animates.
-      expect(vt.pseudos.some((p) => p.includes("(root)"))).toBe(false);
-      expect(vt.pseudos.some((p) => p.includes("product-image-"))).toBe(false);
+    await expect.poll(() => settleCount(page)).toBe(1);
+    // Nothing is captured into a snapshot during a refinement: not the root,
+    // not the results, not a card (captured elements are not hit-testable).
+    for (const vt of (await viewTransitions(page)).filter((v) => v.refine)) {
+      expect(vt.pseudos).toEqual([]);
     }
-    // A chip removal is typed too.
+    // A chip removal settles in too.
     await page.getByRole("link", { name: "Remove filter CCT 3000K" }).click();
     await expect(count(page)).toHaveText(`${LISTING.count} products`);
-    await expect
-      .poll(
-        async () =>
-          (await viewTransitions(page)).filter((v) => v.refine).length,
-      )
-      .toBeGreaterThanOrEqual(2);
+    await expect.poll(() => settleCount(page)).toBe(2);
+    for (const vt of (await viewTransitions(page)).filter((v) => v.refine)) {
+      expect(vt.pseudos).toEqual([]);
+    }
+    // Once settled, nothing stays on the results.
+    await expect(grid(page)).toHaveCSS("opacity", "1");
     expect(errors).toEqual([]);
     await context.close();
   });
 
-  test("reduced motion: no view transition, results still update", async ({
+  test("a card is clickable with the mouse right after a filter change", async ({
+    browser,
+  }) => {
+    const { context, page, errors } = await newPage(browser, false);
+    await page.goto(LISTING_RECESSED_PATH);
+    const box = rail(page).getByRole("checkbox", { name: /^3000K/ });
+    await waitForHydration(box);
+    await box.check();
+    // QA regression: during the old snapshot crossfade a mouse click on a
+    // card in the first ~0.4 s hit the grid container and was lost. No wait
+    // on data-listing-refine or the settle-in: the first refined card is
+    // clicked as soon as it is in the DOM, while the settle-in still runs.
+    await expect(count(page)).toHaveText(
+      `${LISTING.cct3000} of ${LISTING.count} products`,
+    );
+    const card = grid(page).locator("[data-product-card]").first();
+    const href = await card.getAttribute("href");
+    expect(href).toBeTruthy();
+    const rect = await card.boundingBox();
+    expect(rect).toBeTruthy();
+    const x = rect!.x + rect!.width / 2;
+    const y = rect!.y + rect!.height / 2;
+    // The point hit-tests to the card itself, not a container above it.
+    expect(
+      await page.evaluate(
+        ([px, py]) =>
+          Boolean(
+            document.elementFromPoint(px!, py!)?.closest("[data-product-card]"),
+          ),
+        [x, y],
+      ),
+    ).toBe(true);
+    await page.mouse.click(x, y);
+    await expect(page).toHaveURL(new RegExp(`${href!.split("?")[0]}`));
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  test("reduced motion: no animation, results still update", async ({
     browser,
   }) => {
     const { context, page, errors } = await newPage(browser, true);
@@ -258,12 +312,13 @@ test.describe("filter result crossfade", () => {
     );
     await expect(grid(page).locator("li")).toHaveCount(LISTING.cct3000);
     expect((await viewTransitions(page)).filter((v) => v.refine)).toEqual([]);
+    expect(await settleCount(page)).toBe(0);
     await expect(grid(page)).toHaveCSS("opacity", "1");
     expect(errors).toEqual([]);
     await context.close();
   });
 
-  test("the mobile filter sheet starts no crossfade over the modal", async ({
+  test("the mobile filter sheet swaps the results at once", async ({
     browser,
   }) => {
     const { context, page, errors } = await newPage(browser, false, {
@@ -279,6 +334,7 @@ test.describe("filter result crossfade", () => {
     await expect(page).toHaveURL(/\?cct=3000$/);
     await expect(sheet).toBeVisible();
     expect((await viewTransitions(page)).filter((v) => v.refine)).toEqual([]);
+    expect(await settleCount(page)).toBe(0);
     expect(errors).toEqual([]);
     await context.close();
   });
