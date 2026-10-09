@@ -343,7 +343,13 @@ describe("product page: default visibility", () => {
 
   it("lists only published products in the sitemap and static params", async () => {
     const entries = await sitemap();
-    expect(entries.map((e) => e.url).sort()).toEqual(
+    // Product pages only (L6 adds the home page and catalog listing paths).
+    expect(
+      entries
+        .map((e) => e.url)
+        .filter((url) => url.startsWith(`${SITE}/product/`))
+        .sort(),
+    ).toEqual(
       ["arc-ar-013a", "arc-ar-020a", "halo-ha-001", "solo-so-001"].map(
         (slug) => `${SITE}/product/${slug}`,
       ),

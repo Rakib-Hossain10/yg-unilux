@@ -95,19 +95,17 @@ test("mobile menu: native disclosure with the five sections", async ({
 }) => {
   await page.setViewportSize({ width: 375, height: 740 });
   await page.goto("/");
-  const summary = page.locator("header summary");
+  const summary = page.locator("header summary[aria-label=Menu]");
   await expect(summary).toHaveAccessibleName("Menu");
   await summary.focus();
   await page.keyboard.press("Enter");
   const menu = page.locator("header details nav");
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("link")).toHaveText([
-    "Product",
-    "Services",
-    "OEM/ODM",
-    "R&D",
-    "About us",
-  ]);
+  // Top-level items only: with menu data (L6) "Product" is a nested
+  // disclosure (summary) instead of a link.
+  await expect(
+    menu.locator(":scope > ul > li > a, :scope > ul > li > details > summary"),
+  ).toHaveText(["Product", "Services", "OEM/ODM", "R&D", "About us"]);
 });
 
 test("no horizontal scroll at 320px (WCAG 1.4.10 reflow)", async ({ page }) => {

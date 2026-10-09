@@ -4,10 +4,18 @@
 
 import type { ReactNode } from "react";
 
+import type { SiteMenu } from "./menu/menu-types";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
-export function SiteShell({ children }: { children: ReactNode }) {
+export function SiteShell({
+  children,
+  menu = null,
+}: {
+  children: ReactNode;
+  /** The header's product menu (layouts load it); null = plain links. */
+  menu?: SiteMenu | null;
+}) {
   return (
     <>
       {/* First focusable element: lets keyboard users jump past the header. */}
@@ -17,7 +25,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
       >
         Skip to content
       </a>
-      <SiteHeader />
+      <SiteHeader menu={menu} />
       <main id="content" className="flex flex-1 flex-col">
         {children}
       </main>
