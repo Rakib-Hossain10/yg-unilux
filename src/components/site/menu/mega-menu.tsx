@@ -9,7 +9,9 @@
 //   stays hidden); the button replaces it once React runs.
 // - Opens on click, Enter or Space (never on hover alone); focus moves to the
 //   first category. Closes on Escape (focus back on the button), a press
-//   outside, focus leaving the menu, a link inside it, or a route change.
+//   outside, focus leaving the menu, any link inside it (the current page's
+//   too), or a route change. A touch first tap that only reveals a
+//   category's sub-categories keeps it open.
 // - DOM order = Tab order: each category link is followed by its own
 //   sub-category block, so Tab walks category, its sub-categories, next
 //   category... Only the active category's block is shown.
@@ -90,6 +92,9 @@ export function MegaMenu({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const focusOnOpen = useRef(false);
+  // Set by CategoryGrid when a touch tap only revealed a category's
+  // sub-categories (no navigation), read and cleared by the panel's click.
+  const revealTap = useRef(false);
   const hoverTimer = useRef<number | undefined>(undefined);
   const panelId = useId();
 
@@ -195,9 +200,14 @@ export function MegaMenu({
         data-slot="mega-menu-panel"
         data-state={open ? "open" : "closed"}
         onClick={(event) => {
-          // Any link inside navigates: close without stealing focus.
-          // A first tap that only showed a category is not a navigation.
-          if (event.defaultPrevented) return;
+          // Any link inside closes the menu without stealing focus, a link
+          // to the page already shown included (next/link prevents the
+          // default of every client navigation, so defaultPrevented says
+          // nothing here). Only a first tap that revealed a category stays.
+          if (revealTap.current) {
+            revealTap.current = false;
+            return;
+          }
           if ((event.target as Element).closest("a[href]")) setOpenOn(null);
         }}
         className="absolute inset-x-0 top-full border-b border-grey-200 bg-paper text-sm tracking-normal normal-case"
@@ -213,6 +223,11 @@ export function MegaMenu({
             }}
             onHoverCategory={hoverTo}
             onLeaveCategory={() => window.clearTimeout(hoverTimer.current)}
+            onRevealTap={(id) => {
+              revealTap.current = true;
+              window.clearTimeout(hoverTimer.current);
+              setActiveId(id);
+            }}
           />
           <ApplicationsColumn menu={menu} allHref={href} />
         </div>
@@ -228,6 +243,7 @@ function CategoryGrid({
   onFocusCategory,
   onHoverCategory,
   onLeaveCategory,
+  onRevealTap,
 }: {
   categories: readonly MenuCategory[];
   active: string;
@@ -235,6 +251,8 @@ function CategoryGrid({
   onFocusCategory: (id: string) => void;
   onHoverCategory: (id: string) => void;
   onLeaveCategory: () => void;
+  /** A touch tap that showed a category instead of following its link. */
+  onRevealTap: (id: string) => void;
 }) {
   const lastPointer = useRef<{ touch: boolean; wasActive: boolean } | null>(
     null,
@@ -283,7 +301,7 @@ function CategoryGrid({
                 lastPointer.current = null;
                 if (press?.touch && !press.wasActive) {
                   event.preventDefault();
-                  onFocusCategory(category.id);
+                  onRevealTap(category.id);
                 }
               }}
               className={`group row-start-1 flex min-h-11 flex-col items-center gap-3 border-b px-1 pb-4 text-center text-[0.8125rem] leading-snug transition-colors duration-(--duration-quick) ${

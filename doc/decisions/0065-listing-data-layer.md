@@ -57,3 +57,11 @@ Listing pages (`/products`, `/products/<main>/<sub>`, `/areas/<slug>`) render on
 - **Client-safe constants** (`search-links.ts`) repeat the search limits and path format so Zod stays out of the header bundle; unit tests pin the copies.
 - **Footer** keeps the single Applications link (no database read in the footer).
 - **Open:** page scrolls behind the overlay (L7); real Atlas `$search` through the overlay untested; overlay leak check with all restricted columns filled is a gate B job; mega-menu with real icons unseen (gate C); `countProductsByArea` would let areas hide when empty.
+
+## Addendum (2026-10-09, QA gate B fixes)
+- Gate B (L4–L6): FAIL then fixed. No restricted spec value leaked anywhere (HTML, RSC, prefetch, search JSON, sitemap, data-cache bytes) with all 28 columns filled; junk-param flood left the data cache unchanged (69 → 69); real Atlas `$search` works through `searchCatalog` on the dev cluster (family-name search still untested, no family data).
+- **L-1:** a comment mentioning `NEXT_PUBLIC_` tripped `repo-security.test.ts`; reworded.
+- **M-1:** a listing page's sub-category links follow the same "published subtree" rule as the menu, sitemap and search (gate-A I-2), via `categoriesWithPublished(tree, listPublishedCategoryCounts())`. The viewed category stays in its own row. A category with no published product answers 200 with the empty state and `robots: noindex, follow`.
+- **L-2:** the mega-menu closes on any link click in the panel; only a touch first tap that reveals a category keeps it open, marked by an explicit `revealTap` flag (not `defaultPrevented`, which `next/link` sets on every client navigation).
+- Saving column visibility drops filter numbers for restricted columns; making a column public again does not restore them (by design; tell the admin).
+- Tests: `e2e/listing-gate-b.qa.spec.ts` (17), `test/listing-gate-b.qa.test.ts` (13), `e2e/fixtures/listing-gate-b.ts`. 4119 unit, full e2e 254.

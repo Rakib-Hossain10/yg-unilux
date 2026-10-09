@@ -40,6 +40,10 @@ import {
   type PublicCategoryView,
 } from "@/lib/catalog/categories";
 import {
+  categoriesWithPublished,
+  listPublishedCategoryCounts,
+} from "@/lib/catalog/category-counts";
+import {
   resolveCategoryPath,
   type CategoryPathView,
 } from "@/lib/catalog/category-path";
@@ -65,6 +69,12 @@ interface ListingPageData {
   /** The category's public record (description, cover), null on /products. */
   category: PublicCategoryView | null;
   tree: PublicCategoryView[];
+  /**
+   * Ids of categories whose subtree holds a published product (the menu,
+   * sitemap and search rule, gate-A I-2): only these are linked, so a
+   * draft-only category is never named on another category's page.
+   */
+  listed: ReadonlySet<string>;
   result: ListingResult;
   facets: ListingFacets;
 }
@@ -78,9 +88,10 @@ const loadListing = listingLoader(
   async (pathKey, queryKey): Promise<ListingPageData | null> => {
     const segments = pathKey === "" ? [] : pathKey.split("/");
     if (segments.length > MAX_PATH_SEGMENTS) return null;
-    const [visibility, tree, path] = await Promise.all([
+    const [visibility, tree, counts, path] = await Promise.all([
       getCatalogVisibility(),
       listPublicCategories(),
+      listPublishedCategoryCounts(),
       segments.length > 0 ? resolveCategoryPath(segments) : null,
     ]);
     if (segments.length > 0 && path === null) return null;
@@ -97,6 +108,7 @@ const loadListing = listingLoader(
       path,
       category: tree.find((entry) => entry.id === categoryId) ?? null,
       tree,
+      listed: categoriesWithPublished(tree, counts),
       result,
       facets,
     };
@@ -117,6 +129,13 @@ async function loadFromProps(
 /** Page 2+ of a listing that has fewer pages is not a page. */
 const isPastEnd = (data: ListingPageData) =>
   data.result.page > data.result.pageCount;
+
+/**
+ * A category whose subtree holds no published product: the page still
+ * answers 200 (an empty state), but it is not indexed until it has one.
+ */
+const isEmptyCategory = (data: ListingPageData) =>
+  data.path !== null && !data.listed.has(data.path.category.id);
 
 const ROOT_TITLE = "Products";
 const ROOT_DESCRIPTION =
@@ -168,8 +187,9 @@ export async function generateMetadata(
     description,
     ...(canonical ? { alternates: { canonical } } : {}),
     // Any filter or a non-default sort (including the empty answer that
-    // keeps unknown values to explain itself): not indexed, links followed.
-    ...(isRefinedListing(data.result.params)
+    // keeps unknown values to explain itself), or a category with no
+    // published product yet: not indexed, links followed.
+    ...(isRefinedListing(data.result.params) || isEmptyCategory(data)
       ? { robots: { index: false, follow: true } }
       : {}),
     openGraph: {
@@ -183,14 +203,17 @@ export async function generateMetadata(
   };
 }
 
-/** The row of category links under the header. */
+/**
+ * The row of category links under the header: only categories with a
+ * published product (the current one always, it is the page's own heading).
+ */
 function subLinksOf(data: ListingPageData): ListingSubLink[] {
-  const { path, tree } = data;
+  const { path, tree, listed } = data;
   if (path === null) {
     return [
       { id: "all", name: "All", href: PRODUCTS_PATH, current: true },
       ...tree
-        .filter((entry) => entry.parentId === null)
+        .filter((entry) => entry.parentId === null && listed.has(entry.id))
         .map((main) => ({
           id: main.id,
           name: main.name,
@@ -201,10 +224,11 @@ function subLinksOf(data: ListingPageData): ListingSubLink[] {
   }
   const main = path.path[0];
   if (!main) return [];
-  const siblings =
+  const siblings = (
     path.path.length === 1
       ? path.children
-      : tree.filter((entry) => entry.parentId === main.id);
+      : tree.filter((entry) => entry.parentId === main.id)
+  ).filter((child) => listed.has(child.id) || child.id === path.category.id);
   return [
     {
       id: "all",

@@ -21,6 +21,7 @@ import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
 import { seedAreaPages } from "./fixtures/area-pages";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
+import { seedListingGateB } from "./fixtures/listing-gate-b";
 import { seedListingPages } from "./fixtures/listing-pages";
 import { seedProductPages } from "./fixtures/product-pages";
 import {
@@ -92,6 +93,8 @@ async function seed(uri: string): Promise<void> {
     // The area-page spec's areas, categories and products (the area list
     // is cached on the first catalog request too).
     await seedAreaPages(getDb());
+    // QA gate B (4b): every-column leak data for listing, search and menu.
+    await seedListingGateB(getDb());
   } finally {
     await disconnectDb();
   }

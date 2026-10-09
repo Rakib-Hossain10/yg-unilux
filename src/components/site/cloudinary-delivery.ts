@@ -2,7 +2,7 @@
 // server import, so client components (the search overlay's thumbnails) and
 // the server helper (cloudinary-image.ts) build URLs the same way. The cloud
 // name is public (it is in every image URL); it is read on the server and
-// handed down as a prop, never from a NEXT_PUBLIC_ variable.
+// handed down as a prop, never from a public build-time variable.
 
 /**
  * `https://res.cloudinary.com/<cloud>/image/upload/[<step>/]<publicId>`, or
