@@ -4,6 +4,7 @@ description: Independent reviewer and test author for YG UniLUX. Use at the end 
 model: opus
 skills:
   - security-and-hardening
+  - better-auth-security-best-practices
   - playwright-best-practices
   - webapp-testing
   - web-design-guidelines

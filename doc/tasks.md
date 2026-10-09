@@ -4,7 +4,40 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Phase 4b: plan APPROVED (2026-10-08, all defaults Q1–Q9), `doc/phase-4b-plan.md`. Branch `phase-4b` (from `main`, 4a merged in PR #15).**
+- **Phase 5 (Restricted access): plan APPROVED (2026-10-09, all defaults Q0–Q12), `doc/phase-5-plan.md`. Branch `phase-5` (from `main` after 4b, PR #16).**
+  - **P0 done:**
+    - answers recorded in the plan;
+    - **user addition to Q1:** the admin can regenerate an invite at any time (expired or lost): a fresh 72 h link, earlier links deleted, "Email it" or "Show once to copy" for WhatsApp, statuses "Invite pending"/"Invite expired" with a list filter, an expired link shows a neutral "ask us for a new one" page, and regenerating never changes `accessExpiresAt`;
+    - Better Auth skills installed (`.claude/skills/better-auth-*`, `skills-lock.json`), given to `backend-architect` + `qa-security-reviewer`; ADR 0013 note lists the parts that conflict with our rules.
+  - **▶ NEXT: P1 account backend** (`backend-architect`/Opus). Start with two spikes in the installed `better-auth` 1.7.7 sources:
+    1. a 72 h invite token through Better Auth's reset mechanism (verification row `reset-password:<token>` with a longer `expiresAt`; also how to delete a user's earlier invite rows); fallback: our own hashed invite-token table;
+    2. whether `auth.api.adminUpdateUser` writes `input: false` fields, else `internalAdapter.updateUser` inside `src/lib/account-writes.ts`.
+
+    Then the P1 list in the plan: hooks clear `mustChangePassword` + `passwordSetAt`, ADR 0032 24 h cap, `invite.ts` with `inviteStatus`, `safeNextPath`, `requireSignedIn`, new user fields, email templates. ADR 0068. P1 also starts the Resend sink in `e2e/fake-providers/` if P2 needs it.
+  - **Tasks:**
+    - P1 account backend, P2 account pages, P3 services (requests + customers), P4 `/api/datasheet/[productId]`, P5 expiry cron; **QA gate A after P5**;
+    - P6 request-access UI, P7 admin queue, P8 admin customers; **QA gate B after P8**;
+    - P9 exit e2e; **gate C** (`qa-security-reviewer` then `ui-reviewer` on the public account pages).
+    - ADRs 0068–0072.
+  - **Subagents:** `backend-architect`, `site-frontend`, `admin-panel-builder`, `qa-security-reviewer`, `ui-reviewer`, `code-reviewer` (hook). No new subagent; `motion-engineer`/`import-engineer` unused. All Opus.
+  - **Must-dos folded into the plan:**
+    - ADR 0032 24 h cap gap (`remember-me.qa.test.ts` `it.fails` → `it`);
+    - ADR 0064 §14/§19 (`/change-password`, temp-password redirect, download link, expired-link target);
+    - task-5 L3 (`/api/auth/*` posts, `revokeOtherSessions: true`);
+    - ADR 0027 full page loads;
+    - gate C I-2 RFC 5987 file names;
+    - **nothing clears `mustChangePassword` today** (P1 fixes it).
+  - **User must:**
+    - `CRON_SECRET` in `.env.local`;
+    - company email + WhatsApp number in `/admin/settings`;
+    - verify the Resend domain before launch.
+  - **Still open from 4b:**
+    - Firewall rate limits (launch list);
+    - M-4 facet counts decision;
+    - 4:3 crop check with real photos;
+    - logo/favicon, real photos, category icons;
+    - family-name search on Atlas after a real import.
+- **Phase 4b (history): plan APPROVED (2026-10-08, all defaults Q1–Q9), `doc/phase-4b-plan.md`. Branch `phase-4b` (from `main`, 4a merged in PR #15).**
   - **L0 done** (roster line in ADR 0013 + CLAUDE.md).
   - **L1 done** (`c09ae39`, ADR 0065): `src/lib/catalog/{listing-params,category-path,listing-scope,listing,facets,areas}.ts`; 3669 unit green. Wiring for L4/L5: `getCatalogVisibility()` once per request → `parseListingParams(searchParams, {publicFacets: publicSpecFacets(v), track: path.isMagneticTrack, cat: isAreaPage})` → `listProducts(scope, params, v)` + `getFacets(scope, v)` → 404 when `page > pageCount`; chips/canonical from `result.params`. `listPublicCategories` lacks `description`/`coverImage` (add with L3/L4, bump `CATALOG_CACHE_VERSION`); `listCategoryPaths()` has no `updatedAt` (sitemap lastmod). L2 can reuse `listing-scope.ts` and `toListingCardView`.
   - **L2 done** (`6ed3966`, ADR 0066): `src/lib/catalog/{search,search-index}.ts`, `scripts/search-index.ts` (`npm run db:search-index`), `GET /api/catalog/search`; 3732 unit green. API for L6: `{query, products:[card + variantCount + matchedModelNo], categories:[{id,name,slug,path,slugPath}]}`; link `/product/<slug>?model=<matchedModelNo>`, categories `/products/<slugPath.join("/")>`; input `maxLength=64`; `/search` page may call `searchCatalog()` directly. Atlas with no index returns empty (not the fallback). QA gate A: add `search.ts` to `CACHED_MODULES` in `test/catalog-gate-a-guards.qa.test.ts`; decide whether empty categories show in search.
@@ -425,6 +458,16 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - **Exit:** leak test passes; Lighthouse ≥ 90 on listing + product page
 
 ## Phase 5 — Restricted access
+**Plan: [phase-5-plan.md](phase-5-plan.md) (P0–P9, QA gates A after P5, B after P8, C at exit; ADRs 0068–0072). Approved 2026-10-09.**
+- [x] Plan drafted, `/find-skills` run (2026-10-09)
+- [x] P0: plan approved (defaults + invite-regenerate addition), branch `phase-5`, Better Auth skills installed (ADR 0013 note)
+- [ ] P1 account backend (ADR 0068)
+- [ ] P2 account pages
+- [ ] P3 services: access requests + customers (ADR 0069, 0070)
+- [ ] P4 `/api/datasheet/[productId]` (ADR 0071)
+- [ ] P5 expiry cron (ADR 0072) → QA gate A
+- [ ] P6 request-access UI, P7 admin queue, P8 admin customers → QA gate B
+- [ ] P9 exit e2e → gate C
 - [ ] Request Access form + WhatsApp link
 - [ ] Admin queue: approve with expiry / reject; Resend emails
 - [ ] Customers module (create, extend, reset, disable, history, filters)
@@ -551,4 +594,6 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-08: Atlas dev search index confirmed READY; model no. exact/prefix and name search verified on the dev cluster; family search untested (no family data in dev). Next: L5 area pages.
 - 2026-10-08: L5 area pages done (`site-frontend`/Opus; ADR 0065 L5 addendum); listing-header grayscale class bug from the code review fixed + tested; 4078 unit + 226 e2e green. Next: L6 mega-menu + search UI + sitemap.
 - 2026-10-09: L6 mega-menu + search UI + sitemap done (`site-frontend`/Opus; ADR 0065 L6 addendum); code-review findings (scrim close, touch first-tap, Esc, e2e) fixed; 4106 unit + 237 e2e green. Next: QA gate B.
+- 2026-10-09: Phase 4b merged (PR #16). Phase 5 planned: `doc/phase-5-plan.md` (P0–P9, Q0–Q12 with defaults). `/find-skills`: official `better-auth-best-practices` + `better-auth-security-best-practices` recommended (Q0), nothing for filter/search/menu UI. Existing subagents reused, none new. Waiting for the user's review; no code written.
+- 2026-10-09: Phase 5 plan approved (all defaults; user added invite regeneration for expired/lost 72 h links, now explicit in Q1/P1/P3/P8). P0 done on `phase-5`: Better Auth skills installed and reviewed (Markdown only; conflicts with our rules listed in ADR 0013). Next: P1.
 - 2026-10-09: QA gate B on L4–L6 failed on 3 findings (L-1 comment, M-1 draft category link, L-2 menu close), all fixed; gate B tests added. 4119 unit + 254 e2e green. Next: L7.
