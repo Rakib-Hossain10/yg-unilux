@@ -23,7 +23,9 @@ import { useRouter } from "next/navigation";
 import { type MouseEvent, useEffect, useId, useRef, useState } from "react";
 
 import { cloudinaryDeliveryUrl } from "../cloudinary-delivery";
+import { THUMB_FIT } from "../product/gallery-images";
 import { CloseIcon, SearchIcon } from "../icons";
+import type { MenuLink } from "../menu/menu-types";
 import {
   isSearchable,
   parseSearchAnswer,
@@ -51,6 +53,17 @@ interface Option {
   href: string;
 }
 
+/** A plain left click (a modified one opens a new tab: the overlay stays). */
+function isPlainClick(event: MouseEvent<HTMLAnchorElement>): boolean {
+  return !(
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey ||
+    event.button !== 0
+  );
+}
+
 function optionsOf(state: SearchState): Option[] {
   if (state.status !== "done") return [];
   const { answer, query } = state;
@@ -71,11 +84,17 @@ export function SearchOverlay({
   open,
   onClose,
   cloudName,
+  quickLinks = [],
 }: {
   open: boolean;
   /** Called once the dialog closed; `returnFocus` false after navigation. */
   onClose: (returnFocus: boolean) => void;
   cloudName: string | null;
+  /**
+   * Main categories (name + listing URL, from the cached menu the header
+   * already has) offered while nothing is typed (ui-reviewer gate C, L-2).
+   */
+  quickLinks?: readonly MenuLink[];
 }) {
   const router = useRouter();
   const baseId = useId();
@@ -304,21 +323,41 @@ export function SearchOverlay({
                 optionId={optionId}
                 onPick={(event) => {
                   // A modified click opens a new tab: the overlay stays.
-                  if (
-                    event.metaKey ||
-                    event.ctrlKey ||
-                    event.shiftKey ||
-                    event.altKey ||
-                    event.button !== 0
-                  ) {
-                    return;
-                  }
+                  if (!isPlainClick(event)) return;
                   navigating.current = true;
                   close();
                 }}
               />
             ) : null}
           </div>
+          {state.status === "idle" && quickLinks.length > 0 ? (
+            <nav
+              aria-labelledby={`${baseId}-browse`}
+              data-slot="search-quick-links"
+              className="mx-auto w-full max-w-(--container-site) px-4 pb-8 md:px-8"
+            >
+              <p id={`${baseId}-browse`} className="pb-2 text-sm text-grey-600">
+                Browse by category
+              </p>
+              <ul className="flex flex-wrap gap-x-8">
+                {quickLinks.map((link) => (
+                  <li key={link.id}>
+                    <Link
+                      href={link.href}
+                      onClick={(event) => {
+                        if (!isPlainClick(event)) return;
+                        navigating.current = true;
+                        close();
+                      }}
+                      className="inline-flex min-h-11 items-center font-display text-2xl leading-tight font-light text-ink underline decoration-transparent decoration-1 underline-offset-[6px] transition-colors duration-(--duration-quick) hover:decoration-ink md:text-3xl"
+                    >
+                      {link.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ) : null}
         </div>
       </div>
     </dialog>
@@ -395,7 +434,7 @@ function Results({
                         alt=""
                         fill
                         sizes="44px"
-                        className="object-cover"
+                        className={THUMB_FIT}
                       />
                     ) : null}
                   </span>

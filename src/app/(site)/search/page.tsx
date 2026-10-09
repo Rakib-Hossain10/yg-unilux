@@ -1,7 +1,8 @@
 // /search?q=: the full search results page (Phase 4b L6, plan Q9, ADR 0066).
 // Works without JavaScript (a GET form); the header overlay's Enter and
 // "See all results" land here. Rendered on request (reads searchParams) from
-// searchCatalog(), whose product answers are cached per normalised query.
+// searchCatalog(). Product answers are not cached per query (gate C L-1);
+// only the overlay's JSON route sends `private, max-age=30`.
 // Cards come from ListingCardView (no spec value, rule 9); a model-no. hit
 // links to /product/<slug>?model=<modelNo>. Never indexed.
 

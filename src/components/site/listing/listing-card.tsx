@@ -10,7 +10,7 @@ import Link from "next/link";
 import { ProductImageTransition } from "@/components/motion/product/product-image-transition";
 import type { ProductImageKind } from "@/models/product-constants";
 
-import { frameFitClass } from "../product/gallery-images";
+import { THUMB_FIT } from "../product/gallery-images";
 import { ImagePlaceholder } from "../product/image-placeholder";
 import { STRIP_CARD_FRAME } from "../product/product-strip";
 
@@ -30,19 +30,28 @@ export interface ListingCardData {
 const CARD_SIZES =
   "(min-width: 1280px) 18vw, (min-width: 1024px) 24vw, (min-width: 768px) 30vw, 46vw";
 
+/** The family eyebrow, only when it adds something to the name. */
+function familyOf(card: ListingCardData): string | null {
+  return card.family && card.family.toLowerCase() !== card.name.toLowerCase()
+    ? card.family
+    : null;
+}
+
 export function ListingCard({
   card,
   eager = false,
+  reserveFamily = true,
 }: {
   card: ListingCardData;
   /** One of the first cards: loaded at once (likely the LCP on mobile). */
   eager?: boolean;
+  /**
+   * Keep an empty family line when this card has none, so names line up
+   * with cards that do. The grid turns it off when no card has a family.
+   */
+  reserveFamily?: boolean;
 }) {
-  // The family eyebrow only when it adds something to the name.
-  const family =
-    card.family && card.family.toLowerCase() !== card.name.toLowerCase()
-      ? card.family
-      : null;
+  const family = familyOf(card);
   return (
     <Link
       href={card.href}
@@ -60,7 +69,7 @@ export function ListingCard({
               fill
               sizes={CARD_SIZES}
               loading={eager ? "eager" : "lazy"}
-              className={`${frameFitClass(card.image.kind)} transition-transform duration-(--duration-calm) ease-(--ease-calm) group-hover:scale-[1.03]`}
+              className={`${THUMB_FIT} transition-transform duration-(--duration-calm) ease-(--ease-calm) group-hover:scale-[1.03]`}
             />
           ) : (
             <ImagePlaceholder name={card.name} size="small" />
@@ -68,24 +77,30 @@ export function ListingCard({
         </div>
       </ProductImageTransition>
       <div className="mt-3">
+        {/* The family line is kept (empty when it would repeat the name)
+            so names line up across a row (ui-reviewer gate C, M-3). */}
         {family ? (
-          <p className="text-[0.8125rem] text-grey-600">
+          <p className="min-h-[1lh] truncate text-[0.8125rem] text-grey-600">
             <span className="sr-only">Family: </span>
             {family}
           </p>
+        ) : reserveFamily ? (
+          <p aria-hidden="true" className="min-h-[1lh] text-[0.8125rem]" />
         ) : null}
         <h3 className="font-display text-xl leading-tight text-ink group-hover:underline group-hover:decoration-1 group-hover:underline-offset-4 md:text-[1.375rem]">
           {card.name}
         </h3>
         {card.modelCode || card.variantCount >= 2 ? (
-          <p className="mt-1 flex flex-wrap gap-x-3 text-sm text-grey-600">
+          // One line at every width: the code gives way (ellipsis) before
+          // "n models" wraps under it in a 2-column phone grid.
+          <p className="mt-1 flex min-w-0 items-baseline gap-x-3 text-[0.8125rem] whitespace-nowrap text-grey-600 md:text-sm">
             {card.modelCode ? (
-              <span className="tracking-[0.02em] tabular-nums">
+              <span className="min-w-0 truncate tracking-[0.02em] tabular-nums">
                 {card.modelCode}
               </span>
             ) : null}
             {card.variantCount >= 2 ? (
-              <span>{card.variantCount} models</span>
+              <span className="shrink-0">{card.variantCount} models</span>
             ) : null}
           </p>
         ) : null}
@@ -102,6 +117,7 @@ export function ListingGrid({
   cards: readonly ListingCardData[];
   eagerCount?: number;
 }) {
+  const reserveFamily = cards.some((card) => familyOf(card) !== null);
   return (
     <ul
       data-slot="listing-grid"
@@ -109,7 +125,11 @@ export function ListingGrid({
     >
       {cards.map((card, index) => (
         <li key={card.id}>
-          <ListingCard card={card} eager={index < eagerCount} />
+          <ListingCard
+            card={card}
+            eager={index < eagerCount}
+            reserveFamily={reserveFamily}
+          />
         </li>
       ))}
     </ul>

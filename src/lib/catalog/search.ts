@@ -6,15 +6,12 @@
 import "server-only";
 
 import type { PipelineStage } from "mongoose";
-import { unstable_cache } from "next/cache";
 
 import { MAX_CATEGORY_DEPTH } from "@/lib/constants";
 import { connectDb } from "@/lib/db";
-import { CATALOG_TAGS } from "@/lib/revalidate";
 import { ProductModel } from "@/models";
 import { modelNoKey } from "@/models/product-constants";
 
-import { CATALOG_CACHE_VERSION } from "./cache-version";
 import { listPublicCategories, type PublicCategoryView } from "./categories";
 import {
   categoriesWithPublished,
@@ -266,14 +263,6 @@ function toHit(doc: SearchDoc, query: string): SearchProductHit {
   };
 }
 
-/* Thrown inside the cache when `$search` fails, so nothing is cached. */
-class AtlasSearchUnavailable extends Error {
-  override readonly name = "AtlasSearchUnavailable";
-  constructor(readonly reason: string) {
-    super("Atlas Search unavailable");
-  }
-}
-
 /* A safe description of a driver error: never the message (it can quote the query). */
 function describeError(error: unknown): string {
   if (!(error instanceof Error)) return "unknown error";
@@ -288,71 +277,35 @@ function describeError(error: unknown): string {
 }
 
 /*
- * Thrown inside the cache when Atlas answers with no hit, so a zero-hit
- * answer is never cached (gate-A L-2): while the index is still PENDING or
- * BUILDING, Atlas answers every query with nothing, and a cached empty
- * answer would outlive the build until the next catalog write.
+ * The `$search` answer, or the escaped-regex fallback when the stage throws
+ * (one warning, never the query text).
  */
-class AtlasSearchNoHits extends Error {
-  override readonly name = "AtlasSearchNoHits";
-  constructor() {
-    super("Atlas Search found nothing");
-  }
-}
-
-async function readAtlasSearch(key: string): Promise<SearchProductHit[]> {
-  await connectDb();
-  let docs: SearchDoc[];
+async function readProductDocs(key: string): Promise<SearchDoc[]> {
   try {
-    docs = await ProductModel.aggregate<SearchDoc>(
+    return await ProductModel.aggregate<SearchDoc>(
       buildAtlasSearchPipeline(key),
     );
   } catch (error) {
-    throw new AtlasSearchUnavailable(describeError(error));
+    console.warn(
+      `Catalog search: $search failed (${describeError(error)}); using the regex fallback (ADR 0006).`,
+    );
+    return ProductModel.aggregate<SearchDoc>(buildFallbackPipeline(key));
   }
-  if (docs.length === 0) throw new AtlasSearchNoHits();
-  return docs.map((doc) => toHit(doc, key));
-}
-
-/*
- * Keyed by the lowercased normalised query (results are case-insensitive)
- * and CATALOG_CACHE_VERSION. Product writes expire `products`; `categories`
- * as well, so a tree change refreshes every search answer. Only answers
- * with at least one hit are stored (zero hits throw AtlasSearchNoHits), so
- * junk queries add no entry either.
- */
-const cachedAtlasSearch = unstable_cache(
-  readAtlasSearch,
-  ["catalog", "search-products", CATALOG_CACHE_VERSION],
-  { tags: [CATALOG_TAGS.products, CATALOG_TAGS.categories] },
-);
-
-async function readFallbackSearch(key: string): Promise<SearchProductHit[]> {
-  await connectDb();
-  const docs = await ProductModel.aggregate<SearchDoc>(
-    buildFallbackPipeline(key),
-  );
-  return docs.map((doc) => toHit(doc, key));
 }
 
 /**
- * Published products for a normalised query. Atlas results with hits are
- * cached; a zero-hit Atlas answer is not (it costs one uncached `$search`
- * per request); the regex fallback is not cached either (a degraded mode
- * must not outlive the outage in the cache) and logs one warning without
- * the query text.
+ * Published products for a normalised, lowercased query. Deliberately NOT
+ * in the shared data cache (gate-C L-1): Atlas matches any token of a
+ * multi-word query, so "lumo 1", "lumo 2", ... all have hits and a per-query
+ * entry would grow without bound. One `$search` per request is cheap, the
+ * overlay debounces, and the route answers `private, max-age=30`. This also
+ * means a zero-hit answer while the index builds, or a degraded fallback
+ * answer, never outlives its cause.
  */
 async function searchProducts(key: string): Promise<SearchProductHit[]> {
-  try {
-    return await cachedAtlasSearch(key);
-  } catch (error) {
-    if (error instanceof AtlasSearchNoHits) return [];
-    if (!(error instanceof AtlasSearchUnavailable)) throw error;
-    console.warn(
-      `Catalog search: $search failed (${error.reason}); using the regex fallback (ADR 0006).`,
-    );
-    return readFallbackSearch(key);
-  }
+  await connectDb();
+  const docs = await readProductDocs(key);
+  return docs.map((doc) => toHit(doc, key));
 }
 
 /* Names and slugs from the main category down to `category` (cycle-safe). */

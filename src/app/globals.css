@@ -125,6 +125,16 @@
     outline-offset: 3px;
   }
 
+  /* Cormorant's default figures are old-style: "01", "13" and model codes
+     read as letters ("Listing oI"). The display face always sets lining
+     figures (ui-reviewer gate C 4b, M-1). The --tw variable keeps them when
+     a numeric utility such as tabular-nums is added to the same element
+     (Tailwind composes font-variant-numeric from these variables). */
+  .font-display {
+    --tw-numeric-figure: lining-nums;
+    font-variant-numeric: lining-nums;
+  }
+
   ::selection {
     background-color: var(--color-ink);
     color: var(--color-paper);

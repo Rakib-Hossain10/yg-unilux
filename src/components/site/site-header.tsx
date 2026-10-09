@@ -80,7 +80,17 @@ export function SiteHeader({
         </nav>
 
         <div className="flex items-center justify-end gap-1">
-          <SearchLauncher className={iconLink} cloudName={siteCloudName()} />
+          <SearchLauncher
+            className={iconLink}
+            cloudName={siteCloudName()}
+            quickLinks={
+              menu?.categories.map(({ id, name, href }) => ({
+                id,
+                name,
+                href,
+              })) ?? []
+            }
+          />
           {/* Not prefetched: the sign-in page's form code (with its schema
               library, ~100 KB) would otherwise load on every public page
               that shows the header. It loads on click instead. */}

@@ -1,7 +1,8 @@
 // Tests for catalog search (ADR 0006, 0066) on an in-memory MongoDB, which
 // has no `$search`, so every product query exercises the regex fallback:
 // model-no. hits in stored case, prefixes, ranking, escaping, caps, drafts,
-// no spec value in any answer, category paths, cache key/tags, and the
+// no spec value in any answer, category paths, no data cache for product
+// answers (gate-C L-1), and the
 // shape of the Atlas pipeline (a pure builder).
 
 import { Types } from "mongoose";
@@ -36,7 +37,6 @@ vi.mock("next/cache", () => ({
   revalidateTag: vi.fn(),
 }));
 
-import { CATALOG_CACHE_VERSION } from "./cache-version";
 import {
   buildAtlasSearchPipeline,
   buildFallbackPipeline,
@@ -560,20 +560,27 @@ describe("category matches", () => {
 });
 
 describe("caching", () => {
-  it("wraps the Atlas search with the version, products + categories tags", () => {
-    const wrapper = cache.wrappers.find(
-      (w) => w.keyParts[1] === "search-products",
-    );
-    expect(wrapper).toEqual({
-      keyParts: ["catalog", "search-products", CATALOG_CACHE_VERSION],
-      tags: ["products", "categories"],
-    });
+  it("product answers never use the shared data cache (gate-C L-1)", async () => {
+    await searchCatalog("arc");
+    expect(
+      cache.wrappers.filter((w) => w.keyParts[1] === "search-products"),
+    ).toEqual([]);
+    // Only the category tree and the published counts are cached readers.
+    const names = new Set(cache.calls.map((c) => c.name));
+    expect(names.has("search-products")).toBe(false);
   });
 
-  it("keys the cache by the lowercased normalised query only", async () => {
-    await searchCatalog("  ＡＲ-013A1  ");
-    expect(cache.calls.filter((c) => c.name === "search-products")).toEqual([
-      { name: "search-products", args: ["ar-013a1"] },
-    ]);
+  it("sends Atlas the lowercased normalised query", async () => {
+    const aggregate = vi.spyOn(ProductModel, "aggregate");
+    try {
+      await searchCatalog("  ＡＲ-013A1  ");
+      const searchStages = aggregate.mock.calls
+        .map(([pipeline]) => pipeline?.[0])
+        .filter((stage) => stage !== undefined && "$search" in stage);
+      expect(searchStages).toHaveLength(1);
+      expect(JSON.stringify(searchStages[0])).toContain('"query":"ar-013a1"');
+    } finally {
+      aggregate.mockRestore();
+    }
   });
 });

@@ -1,5 +1,6 @@
 // /areas/<slug>: the products made for one application area (Phase 4b L5,
-// plan Q4, ADR 0065). The area's black-and-white photo heads the page; the
+// plan Q4, ADR 0065). The area's black-and-white photo heads the page as a
+// full-bleed band (AreaBand, Viabizzuno); the
 // main-category facet (`cat`) sits on top of the spec facets; grid,
 // pagination, metadata and robots rules are the /products ones. Rendered on
 // request (it reads searchParams) from cached data. Cards and facets hold no
@@ -13,7 +14,8 @@ import {
   cloudinaryImageUrl,
   siteCloudName,
 } from "@/components/site/cloudinary-image";
-import { ListingHeader } from "@/components/site/listing/listing-header";
+import { AreaBand } from "@/components/site/areas/area-band";
+import { ListingSubNav } from "@/components/site/listing/listing-header";
 import {
   listingLoader,
   readListing,
@@ -99,22 +101,17 @@ async function loadFromProps(
 const isPastEnd = (data: AreaPageData) =>
   data.result.page > data.result.pageCount;
 
-const INTRO =
-  "Every product in the catalog made for this application. Narrow the list by category or specification.";
-
-function coverOf(
+/** The share image: the bw photo smart-cropped to 3:2, or null. */
+function shareImageOf(
   area: PublicAreaView,
   cloudName: string | null,
-): { src: string; alt: string; monochrome: true } | null {
+): string | null {
   if (!area.bwImage) return null;
-  // The listing header's 3:2 frame, smart-cropped like a category cover.
-  const src = cloudinaryImageUrl(
+  return cloudinaryImageUrl(
     cloudName,
     area.bwImage,
     CLOUDINARY_TRANSFORMS.categoryCover,
   );
-  // Decorative: the area name follows as the page heading.
-  return src ? { src, alt: "", monochrome: true } : null;
 }
 
 export async function generateMetadata(
@@ -133,7 +130,7 @@ export async function generateMetadata(
   const canonical = absoluteSiteUrl(
     listingCanonicalPath(data.basePath, data.result.page),
   );
-  const cover = coverOf(data.area, siteCloudName());
+  const shareImage = shareImageOf(data.area, siteCloudName());
   return {
     title,
     description,
@@ -149,7 +146,7 @@ export async function generateMetadata(
       title,
       description,
       ...(canonical ? { url: canonical } : {}),
-      ...(cover ? { images: [{ url: cover.src }] } : {}),
+      ...(shareImage ? { images: [{ url: shareImage }] } : {}),
     },
   };
 }
@@ -164,39 +161,44 @@ export default async function AreaPage(props: PageProps<"/areas/[slug]">) {
   const { area } = data;
 
   return (
-    <div
-      data-slot="listing-page"
-      className={`${container} pt-4 pb-24 md:pt-6 md:pb-32`}
-    >
-      <ListingHeader
+    <div data-slot="listing-page" className="pb-24 md:pb-32">
+      <div className={`${container} pt-4 pb-4 md:pt-6`}>
+        <ProductBreadcrumb root={ROOT} categories={[]} current={area.name} />
+      </div>
+      {/* Full-bleed: outside the container. The original photo (uncropped)
+          so the band can frame it at any ratio. */}
+      <AreaBand
         title={area.name}
-        description={INTRO}
-        cover={coverOf(area, cloudName)}
-        breadcrumb={
-          <ProductBreadcrumb root={ROOT} categories={[]} current={area.name} />
+        image={
+          area.bwImage ? cloudinaryImageUrl(cloudName, area.bwImage) : null
         }
-        subLinks={data.areas.map((entry) => ({
-          id: entry.id,
-          name: entry.name,
-          href: areaListingPath(entry),
-          current: entry.id === area.id,
-        }))}
-        subLinksLabel="Applications"
       />
-      <div className="mt-8 md:mt-10">
-        <ListingResults
-          basePath={data.basePath}
-          result={data.result}
-          facets={data.facets}
-          cards={toListingCards(data.result.cards, cloudName)}
-          categoryNames={data.categoryNames}
-          emptyScope={{
-            message:
-              "Products for this application are on their way. Browse the full catalog in the meantime.",
-            href: PRODUCTS_PATH,
-            linkLabel: "All products",
-          }}
+      <div className={container}>
+        <ListingSubNav
+          links={data.areas.map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            href: areaListingPath(entry),
+            current: entry.id === area.id,
+          }))}
+          label="Applications"
+          className="mt-6 md:mt-8"
         />
+        <div className="mt-8 md:mt-10">
+          <ListingResults
+            basePath={data.basePath}
+            result={data.result}
+            facets={data.facets}
+            cards={toListingCards(data.result.cards, cloudName)}
+            categoryNames={data.categoryNames}
+            emptyScope={{
+              message:
+                "Products for this application are on their way. Browse the full catalog in the meantime.",
+              href: PRODUCTS_PATH,
+              linkLabel: "All products",
+            }}
+          />
+        </div>
       </div>
     </div>
   );

@@ -276,6 +276,39 @@ test.describe("search overlay", () => {
     ).toHaveText(VARIANT_B);
   });
 
+  test("before typing it offers the main categories; one navigates and closes", async ({
+    page,
+  }) => {
+    await openListing(page, "/products");
+    await waitForHydration(searchButton(page));
+    await searchButton(page).click();
+    const quick = overlay(page).getByRole("navigation", {
+      name: "Browse by category",
+    });
+    const main = quick.getByRole("link", {
+      name: LISTING.main.name,
+      exact: true,
+    });
+    await expect(main).toHaveAttribute("href", LISTING_MAIN_PATH);
+    // Only main categories (never a sub-category) and no restricted value.
+    await expect(
+      quick.getByRole("link", { name: LISTING.recessed.name, exact: true }),
+    ).toHaveCount(0);
+    const html = await overlay(page).innerHTML();
+    for (const token of LISTING_RESTRICTED_TOKENS) {
+      expect(html).not.toContain(token);
+    }
+    expect(await axeViolations(page)).toEqual([]);
+    // Typing replaces them with answers.
+    await overlay(page).getByRole("combobox").fill("Li");
+    await expect(quick).toBeHidden();
+    await overlay(page).getByRole("combobox").fill("");
+    await expect(main).toBeVisible();
+    await main.click();
+    await expect(page).toHaveURL(new RegExp(`${LISTING_MAIN_PATH}$`));
+    await expect(overlay(page)).toBeHidden();
+  });
+
   test("Enter without an active option opens the results page", async ({
     page,
   }) => {

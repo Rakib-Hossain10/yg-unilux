@@ -18,8 +18,19 @@ const nestedSummary =
 const nestedLink =
   "flex min-h-11 items-center py-2 text-[0.9375rem] text-grey-700 hover:text-ink";
 
-/* A plus that turns into a minus while its <details> is open. */
-function ToggleMark() {
+/*
+ * The one disclosure mark of the menu: a chevron that turns while its
+ * <details> is open, the same for "Product" and the nested groups
+ * (ui-reviewer gate C, L-5). `openClass` names the group variant
+ * (static strings, so Tailwind sees them).
+ */
+function DisclosureChevron({
+  openClass,
+  className = "",
+}: {
+  openClass: "group-open/item:rotate-180" | "group-open/products:rotate-180";
+  className?: string;
+}) {
   return (
     <svg
       viewBox="0 0 12 12"
@@ -30,10 +41,9 @@ function ToggleMark() {
       strokeWidth={1.25}
       aria-hidden="true"
       focusable="false"
-      className="shrink-0 text-grey-600"
+      className={`shrink-0 transition-transform duration-(--duration-quick) motion-reduce:transition-none ${openClass} ${className}`}
     >
-      <path d="M1.5 6h9" />
-      <path d="M6 1.5v9" className="group-open/item:hidden" />
+      <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
     </svg>
   );
 }
@@ -51,7 +61,10 @@ function Group({
     <details className="group/item">
       <summary className={nestedSummary}>
         {title}
-        <ToggleMark />
+        <DisclosureChevron
+          openClass="group-open/item:rotate-180"
+          className="text-grey-600"
+        />
       </summary>
       <ul className="mb-2 border-l border-grey-200 pl-4">
         <li>
@@ -78,19 +91,7 @@ function ProductItem({ menu, href }: { menu: SiteMenu; href: string }) {
         className={`${topItem} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}
       >
         Product
-        <svg
-          viewBox="0 0 12 12"
-          width={12}
-          height={12}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.25}
-          aria-hidden="true"
-          focusable="false"
-          className="shrink-0 transition-transform duration-(--duration-quick) group-open/products:rotate-180 motion-reduce:transition-none"
-        >
-          <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
-        </svg>
+        <DisclosureChevron openClass="group-open/products:rotate-180" />
       </summary>
       <ul className="divide-y divide-grey-100 pb-4">
         <li>

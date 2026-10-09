@@ -304,7 +304,14 @@ function CategoryGrid({
                   onRevealTap(category.id);
                 }
               }}
-              className={`group row-start-1 flex min-h-11 flex-col items-center gap-3 border-b px-1 pb-4 text-center text-[0.8125rem] leading-snug transition-colors duration-(--duration-quick) ${
+              className={`group row-start-1 flex min-h-11 flex-col gap-3 border-b pb-4 text-[0.8125rem] leading-snug transition-colors duration-(--duration-quick) ${
+                // Icons: name centred under its icon (KC Lighting). Text
+                // only: names start on the panel's left edge, like the
+                // detail below them (ui-reviewer gate C, L-1).
+                hasIcons
+                  ? "items-center px-1 text-center"
+                  : "items-start pr-2 text-left"
+              } ${
                 isActive
                   ? "border-ink text-ink"
                   : "border-transparent text-grey-600 hover:text-ink"
@@ -376,7 +383,7 @@ function CategoryDetail({
             <li key={child.id} className="break-inside-avoid">
               <Link
                 href={child.href}
-                className={`flex min-h-11 items-center text-[0.9375rem] ${linkClass}`}
+                className={`flex min-h-11 w-fit items-center text-[0.9375rem] ${linkClass}`}
               >
                 {child.name}
               </Link>
@@ -408,7 +415,7 @@ function ApplicationsColumn({
               <li key={area.id}>
                 <Link
                   href={area.href}
-                  className={`flex min-h-11 items-center text-[0.9375rem] ${linkClass}`}
+                  className={`flex min-h-11 w-fit items-center text-[0.9375rem] ${linkClass}`}
                 >
                   {area.name}
                 </Link>

@@ -81,22 +81,39 @@ export function SortControl({
       >
         Sort by
       </label>
-      <select
-        id={selectId}
-        name="sort"
-        value={value}
-        onChange={(event) => {
-          setState({ applied: sort, value: event.currentTarget.value });
-          if (event.currentTarget.form) apply(event.currentTarget.form);
-        }}
-        className="h-11 cursor-pointer border border-grey-300 bg-paper pr-8 pl-3 text-sm text-ink transition-colors duration-(--duration-quick) hover:border-ink"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      {/* The browser's arrow replaced by the site's chevron (ui-reviewer
+          gate C, L-8); the chevron ignores the pointer. */}
+      <span className="relative inline-flex">
+        <select
+          id={selectId}
+          name="sort"
+          value={value}
+          onChange={(event) => {
+            setState({ applied: sort, value: event.currentTarget.value });
+            if (event.currentTarget.form) apply(event.currentTarget.form);
+          }}
+          className="h-11 cursor-pointer appearance-none border border-grey-300 bg-paper pr-10 pl-3 text-sm text-ink transition-colors duration-(--duration-quick) hover:border-ink"
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <svg
+          viewBox="0 0 12 12"
+          width={10}
+          height={10}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.25}
+          aria-hidden="true"
+          focusable="false"
+          className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-grey-700"
+        >
+          <path d="m2.5 4.5 3.5 3.5 3.5-3.5" />
+        </svg>
+      </span>
       {hydrated ? null : (
         <button
           type="submit"

@@ -29,7 +29,7 @@ Not in scope: home page sections (Phase 6), content pages (Phase 7), the 4a open
 ## Caching and safety (ADR 0002 / 0062 / 0063, rule 9)
 - New readers in `src/lib/catalog/` (`listing.ts`, `facets.ts`, `areas.ts`, `search.ts`) use `PRODUCT_CARD_PROJECTION` (no specs) plus `filters.<k>` **only for public filter columns** (visibility read outside the cache and passed as a cache argument, the gate-A M-1 pattern). Facet values come from `filters` numbers, never from restricted display strings.
 - Cache keys: normalised params only (sorted, deduped, bounded lists, Zod-parsed); unknown or restricted params are dropped before the key is built, so a crawler cannot fill the cache with junk keys beyond a small bounded set. Tags: `products`, `categories`, `areas`, `settings:columns`. `CATALOG_CACHE_VERSION` bumps on any projection change.
-- Search route: Zod on `q` (trimmed, 2–64 chars); answers come from `unstable_cache` keyed by the normalised query and are sent `private, max-age=30`. No CDN (`s-maxage`) caching, so a CDN copy can never outlive a tag expiry. No session read. Vercel Firewall rate limit on `/api/catalog/search` (added to the launch list).
+- Search route: Zod on `q` (trimmed, 2–64 chars); product answers are not cached in the data cache (gate C L-1) and are sent `private, max-age=30`. No CDN (`s-maxage`) caching, so a CDN copy can never outlive a tag expiry. No session read. Vercel Firewall rate limit on `/api/catalog/search` (added to the launch list).
 - No reader in 4b imports `permissions`; the static guard from gate A extends to the new files.
 - Drafts never appear in listings, facets, counts, search or the sitemap.
 

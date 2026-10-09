@@ -2,10 +2,10 @@
 // one <h1>, its description (plain text, line breaks kept) and, when the
 // admin uploaded one, the cover photo at hero scale (Arelux). Without a
 // cover the name and description sit side by side on wide screens, so the
-// header never looks like it is missing something. Below it, the links to
-// the category's sub-categories (or the main categories on /products, the
-// other areas on an area page). Area pages show their cover in black and
-// white (Viabizzuno).
+// header never looks like it is missing something; a title alone sits close
+// to the links below it. Below it, the links to the category's
+// sub-categories (or the main categories on /products). Area pages use
+// their own full-bleed band (areas/area-band.tsx) and reuse ListingSubNav.
 // Server Component.
 
 import Image from "next/image";
@@ -29,8 +29,7 @@ export function ListingHeader({
 }: {
   title: string;
   description: string | null;
-  /** `monochrome` renders the photo in greyscale (area pages). */
-  cover: { src: string; alt: string; monochrome?: boolean } | null;
+  cover: { src: string; alt: string } | null;
   breadcrumb?: ReactNode;
   /** Sub-category links; the row is left out with fewer than 2. */
   subLinks: readonly ListingSubLink[];
@@ -60,9 +59,7 @@ export function ListingHeader({
               fill
               sizes="(min-width: 1440px) 52rem, (min-width: 1024px) 56vw, 100vw"
               preload
-              className={
-                cover.monochrome ? "object-cover grayscale" : "object-cover"
-              }
+              className="object-cover"
             />
           </div>
         </div>
@@ -78,27 +75,51 @@ export function ListingHeader({
           ) : null}
         </div>
       )}
-      {subLinks.length >= 2 ? (
-        <nav aria-label={subLinksLabel} className="mt-10 md:mt-14">
-          <ul className="-mx-4 flex snap-x gap-x-7 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
-            {subLinks.map((link) => (
-              <li key={link.id} className="shrink-0 snap-start">
-                <Link
-                  href={link.href}
-                  aria-current={link.current ? "page" : undefined}
-                  className={`inline-flex min-h-11 items-center border-b whitespace-nowrap transition-colors duration-(--duration-quick) ${
-                    link.current
-                      ? "border-ink text-ink"
-                      : "border-transparent text-grey-600 hover:border-grey-400 hover:text-ink"
-                  }`}
-                >
-                  {link.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      ) : null}
+      <ListingSubNav
+        links={subLinks}
+        label={subLinksLabel}
+        // A bare title needs less air above the links (ui-reviewer L-9).
+        className={cover || text ? "mt-10 md:mt-14" : "mt-6 md:mt-8"}
+      />
     </header>
+  );
+}
+
+/**
+ * The row of sibling links under a listing header (sub-categories, areas).
+ * A swipe row on phones (snap keeps the 16 px gutter, ui-reviewer M-2),
+ * wrapped from md. Left out with fewer than 2 links.
+ */
+export function ListingSubNav({
+  links,
+  label,
+  className,
+}: {
+  links: readonly ListingSubLink[];
+  /** The nav's accessible name. */
+  label: string;
+  className: string;
+}) {
+  if (links.length < 2) return null;
+  return (
+    <nav aria-label={label} className={className}>
+      <ul className="-mx-4 flex snap-x scroll-px-4 gap-x-7 overflow-x-auto px-4 md:mx-0 md:scroll-px-0 md:flex-wrap md:overflow-visible md:px-0">
+        {links.map((link) => (
+          <li key={link.id} className="shrink-0 snap-start">
+            <Link
+              href={link.href}
+              aria-current={link.current ? "page" : undefined}
+              className={`inline-flex min-h-11 items-center border-b whitespace-nowrap transition-colors duration-(--duration-quick) ${
+                link.current
+                  ? "border-ink text-ink"
+                  : "border-transparent text-grey-600 hover:border-grey-400 hover:text-ink"
+              }`}
+            >
+              {link.name}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }

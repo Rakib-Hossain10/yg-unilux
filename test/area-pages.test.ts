@@ -230,21 +230,28 @@ describe("area pages: rendering", () => {
     expect(html).toMatch(/href="\/areas"[^>]*>Applications</);
     expect(html).toContain('href="/areas/office"');
     expect(html).toMatch(/aria-current="page"[^>]*href="\/areas\/retail"/);
-    // The bw cover, smart-cropped to the header frame, in greyscale.
+    // The bw photo heads the page as a full-bleed band: the original
+    // (uncropped, the band frames it with object-cover) in greyscale.
+    expect(html).toContain('data-slot="area-band" data-media="photo"');
     expect(html).toContain(
       encodeURIComponent(
-        `res.cloudinary.com/demo-cloud/image/upload/c_fill,g_auto,ar_3:2,w_2400,q_auto/${RETAIL_IMAGE}`,
+        `res.cloudinary.com/demo-cloud/image/upload/${RETAIL_IMAGE}`,
       ),
     );
-    // The cover image keeps both its fill and its greyscale class.
-    const cover = /<img [^>]*c_fill[^>]*>/.exec(html)?.[0] ?? "";
-    expect(cover).toMatch(/class="object-cover grayscale"/);
+    const band =
+      /<header data-slot="area-band"[\s\S]*?<\/header>/.exec(html)?.[0] ?? "";
+    expect(band).toMatch(/<img [^>]*class="object-cover grayscale"/);
+    expect(band).toContain(">Retail</h1>");
+    // No boilerplate intro under the name.
+    expect(html).not.toContain("Every product in the catalog made for");
     expect(anyToken(html)).toEqual([]);
   });
 
   it("an area without a photo still renders its header", async () => {
     const html = await render("office");
     expect(html).toContain(">Office</h1>");
+    // No photo: a solid ink band with the name, no image.
+    expect(html).toContain('data-slot="area-band" data-media="none"');
     expect(html).not.toContain("c_fill");
     expect(cardSlugs(html).sort()).toEqual(["desk-only", "shop-down"]);
   });

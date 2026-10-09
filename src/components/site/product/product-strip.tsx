@@ -9,7 +9,7 @@ import Link from "next/link";
 
 import type { ProductImageKind } from "@/models/product-constants";
 
-import { frameFitClass } from "./gallery-images";
+import { THUMB_FIT } from "./gallery-images";
 import { ImagePlaceholder } from "./image-placeholder";
 
 export interface StripCard {
@@ -59,7 +59,7 @@ export function ProductStrip({
                     alt={card.image.alt}
                     fill
                     sizes="(min-width: 768px) 16rem, (min-width: 640px) 40vw, 68vw"
-                    className={`${frameFitClass(card.image.kind)} transition-transform duration-(--duration-calm) ease-(--ease-calm) group-hover:scale-[1.03]`}
+                    className={`${THUMB_FIT} transition-transform duration-(--duration-calm) ease-(--ease-calm) group-hover:scale-[1.03]`}
                   />
                 ) : (
                   <ImagePlaceholder name={card.name} size="small" />

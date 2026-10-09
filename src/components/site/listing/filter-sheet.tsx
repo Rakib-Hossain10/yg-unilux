@@ -86,12 +86,14 @@ export function FilterSheet({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
           {children}
         </div>
-        <div className="flex items-center gap-4 border-t border-grey-200 px-4 py-3">
+        {/* The main action takes the whole row beside "Clear all"
+            (ui-reviewer gate C, L-4). */}
+        <div className="flex items-center gap-5 border-t border-grey-200 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {clearHref ? (
             <Link
               href={clearHref}
               scroll={false}
-              className="inline-flex min-h-11 items-center text-sm text-ink underline decoration-grey-400 underline-offset-4 hover:decoration-ink"
+              className="inline-flex min-h-11 shrink-0 items-center text-sm text-ink underline decoration-grey-400 underline-offset-4 hover:decoration-ink"
             >
               Clear all
             </Link>
@@ -99,7 +101,7 @@ export function FilterSheet({
           <button
             type="button"
             onClick={close}
-            className="ml-auto inline-flex h-11 items-center justify-center bg-ink px-6 text-sm text-paper transition-colors duration-(--duration-quick) hover:bg-grey-800"
+            className="inline-flex h-12 min-w-0 flex-1 items-center justify-center bg-ink px-6 text-sm text-paper tabular-nums transition-colors duration-(--duration-quick) hover:bg-grey-800"
           >
             Show {total} {total === 1 ? "product" : "products"}
           </button>

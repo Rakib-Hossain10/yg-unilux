@@ -65,13 +65,17 @@ test.describe("area listing", () => {
     await expect(count(page)).toHaveText(`${A.galleryCount} products`);
     await expect(cards(page)).toHaveCount(A.galleryCount);
     await expect(page.getByText(A.lobbyOnlyName)).toHaveCount(0);
-    // The black-and-white cover fills its frame in greyscale.
-    await expect(page.locator('[data-slot="listing-header"] img')).toHaveClass(
-      /(^|\s)object-cover(\s|$)/,
-    );
-    await expect(page.locator('[data-slot="listing-header"] img')).toHaveClass(
-      /(^|\s)grayscale(\s|$)/,
-    );
+    // The black-and-white photo is a full-bleed band in greyscale, with the
+    // area name (the page's h1) set over it.
+    const band = page.locator('[data-slot="area-band"]');
+    await expect(band.locator("img")).toHaveClass(/(^|\s)object-cover(\s|$)/);
+    await expect(band.locator("img")).toHaveClass(/(^|\s)grayscale(\s|$)/);
+    await expect(
+      band.getByRole("heading", { level: 1, name: A.gallery.name }),
+    ).toBeVisible();
+    const bandBox = await band.boundingBox();
+    expect(bandBox?.x).toBe(0);
+    expect(bandBox?.width).toBe(1280);
     // The breadcrumb leads back to the index; the other areas are linked.
     await expect(
       page

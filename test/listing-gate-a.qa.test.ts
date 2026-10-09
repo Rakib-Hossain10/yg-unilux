@@ -14,7 +14,15 @@
 //  4. Regex injection / ReDoS in the fallback, route Zod + headers, no session.
 
 import { Types } from "mongoose";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 
 import { SETTINGS_KEYS } from "@/lib/schemas/settings";
 import {
@@ -636,21 +644,35 @@ describe("cache-key bounding (junk-param flood)", () => {
     expect(distinctKeys("listing-count").size).toBeLessThanOrEqual(1);
   });
 
-  it("search cache keys: case, width and spacing variants of one query share one key", async () => {
-    for (const q of [
-      "arc spot",
-      "ARC SPOT",
-      "  arc   spot ",
-      "ａｒｃ ｓｐｏｔ",
-      "arc​ spot",
-      "Arc\tSpot",
-    ]) {
-      await searchCatalog(q);
+  it("search: product answers create no cache entry; case, width and spacing variants send one query", async () => {
+    const aggregate = vi.spyOn(ProductModel, "aggregate");
+    try {
+      for (const q of [
+        "arc spot",
+        "ARC SPOT",
+        "  arc   spot ",
+        "ａｒｃ ｓｐｏｔ",
+        "arc​ spot",
+        "Arc\tSpot",
+      ]) {
+        await searchCatalog(q);
+      }
+      // Gate-C L-1: no per-query data-cache entry at all.
+      expect(distinctKeys("search-products").size).toBe(0);
+      const searchStages = aggregate.mock.calls
+        .map(([pipeline]) => pipeline?.[0])
+        .filter((stage) => stage !== undefined && "$search" in stage)
+        .map((stage) => JSON.stringify(stage));
+      expect(searchStages).toHaveLength(6);
+      expect(new Set(searchStages).size).toBe(1);
+    } finally {
+      aggregate.mockRestore();
     }
-    expect(distinctKeys("search-products").size).toBe(1);
   });
 
-  it("search: too short / too long / non-string queries reach no cached reader", async () => {
+  it("search: too short / too long / non-string queries reach no reader", async () => {
+    const aggregate = vi.spyOn(ProductModel, "aggregate");
+    onTestFinished(() => aggregate.mockRestore());
     for (const q of [
       "",
       "a",
@@ -669,6 +691,7 @@ describe("cache-key bounding (junk-param flood)", () => {
       });
     }
     expect(distinctKeys("search-products").size).toBe(0);
+    expect(aggregate).not.toHaveBeenCalled();
   });
 });
 

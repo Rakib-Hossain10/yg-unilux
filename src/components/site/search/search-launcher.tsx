@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { SearchIcon } from "../icons";
+import type { MenuLink } from "../menu/menu-types";
 import { useHydrated } from "../listing/use-hydrated";
 import { SEARCH_PATH } from "./search-links";
 
@@ -24,10 +25,13 @@ const SearchOverlay = dynamic(
 export function SearchLauncher({
   className,
   cloudName,
+  quickLinks,
 }: {
   className: string;
   /** For result thumbnails (public, read on the server). */
   cloudName: string | null;
+  /** Main categories shown before anything is typed (the header's menu). */
+  quickLinks: readonly MenuLink[];
 }) {
   const hydrated = useHydrated();
   const [mounted, setMounted] = useState(false);
@@ -68,6 +72,7 @@ export function SearchLauncher({
         <SearchOverlay
           open={open}
           cloudName={cloudName}
+          quickLinks={quickLinks}
           onClose={(returnFocus) => {
             setOpen(false);
             if (returnFocus) buttonRef.current?.focus();

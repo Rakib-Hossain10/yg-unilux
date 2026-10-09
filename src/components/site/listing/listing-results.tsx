@@ -117,7 +117,13 @@ export function ListingResults({
             ))}
           </ul>
           {clearHref ? (
-            <RefineLink href={clearHref} className={textLink}>
+            // From lg the rail's heading carries the one "Clear all"
+            // (ui-reviewer gate C, L-3); without JS the rail shows at
+            // every width, so this one is only needed below lg.
+            <RefineLink
+              href={clearHref}
+              className={`${textLink} ${hasFilters ? "lg:hidden" : ""}`}
+            >
               Clear all
             </RefineLink>
           ) : null}

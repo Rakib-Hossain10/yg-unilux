@@ -1,6 +1,6 @@
 // Phase 4b gate-A fixes on the REAL Next.js cache (next-cache-harness):
 //  - L-2: a zero-hit Atlas answer is never cached (the index may still be
-//    BUILDING), while an answer with hits is.
+//    BUILDING). Since gate-C L-1 no product answer is cached at all.
 //  - I-2: the published-count per category behind category search is
 //    cached and expires with `products` (publishing a product in an empty
 //    category makes it a search hit after the write's tag).
@@ -117,8 +117,8 @@ const hitDoc = {
 };
 
 describe("L-2: zero-hit Atlas answers are not cached", () => {
-  it("an empty answer (index still building) is asked again; the first hit is then cached", async () => {
-    atlasAnswers = [[], [hitDoc], []];
+  it("an empty answer (index still building) is asked again; answers with hits are not cached either (gate-C L-1)", async () => {
+    atlasAnswers = [[], [hitDoc]];
     const first = await harness.inRequest(() => searchCatalog("lumo"));
     expect(first.products).toEqual([]);
     await nextTick();
@@ -127,10 +127,10 @@ describe("L-2: zero-hit Atlas answers are not cached", () => {
     expect(second.products.map((p) => p.slug)).toEqual(["lumo-lp-1"]);
     expect(atlasCalls).toBe(2);
     await nextTick();
-    // An answer with hits is cached: Atlas is not asked a third time.
+    // Product answers skip the data cache: Atlas is asked on every request.
     const third = await harness.inRequest(() => searchCatalog("lumo"));
     expect(third.products.map((p) => p.slug)).toEqual(["lumo-lp-1"]);
-    expect(atlasCalls).toBe(2);
+    expect(atlasCalls).toBe(3);
   });
 
   it("a zero-hit answer does not log the fallback warning", async () => {
