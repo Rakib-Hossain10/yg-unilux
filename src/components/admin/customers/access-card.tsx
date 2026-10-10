@@ -5,14 +5,33 @@
 // and the current end), a custom last day, or no expiry, with the optional
 // "access extended" email. Never touches the invite. Same Zod schema as the
 // server, which re-validates the raw values.
+//
+// "End access now" (shown only while access runs) locks downloads at once
+// after a confirm. It is not a block: sign-in keeps working and no email
+// goes out; extending access later restores it.
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import type { FormEvent } from "react";
+import { CircleOff } from "lucide-react";
+import { useEffect, useRef, type FormEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import type { z } from "zod";
 
-import { setCustomerAccessAction } from "@/app/admin/customers/actions";
+import {
+  endAccessAction,
+  setCustomerAccessAction,
+} from "@/app/admin/customers/actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -26,6 +45,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import type { AccessChoice } from "@/lib/access-expiry";
 import { setCustomerAccessSchema } from "@/lib/schemas/customer";
+import { formatDateTime } from "@/lib/time-zone";
 
 import { ExpiryPicker } from "../access-requests/expiry-picker";
 import { formatAccessEnd } from "../access-requests/format";
@@ -64,9 +84,22 @@ export function AccessCard({
     },
   });
   const save = useCustomerAction();
+  const end = useCustomerAction();
+  // Running access: a future end or no expiry at all.
+  const running = access !== "expired";
+  // The End button unmounts once the refresh shows access ended: focus then
+  // lands on Save (enabled again by then), not on <body>.
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const focusAfterEnd = useRef(false);
+  useEffect(() => {
+    if (running || !focusAfterEnd.current) return;
+    focusAfterEnd.current = false;
+    saveButton.current?.focus();
+  }, [running, end.pending]);
 
   const submitValid = () => {
     const values = form.getValues();
+    end.clear();
     save.run(
       () => setCustomerAccessAction(values),
       (result) =>
@@ -82,7 +115,11 @@ export function AccessCard({
 
   return (
     <Card>
-      <form noValidate aria-busy={save.pending} onSubmit={onSubmit}>
+      <form
+        noValidate
+        aria-busy={save.pending || end.pending}
+        onSubmit={onSubmit}
+      >
         <CardHeader>
           <CardTitle>
             <h2>Datasheet access</h2>
@@ -140,11 +177,72 @@ export function AccessCard({
             saved={save.saved}
             failedTitle="Access was not changed"
           />
+          <ActionFeedback
+            status={end.status}
+            errors={end.errors}
+            saved={end.saved}
+            failedTitle="Access was not ended"
+          />
         </CardContent>
-        <CardFooter>
-          <Button type="submit" disabled={save.pending}>
+        <CardFooter className="flex flex-wrap gap-2">
+          <Button
+            ref={saveButton}
+            type="submit"
+            disabled={save.pending || end.pending}
+          >
             {save.pending ? "Saving…" : "Save access"}
           </Button>
+          {running ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={end.pending || save.pending}
+                >
+                  <CircleOff data-icon="inline-start" aria-hidden="true" />
+                  {end.pending ? "Ending access…" : "End access now…"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>End datasheet access now?</AlertDialogTitle>
+                  <AlertDialogDescription asChild>
+                    <div className="flex flex-col gap-2">
+                      <p>
+                        Access to every datasheet ends immediately. The customer
+                        can still sign in, and no email is sent.
+                      </p>
+                      <p>
+                        To stop them signing in, use Block. To give access back
+                        later, extend it here.
+                      </p>
+                    </div>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    variant="destructive"
+                    onClick={() => {
+                      save.clear();
+                      end.run(
+                        () => endAccessAction({ userId }),
+                        (result) => {
+                          focusAfterEnd.current = true;
+                          return result.data.alreadyEnded
+                            ? "Access had already ended."
+                            : `Access ended on ${formatDateTime(result.data.accessExpiresAt)}.`;
+                        },
+                      );
+                    }}
+                  >
+                    End access now
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : null}
         </CardFooter>
       </form>
     </Card>

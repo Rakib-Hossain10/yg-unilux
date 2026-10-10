@@ -22,6 +22,7 @@ import {
 import {
   banCustomerAction,
   createCustomerAction,
+  endAccessAction,
   newCustomerInviteAction,
   revokeCustomerSessionsAction,
   sendCustomerResetLinkAction,
@@ -170,6 +171,7 @@ const CALLS: [string, () => Promise<unknown>][] = [
         notify: true,
       }),
   ],
+  ["end access", () => endAccessAction({ userId: targetId })],
   ["block", () => banCustomerAction({ userId: targetId, reason: "x" })],
   ["unblock", () => unbanCustomerAction({ userId: targetId })],
   ["end sessions", () => revokeCustomerSessionsAction({ userId: targetId })],
@@ -272,6 +274,52 @@ describe("as the signed-in admin", () => {
     expect((await rawUser(id))?.banned).toBe(false);
   });
 
+  it("ending access sets the end to now, audits it and keeps sign-in", async () => {
+    request.headers = adminHeaders;
+    const email = "customer@customer-actions.test";
+    const user = await getDb().collection("users").findOne({ email });
+    const id = user?._id.toHexString() ?? "";
+    await seedUserFields(id, {
+      accessExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+    });
+    const sessionsBefore = await sessionCount(id);
+    const mailBefore = mail.sent;
+
+    const before = Date.now();
+    const result = await endAccessAction({ userId: id });
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.data.alreadyEnded).toBe(false);
+    const ended = (await rawUser(id))?.accessExpiresAt as Date;
+    expect(ended.toISOString()).toBe(result.data.accessExpiresAt);
+    expect(ended.getTime()).toBeGreaterThanOrEqual(before);
+    expect(ended.getTime()).toBeLessThanOrEqual(Date.now());
+    expect((await rawUser(id))?.banned ?? false).toBe(false);
+    expect(await sessionCount(id)).toBe(sessionsBefore);
+    expect(mail.sent).toBe(mailBefore);
+    expect(
+      await AuditLogModel.countDocuments({
+        action: "customer.access.end",
+        "target.id": id,
+      }).exec(),
+    ).toBe(1);
+
+    // A second click changes nothing and writes no audit entry.
+    const again = await endAccessAction({ userId: id });
+    expect(again).toEqual({
+      ok: true,
+      data: { accessExpiresAt: ended.toISOString(), alreadyEnded: true },
+    });
+    expect(
+      await AuditLogModel.countDocuments({
+        action: "customer.access.end",
+      }).exec(),
+    ).toBe(1);
+    // And sign-in still works.
+    await expect(
+      signIn(email, "customer-password-123456"),
+    ).resolves.toBeTruthy();
+  });
+
   it("the admin account is not a customer: every write refuses it", async () => {
     request.headers = adminHeaders;
     const admin = await getDb()
@@ -280,6 +328,7 @@ describe("as the signed-in admin", () => {
     const id = admin?._id.toHexString() ?? "";
     for (const result of [
       await banCustomerAction({ userId: id, reason: "nope" }),
+      await endAccessAction({ userId: id }),
       await setTemporaryPasswordAction({ userId: id }),
       await newCustomerInviteAction({ userId: id, delivery: "copy" }),
     ]) {

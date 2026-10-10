@@ -1,8 +1,8 @@
 "use server";
 
 // Server Actions for the customers module (Phase 5 P8, ADR 0070/0073):
-// create, edit the profile, set or extend access, block / unblock, end
-// sessions, send a reset link, set a temporary password and make a new
+// create, edit the profile, set or extend access, end access now, block /
+// unblock, end sessions, send a reset link, set a temporary password and make a new
 // invite link. Each one: requireAdmin() first → the P3 service with
 // `{ id, headers }` (the service re-checks that actor from the database) → a
 // refused actor (`denied`) is a 403 → revalidate the (always empty) tags →
@@ -30,6 +30,7 @@ import type {
 import {
   banCustomer,
   createCustomer,
+  endCustomerAccess,
   regenerateInvite,
   revokeCustomerSessions,
   sendCustomerResetLink,
@@ -43,6 +44,7 @@ import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
 
 import { auditMessage, failure, inviteView } from "../action-helpers";
+import { pageActor } from "../admin-reads";
 
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
@@ -132,6 +134,29 @@ export async function setCustomerAccessAction(
     data: {
       accessExpiresAt: result.data.accessExpiresAt?.toISOString() ?? null,
       notified: result.data.notified,
+    },
+  };
+}
+
+/**
+ * "End access now" for `{ userId }`: downloads lock at once, sign-in keeps
+ * working, no email goes out (not a ban). Returns the recorded end (ISO) and
+ * whether access had already ended (then nothing was written). A failed
+ * audit entry comes back as a saved failure with AUDIT_FAILED_MESSAGE.
+ */
+export async function endAccessAction(
+  input: unknown,
+): Promise<ActionData<{ accessExpiresAt: string; alreadyEnded: boolean }>> {
+  const viewer = await requireAdmin();
+  const result = await endCustomerAccess(await pageActor(viewer), input);
+  revalidateCatalogInAction(result.tags);
+  if (!result.ok) return failedWrite(result);
+  refresh();
+  return {
+    ok: true,
+    data: {
+      accessExpiresAt: result.data.accessExpiresAt.toISOString(),
+      alreadyEnded: result.data.alreadyEnded,
     },
   };
 }

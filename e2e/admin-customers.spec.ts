@@ -5,15 +5,18 @@
 // mode → the old link shows the expired page, the new one sets the password
 // → extend access → block → sessions gone; the copied link is not in the page
 // after a reload; unknown ids 404; a customer gets 403; axe WCAG 2.2 AA and
-// no sideways scroll at 375 px. Everything this spec creates is removed in
+// no sideways scroll at 375 px. "End access now": downloads lock (the
+// datasheet route sends to renewal) while sign-in keeps working. Everything this spec creates is removed in
 // afterAll, so list counts in other specs are unaffected.
 
 import { randomUUID } from "node:crypto";
 
 import {
+  type Browser,
   type BrowserContextOptions,
   expect,
   type Page,
+  request as playwrightRequest,
   test as base,
 } from "@playwright/test";
 import { type Db, type MongoClient, ObjectId } from "mongodb";
@@ -26,10 +29,12 @@ import {
   horizontalOverflow,
   waitForHydration,
 } from "./fixtures/product-page-helpers";
+import { RESTRICTED } from "./fixtures/product-pages";
 
 const PHONE = { width: 375, height: 740 };
 const LIST = "/admin/customers";
 const HOUR = 3_600_000;
+const BASE_URL = "http://localhost:3000";
 
 type StorageState = Exclude<BrowserContextOptions["storageState"], undefined>;
 let adminState: StorageState;
@@ -388,4 +393,121 @@ test("axe passes on the list, new and customer pages, at 375 px without sideways
     expect(await axeViolations(page)).toEqual([]);
     await page.keyboard.press("Escape");
   }
+});
+
+/* Signs `email` in on a fresh context (its own IP bucket); lands on /my-downloads. */
+async function signInCustomer(
+  browser: Browser,
+  email: string,
+  password: string,
+) {
+  const context = await browser.newContext({
+    extraHTTPHeaders: { "x-vercel-forwarded-for": "203.0.113.92" },
+  });
+  const page = await context.newPage();
+  await page.goto("/login");
+  const submit = page.getByRole("button", { name: "Sign in" });
+  await waitForHydration(submit);
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await submit.click();
+  await expect(page).toHaveURL(/\/my-downloads$/);
+  return context;
+}
+
+test("end access now: downloads lock, sign-in still works, the trail says so", async ({
+  adminPage: page,
+  browser,
+}) => {
+  const email = newEmail();
+  const id = await createCustomer(page, email, "Ends Access");
+  const link = linkIn(
+    await waitForEmail(email, /Set your .* password/),
+    /\/reset-password\?token=/,
+  );
+  const password = "end access e2e customer password";
+  const visitor = await browser.newContext();
+  const visitorPage = await visitor.newPage();
+  await setPassword(visitorPage, link, password);
+  await expect(visitorPage).toHaveURL(/\/login\?reset=1$/);
+  await visitor.close();
+  const customer = await signInCustomer(browser, email, password);
+
+  await page.goto(`${LIST}/${id}`);
+  await expect(
+    page.getByText(/^Access until the end of /).first(),
+  ).toBeVisible();
+  const endNow = page.getByRole("button", { name: "End access now…" });
+  await waitForHydration(endNow);
+
+  // The confirm dialog: axe and no sideways scroll at 375 px.
+  await page.setViewportSize(PHONE);
+  await endNow.click();
+  const dialog = page.getByRole("alertdialog", {
+    name: "End datasheet access now?",
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("ends immediately");
+  await expect(dialog).toContainText("can still sign in");
+  await expect(dialog).toContainText("no email is sent");
+  await expect(dialog).toContainText("use Block");
+  expect(await axeViolations(page)).toEqual([]);
+  expect(await horizontalOverflow(page)).toBe(0);
+
+  // Cancel changes nothing.
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(endNow).toBeEnabled();
+  await expect(page.getByText(/^Access ended on /)).toHaveCount(0);
+  const before = (await db.collection("users").findOne({ email }))
+    ?.accessExpiresAt as Date;
+  expect(before.getTime()).toBeGreaterThan(Date.now());
+
+  await endNow.click();
+  await dialog.getByRole("button", { name: "End access now" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByText(/^Access ended on .* \(China time\)\.$/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/^Ended on .* \(China time\)\. Downloads are locked\.$/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "End access now…" }),
+  ).toHaveCount(0);
+  // Focus is not lost with the button: it lands on Save.
+  await expect(page.getByRole("button", { name: "Save access" })).toBeFocused();
+  const user = await db.collection("users").findOne({ email });
+  expect((user?.accessExpiresAt as Date).getTime()).toBeLessThanOrEqual(
+    Date.now(),
+  );
+  expect(user?.banned ?? false).toBe(false);
+
+  // The datasheet route sends the signed-in customer to renewal.
+  const api = await playwrightRequest.newContext({
+    baseURL: BASE_URL,
+    storageState: await customer.storageState(),
+  });
+  try {
+    const reply = await api.get(`/api/datasheet/${RESTRICTED.productId}`, {
+      maxRedirects: 0,
+    });
+    expect(reply.status()).toBe(303);
+    expect(reply.headers()["location"]).toBe(
+      `/request-access?renew=1&product=${RESTRICTED.productId}`,
+    );
+  } finally {
+    await api.dispose();
+    await customer.close();
+  }
+
+  // Not a block: the customer can still sign in.
+  const again = await signInCustomer(browser, email, password);
+  await again.close();
+
+  // The audit trail lists it.
+  await page.reload();
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "Access ended" }).first(),
+  ).toBeVisible();
 });

@@ -4,7 +4,7 @@
 //
 // 1. Guard sweep, beyond the builders' tests (visitor / customer / banned
 //    admin): an admin still on a TEMPORARY password is sent to change it by
-//    every action (14) and every page (6, incl. the dashboard), and nothing
+//    every action (15) and every page (6, incl. the dashboard), and nothing
 //    changes (users, sessions, links, requests, audit, mail). The pages are
 //    also refused for the three other callers.
 // 2. Unknown, malformed and operator-shaped ids from the signed-in admin:
@@ -38,6 +38,7 @@ import { inviteView } from "@/app/admin/action-helpers";
 import {
   banCustomerAction,
   createCustomerAction,
+  endAccessAction,
   newCustomerInviteAction,
   revokeCustomerSessionsAction,
   sendCustomerResetLinkAction,
@@ -270,6 +271,7 @@ const ACTIONS: [string, () => Promise<unknown>][] = [
         notify: true,
       }),
   ],
+  ["end access", () => endAccessAction({ userId: targetId })],
   ["block", () => banCustomerAction({ userId: targetId, reason: "x" })],
   ["unblock", () => unbanCustomerAction({ userId: targetId })],
   ["end sessions", () => revokeCustomerSessionsAction({ userId: targetId })],
@@ -412,6 +414,7 @@ describe("the signed-in admin with unknown, malformed or operator-shaped ids", (
           access: { kind: "none" },
           notify: false,
         }),
+        await endAccessAction({ userId: id }),
         await banCustomerAction({ userId: id, reason: "x" }),
         await unbanCustomerAction({ userId: id }),
         await revokeCustomerSessionsAction({ userId: id }),

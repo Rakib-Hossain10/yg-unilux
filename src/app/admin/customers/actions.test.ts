@@ -19,6 +19,7 @@ import {
 import {
   banCustomerAction,
   createCustomerAction,
+  endAccessAction,
   newCustomerInviteAction,
   revokeCustomerSessionsAction,
   sendCustomerResetLinkAction,
@@ -39,6 +40,7 @@ const services = vi.hoisted(() => ({
   createCustomer: vi.fn(),
   updateCustomerProfile: vi.fn(),
   setCustomerAccess: vi.fn(),
+  endCustomerAccess: vi.fn(),
   banCustomer: vi.fn(),
   unbanCustomer: vi.fn(),
   revokeCustomerSessions: vi.fn(),
@@ -89,6 +91,7 @@ const CASES: [string, Action, ReturnType<typeof vi.fn>, unknown][] = [
     PROFILE,
   ],
   ["access", setCustomerAccessAction, services.setCustomerAccess, ACCESS],
+  ["end access", endAccessAction, services.endCustomerAccess, ID],
   ["block", banCustomerAction, services.banCustomer, BAN],
   ["unblock", unbanCustomerAction, services.unbanCustomer, ID],
   [
@@ -127,6 +130,7 @@ it("covers every exported action", async () => {
     [
       "banCustomerAction",
       "createCustomerAction",
+      "endAccessAction",
       "newCustomerInviteAction",
       "revokeCustomerSessionsAction",
       "sendCustomerResetLinkAction",
@@ -311,6 +315,54 @@ describe("as the admin", () => {
     await expect(setCustomerAccessAction(ACCESS)).resolves.toEqual({
       ok: true,
       data: { accessExpiresAt: "2027-01-31T15:59:59.999Z", notified: true },
+    });
+    expect(nextCache.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("end access returns the end as an ISO string and refreshes", async () => {
+    services.endCustomerAccess.mockResolvedValue({
+      ok: true,
+      tags: [],
+      data: {
+        accessExpiresAt: new Date("2026-10-10T06:30:00.000Z"),
+        alreadyEnded: false,
+      },
+    });
+    await expect(endAccessAction(ID)).resolves.toEqual({
+      ok: true,
+      data: {
+        accessExpiresAt: "2026-10-10T06:30:00.000Z",
+        alreadyEnded: false,
+      },
+    });
+    expect(nextCache.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("end access passes an already-ended answer on", async () => {
+    services.endCustomerAccess.mockResolvedValue({
+      ok: true,
+      tags: [],
+      data: {
+        accessExpiresAt: new Date("2026-01-31T15:59:59.999Z"),
+        alreadyEnded: true,
+      },
+    });
+    await expect(endAccessAction(ID)).resolves.toEqual({
+      ok: true,
+      data: { accessExpiresAt: "2026-01-31T15:59:59.999Z", alreadyEnded: true },
+    });
+  });
+
+  it("end access saved without its audit entry shows the audit message", async () => {
+    services.endCustomerAccess.mockResolvedValue({
+      ok: false,
+      errors: { formErrors: [AUDIT_FAILED_MESSAGE], fieldErrors: {} },
+      tags: [],
+    });
+    await expect(endAccessAction(ID)).resolves.toEqual({
+      ok: false,
+      errors: { formErrors: [AUDIT_FAILED_MESSAGE], fieldErrors: {} },
+      saved: true,
     });
     expect(nextCache.refresh).toHaveBeenCalledTimes(1);
   });

@@ -8,7 +8,13 @@ import type {
   CustomerStatusFilter,
 } from "@/lib/schemas/customer";
 
-import { formatDate, formatDateTime } from "@/lib/time-zone";
+import {
+  endOfZonedDay,
+  formatDate,
+  formatDateTime,
+  zonedDayKey,
+} from "@/lib/time-zone";
+import type { AdminAuditAction } from "@/models/audit-actions";
 
 import { formatAccessEnd } from "../access-requests/format";
 
@@ -48,15 +54,25 @@ export function accessText(
     : `Until ${formatDate(expiresAt)}`;
 }
 
-/** The access line on the customer page, with the zone written out. */
+/* True when `iso` is the last millisecond of its China day (a picked end). */
+function isEndOfDay(iso: string): boolean {
+  return endOfZonedDay(zonedDayKey(iso))?.toISOString() === iso;
+}
+
+/**
+ * The access line on the customer page, with the zone written out. An end
+ * set by "End access now" is a moment, not the end of a day, so it reads
+ * "Ended on 10 Oct 2026, 14:30 (China time)".
+ */
 export function accessSentence(
   access: AccessStateView,
   expiresAt: string | null,
 ): string {
   if (expiresAt === null) return "No expiry: datasheets stay unlocked.";
-  return access === "expired"
+  if (access !== "expired") return `Access ${formatAccessEnd(expiresAt)}.`;
+  return isEndOfDay(expiresAt)
     ? `Ended at the end of ${formatDate(expiresAt, { label: true })}. Downloads are locked.`
-    : `Access ${formatAccessEnd(expiresAt)}.`;
+    : `Ended on ${formatDateTime(expiresAt)}. Downloads are locked.`;
 }
 
 /** The invite line on the customer page. */
@@ -87,10 +103,17 @@ export function inviteOpen(
 }
 
 /* The actions the customer page's trail can show (others pass through). */
-const AUDIT_LABELS: Record<string, string> = {
+type CustomerTrailAction = Extract<
+  AdminAuditAction,
+  `customer.${string}` | `access_request.${string}`
+>;
+
+/* A full record: a new customer or access-request action fails tsc here. */
+const AUDIT_LABELS: Record<CustomerTrailAction, string> = {
   "customer.create": "Account created",
   "customer.update": "Profile edited",
   "customer.access.set": "Access changed",
+  "customer.access.end": "Access ended",
   "customer.ban": "Blocked",
   "customer.unban": "Unblocked",
   "customer.password.link": "Password reset link sent",
@@ -106,6 +129,6 @@ const AUDIT_LABELS: Record<string, string> = {
 /** A readable label for an audit action; unknown actions pass through. */
 export function auditLabel(action: string): string {
   return Object.hasOwn(AUDIT_LABELS, action)
-    ? (AUDIT_LABELS[action] ?? action)
+    ? (AUDIT_LABELS[action as CustomerTrailAction] ?? action)
     : action;
 }
