@@ -52,3 +52,9 @@ Plan Q4/Q11 and P5: a customer whose datasheet access ends soon gets one reminde
 - A customer renamed on the same day as a failed mark write gets a Resend 409 for the reused key. The retry is counted as failed, and nothing is sent twice; it clears after 24 h.
 - Tests: `src/lib/expiry-reminders.test.ts`, `src/app/api/cron/access-expiry/route.test.ts`, `scripts/cron-expiry.test.ts`.
 - Gate A: review the cron auth, the counts-only body and audit, and the lock and idempotency reasoning.
+
+## Amendment (2026-10-10, QA gate A, user decision)
+- A customer who never accepted their invite gets no expiry reminder. "Never accepted" means `invitedAt` is set and `passwordSetAt` is missing or earlier than `invitedAt`, the same rule as the invite pending/expired status.
+- `dueFilter` adds `INVITE_SETTLED` (exported from `customers.ts`): `{ $or: [{ invitedAt: null }, { $expr: { $gte: ["$passwordSetAt", "$invitedAt"] } }] }`.
+- Once the customer sets a password through the invite, they are due on the next run. If that is still before the expiry, they get their one reminder for that date.
+- The digest and the audit counts are unchanged; `due` already excludes these customers, so there is no "skipped" count.

@@ -1,7 +1,8 @@
 // Admin services for the access-request queue (plan Q1-Q5, Q12; ADR 0069):
 // list, get, approve (create or extend a customer + invite), reject, the
 // manual WhatsApp entry and deleting handled requests. Callers are
-// requireAdmin() Server Actions (P7) passing the admin's id and headers.
+// requireAdmin() Server Actions and pages (P7) passing the admin's id and
+// headers; every read and write re-checks them first (./actor.ts).
 
 import "server-only";
 
@@ -27,14 +28,13 @@ import type {
   AccessRequestStatus,
 } from "@/models/access-request";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import {
   applyAccess,
-  assertActor,
   createCustomerAccount,
   findAccountByEmail,
   issueInvite,
   notifyAccessExtended,
-  type AdminActor,
   type InviteOutcome,
 } from "./customers";
 import {
@@ -160,8 +160,10 @@ async function customerEmails(emails: string[]): Promise<Set<string>> {
  * the `{ status: 1, createdAt: -1 }` index.
  */
 export async function listAccessRequests(
+  actor: AdminActor,
   input: unknown,
 ): Promise<AccessRequestPage> {
+  await assertAdminActor(actor);
   const parsed = listAccessRequestsSchema.safeParse(input);
   const query = parsed.success
     ? parsed.data
@@ -225,9 +227,11 @@ function isBlockedAccount(account: CustomerAccount, now: Date): boolean {
 
 /** One request with its product and any existing account; null if missing. */
 export async function getAccessRequest(
+  actor: AdminActor,
   input: unknown,
   options: { now?: Date } = {},
 ): Promise<AccessRequestDetail | null> {
+  await assertAdminActor(actor);
   const parsed = accessRequestIdSchema.safeParse(input);
   if (!parsed.success) return null;
   const now = options.now ?? new Date();
@@ -349,6 +353,12 @@ export interface ApproveResult {
   /** The existing account is blocked; approving does not unblock it. */
   blocked: boolean;
   /**
+   * An invite was due (see needsInvite) but the existing customer is
+   * blocked, so none was made (same rule as regenerateInvite): the UI says
+   * "unblock, then send a new link".
+   */
+  inviteWithheld: boolean;
+  /**
    * The approval is saved but its audit entry is not (ADR 0070): the result
    * is still returned, because a copy-once link exists only here.
    */
@@ -375,7 +385,8 @@ function needsInvite(account: CustomerAccount, now: Date): boolean {
  * - an existing customer: never a second account. Access is extended
  *   (months from the later of today and the current end), "access extended"
  *   is emailed when asked, and an invite is (re)sent when the last one
- *   expired, or none was ever made and no password was chosen;
+ *   expired, or none was ever made and no password was chosen, unless the
+ *   customer is blocked (then `inviteWithheld`);
  * - the admin's own email: refused.
  * The request is claimed first (pending to approved, atomically). Only a
  * failure BEFORE the account is written puts it back to pending. Once the
@@ -388,7 +399,8 @@ export async function approveAccessRequest(
   input: unknown,
   options: { now?: Date } = {},
 ): Promise<ServiceResult<ApproveResult>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "access-requests");
+  if (refused) return refused;
   const parsed = approveAccessRequestSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const data = parsed.data;
@@ -455,6 +467,7 @@ export async function approveAccessRequest(
 
   // Step 2: the account is written; nothing below throws or rolls back.
   let invite: InviteOutcome | null = null;
+  let inviteWithheld = false;
   let notified = false;
   if (existing === null) {
     invite = await issueInvite(
@@ -462,7 +475,12 @@ export async function approveAccessRequest(
       data.delivery,
     );
   } else {
-    if (needsInvite(existing, now)) {
+    // A blocked customer can't use a link, so (like regenerateInvite) none
+    // is made; the admin unblocks, then sends a new link.
+    const inviteDue = needsInvite(existing, now);
+    if (inviteDue && isBlockedAccount(existing, now)) {
+      inviteWithheld = true;
+    } else if (inviteDue) {
       invite = await issueInvite(
         { id: userId, email: existing.email, name: existing.name },
         data.delivery,
@@ -490,6 +508,7 @@ export async function approveAccessRequest(
     invite,
     notified,
     blocked: existing !== null && isBlockedAccount(existing, now),
+    inviteWithheld,
   };
   return auditKeepingData(
     {
@@ -500,7 +519,7 @@ export async function approveAccessRequest(
         userId,
         created: result.created,
         access: data.access.kind,
-        invite: invite ? invite.state : "none",
+        invite: invite ? invite.state : inviteWithheld ? "withheld" : "none",
         notified,
       },
     },
@@ -519,7 +538,8 @@ export async function rejectAccessRequest(
   input: unknown,
   options: { now?: Date } = {},
 ): Promise<ServiceResult<{ requestId: string; emailSent: boolean }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "access-requests");
+  if (refused) return refused;
   const parsed = rejectAccessRequestSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { requestId, reason, sendEmail } = parsed.data;
@@ -570,7 +590,8 @@ export async function createManualAccessRequest(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ requestId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "access-requests");
+  if (refused) return refused;
   const parsed = manualAccessRequestSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const data = parsed.data;
@@ -627,7 +648,8 @@ export async function deleteAccessRequest(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ requestId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "access-requests");
+  if (refused) return refused;
   const parsed = accessRequestIdSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { requestId } = parsed.data;

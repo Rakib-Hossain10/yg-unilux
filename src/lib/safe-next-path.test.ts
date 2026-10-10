@@ -15,6 +15,11 @@ describe("safeNextPath: accepted", () => {
     "/products/spot-lights/recessed?cct=3000K&page=2",
     "/search?q=led%2Bstrip",
     "/areas/retail#top",
+    // Dots inside a segment, and dot segments in the query, are fine.
+    "/product/arc.v2",
+    "/products/...",
+    "/search?q=../x",
+    "/areas/retail#/../x",
   ])("%s", (path) => {
     expect(safeNextPath(path)).toBe(path);
   });
@@ -47,6 +52,20 @@ describe("safeNextPath: refused", () => {
     ["malformed encoding", "/%E0%A4%A"],
     ["lone percent", "/100%"],
     ["deeply nested encoding", "/%2525252525252F"],
+    // Dot segments (QA L-2): the URL parser resolves these to "//evil".
+    ["dot-dot then //", "/..//evil.example"],
+    ["dot then //", "/.//evil.example"],
+    ["nested dot-dot then //", "/a/..//evil.example"],
+    ["encoded dot-dot", "/%2e%2e//evil.example"],
+    ["mixed-case encoded dot", "/%2E//evil.example"],
+    ["half-encoded dot-dot", "/.%2e//evil.example"],
+    ["double-encoded dot-dot", "/%252e%252e//evil.example"],
+    ["trailing dot-dot", "/products/.."],
+    ["trailing dot", "/products/."],
+    ["dot segment before query", "/a/../b?x=1"],
+    // Only the resolved-pathname check catches this one: the decoded "?"
+    // hides the dot segment from the per-layer check.
+    ["dot-dot hidden behind encoded ?", "/a%3F/%2e%2e//evil.example"],
   ])("%s", (_label, path) => {
     expect(safeNextPath(path)).toBeNull();
   });
@@ -98,6 +117,8 @@ const FRAGMENTS = [
   "#",
   ".",
   "..",
+  "%2e",
+  "%2e%2e",
   "evil.example",
   "javascript:",
   "https:",
@@ -127,6 +148,8 @@ describe("safeNextPath: property", () => {
       expect(result).toBe(candidate);
       // They stay on the origin, also after any number of decodes.
       expect(new URL(result, base).origin).toBe(base);
+      // ...and their resolved path is never protocol-relative (QA L-2).
+      expect(new URL(result, base).pathname.startsWith("//")).toBe(false);
       let decoded = result;
       for (let round = 0; round < 6; round += 1) {
         expect(decoded.startsWith("/")).toBe(true);

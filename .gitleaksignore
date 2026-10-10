@@ -7,3 +7,5 @@ src/lib/admin/uploads.test.ts:generic-api-key:34
 test/admin-uploads.qa.test.ts:generic-api-key:100
 # False positive: fixed fake CRON_SECRET used by the P5 cron route tests.
 src/app/api/cron/access-expiry/route.test.ts:generic-api-key:41
+# False positive: fixed fake CRON_SECRET used by the Phase 5 gate A QA route tests.
+test/phase5-gate-a-routes.qa.test.ts:generic-api-key:238

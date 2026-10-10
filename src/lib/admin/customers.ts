@@ -3,8 +3,9 @@
 // ban, unban, set password, revoke sessions, reset request) called with the
 // signed-in admin's own request headers, or src/lib/account-writes.ts for
 // our `input: false` fields. Never Mongoose (UserModel is read-only).
-// Callers are requireAdmin() Server Actions (P7/P8) passing the admin's id
-// and request headers; results follow ADR 0035.
+// Callers are requireAdmin() Server Actions and pages (P7/P8) passing the
+// admin's id and request headers; every read and write re-checks them from
+// the database first (src/lib/admin/actor.ts). Results follow ADR 0035.
 
 import "server-only";
 
@@ -67,8 +68,8 @@ import type {
 } from "@/models/access-request";
 import type { User } from "@/models/user";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import {
-  assertActorId,
   auditAndFinish,
   auditKeepingData,
   fieldError,
@@ -82,23 +83,7 @@ import {
 // Shared pieces (also used by src/lib/admin/access-requests.ts)
 // ---------------------------------------------------------------------------
 
-/**
- * The verified admin a write runs as: the session's user id and the
- * request's headers (`await headers()` in the Server Action). Better Auth's
- * admin endpoints read the session from those headers again, from the
- * database, so a forged id alone can't do anything.
- */
-export interface AdminActor {
-  id: string;
-  headers: Headers;
-}
-
-export function assertActor(actor: AdminActor): void {
-  assertActorId(actor.id);
-  if (!(actor.headers instanceof Headers)) {
-    throw new TypeError("Admin services need the admin's request headers");
-  }
-}
+export type { AdminActor } from "./actor";
 
 /** Invites per customer per hour (plan Q1: against double-clicks). */
 export const INVITE_LIMIT = {
@@ -521,6 +506,16 @@ export function escapeRegex(text: string): string {
 const INVITE_ACCEPTED = { $gte: ["$passwordSetAt", "$invitedAt"] };
 
 /**
+ * Never invited, or the latest invite was accepted (a password chosen at or
+ * after it). The complement of "invite pending or expired" (the same
+ * invitedAt vs passwordSetAt rule as customerStatusFilter); the expiry
+ * reminder only goes to these customers (ADR 0072 amendment).
+ */
+export const INVITE_SETTLED = {
+  $or: [{ invitedAt: null }, { $expr: INVITE_ACCEPTED }],
+};
+
+/**
  * The MongoDB filter for one status (plan Q10) at `now`. Exported for the
  * dashboard counts so both always agree.
  * - blocked: banned with no end, or an end still ahead;
@@ -621,9 +616,11 @@ export interface CustomerListPage {
  * Better Auth owns `users` and its indexes, and customers number hundreds.
  */
 export async function listCustomers(
+  actor: AdminActor,
   input: unknown,
   options: { now?: Date } = {},
 ): Promise<CustomerListPage> {
+  await assertAdminActor(actor);
   const parsed = listCustomersSchema.safeParse(input);
   const query = parsed.success ? parsed.data : listCustomersSchema.parse({});
   const now = options.now ?? new Date();
@@ -702,9 +699,11 @@ const LINKED_LIMIT = 50;
  * unknown id, a non-customer or the admin.
  */
 export async function getCustomer(
+  actor: AdminActor,
   input: unknown,
   options: { now?: Date } = {},
 ): Promise<CustomerPage | null> {
+  await assertAdminActor(actor);
   const parsed = customerDetailSchema.safeParse(input);
   if (!parsed.success) return null;
   const { userId, page } = parsed.data;
@@ -758,8 +757,10 @@ export async function getCustomer(
 
 /** Dashboard figures for the customers module (cheap counts). */
 export async function getCustomerCounts(
+  actor: AdminActor,
   options: { now?: Date } = {},
 ): Promise<{ expiringSoon: number; invitesExpired: number }> {
+  await assertAdminActor(actor);
   const now = options.now ?? new Date();
   await connectDb();
   const [expiringSoon, invitesExpired] = await Promise.all([
@@ -795,7 +796,8 @@ export async function createCustomer(
     auditFailed: boolean;
   }>
 > {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = createCustomerSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const data = parsed.data;
@@ -836,7 +838,8 @@ export async function updateCustomerProfile(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ userId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = updateCustomerProfileSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId, ...profile } = parsed.data;
@@ -872,7 +875,8 @@ export async function setCustomerAccess(
   input: unknown,
   options: { now?: Date } = {},
 ): Promise<ServiceResult<{ accessExpiresAt: Date | null; notified: boolean }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = setCustomerAccessSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId, access, notify } = parsed.data;
@@ -907,7 +911,8 @@ export async function banCustomer(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ userId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = banCustomerSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId, reason } = parsed.data;
@@ -937,7 +942,8 @@ export async function unbanCustomer(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ userId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = customerIdSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId } = parsed.data;
@@ -966,7 +972,8 @@ export async function revokeCustomerSessions(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ userId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = customerIdSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId } = parsed.data;
@@ -998,7 +1005,8 @@ export async function sendCustomerResetLink(
   actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ userId: string }>> {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = customerIdSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId } = parsed.data;
@@ -1058,7 +1066,8 @@ export async function setTemporaryPassword(
 ): Promise<
   ServiceResult<{ userId: string; password: string; auditFailed: boolean }>
 > {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = customerIdSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId } = parsed.data;
@@ -1105,7 +1114,8 @@ export async function regenerateInvite(
 ): Promise<
   ServiceResult<{ userId: string; invite: InviteOutcome; auditFailed: boolean }>
 > {
-  assertActor(actor);
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
   const parsed = regenerateInviteSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { userId, delivery } = parsed.data;

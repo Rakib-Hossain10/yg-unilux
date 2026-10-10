@@ -28,7 +28,20 @@ export interface ServiceErrors {
  */
 export type ServiceResult<T> =
   | { ok: true; data: T; tags: CatalogTag[] }
-  | { ok: false; errors: ServiceErrors; tags: CatalogTag[] };
+  | {
+      ok: false;
+      errors: ServiceErrors;
+      tags: CatalogTag[];
+      /**
+       * Set only when the actor is not the signed-in active admin
+       * (src/lib/admin/actor.ts): the Server Action answers `forbidden()`.
+       */
+      denied?: AdminActorRefusal;
+    };
+
+/** Why an admin service refused its actor (src/lib/admin/actor.ts). */
+export type AdminActorRefusal =
+  "signed_out" | "not_admin" | "must_change_password" | "actor_mismatch";
 
 /** Shown when the change was saved but its audit entry was not. */
 export const AUDIT_FAILED_MESSAGE =

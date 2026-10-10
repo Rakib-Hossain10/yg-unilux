@@ -4,6 +4,7 @@
 // every answer is `Cache-Control: private, no-store`.
 //
 // Order of checks (each step answers before the next one runs):
+//   0. a browser prefetch (Sec-Purpose/Purpose: prefetch)  → 204, nothing read
 //   1. productId must be an ObjectId                      → 404
 //   2. product published (draft/unknown = 404 for everyone, the admin too)
 //      and a datasheet attached ("coming soon" is public) → 404
@@ -20,7 +21,7 @@
 // viewer who may download, so nobody else learns whether it still exists.
 // A database failure while reading the product or the session is a 503,
 // never "signed out". The R2 key and the URL are never logged and never in a
-// body.
+// body. HEAD is 405 (Allow: GET), so it never runs the GET pipeline.
 
 import { connection } from "next/server";
 
@@ -101,11 +102,45 @@ function renewalPath(productId: string): string {
   return `/request-access?${query.toString()}`;
 }
 
+/*
+ * A speculative request: Chromium sends `Sec-Purpose: prefetch` (or
+ * `prefetch;prerender`), older browsers `Purpose: prefetch`, Firefox
+ * `X-Moz: prefetch`, old Safari `X-Purpose: preview`. A download must cost a
+ * slot, a presigned URL and a log row only when the person clicks.
+ */
+const PREFETCH_TOKEN = /(?:^|[\s,;])(?:prefetch|preview)(?:$|[\s,;=])/i;
+
+function isPrefetch(headers: Headers): boolean {
+  return ["sec-purpose", "purpose", "x-purpose", "x-moz"].some((name) =>
+    PREFETCH_TOKEN.test(headers.get(name) ?? ""),
+  );
+}
+
+/* Answers a prefetch with nothing: no lookup, no session read, no log. */
+function noContent(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: { "Cache-Control": NO_STORE },
+  });
+}
+
+/*
+ * HEAD would otherwise run GET (Next answers HEAD with the GET handler) and
+ * count, presign and log a download nobody receives.
+ */
+export function HEAD(): Response {
+  return new Response(null, {
+    status: 405,
+    headers: { Allow: "GET", "Cache-Control": NO_STORE },
+  });
+}
+
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ productId: string }> },
 ): Promise<Response> {
   await connection();
+  if (isPrefetch(request.headers)) return noContent();
   const parsed = objectIdSchema.safeParse((await params).productId);
   if (!parsed.success) return notFound();
 

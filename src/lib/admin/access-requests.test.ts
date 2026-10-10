@@ -13,6 +13,7 @@ import { AccessRequestModel, AuditLogModel, UserModel } from "@/models";
 import { LoginAttemptModel } from "@/models/login-attempt";
 import {
   authCall,
+  linkCount,
   rawUser,
   seedUserFields,
   setupAuthHarness,
@@ -224,6 +225,52 @@ describe("approveAccessRequest: existing email", () => {
     expect(await usersWith(first.email)).toBe(1);
   });
 
+  it("a blocked customer whose invite expired gets no new link (like regenerateInvite)", async () => {
+    const first = await pending();
+    const created = expectOk(
+      await approveAccessRequest(admin, approveInput(first.id), { now }),
+    );
+    await seedUserFields(created.userId, {
+      inviteExpiresAt: new Date(now.getTime() - 1),
+      banned: true,
+      banExpires: null,
+    });
+    const linksBefore = await linkCount(created.userId);
+    mail.invites.length = 0;
+    const second = await pending(first.email);
+    const data = expectOk(
+      await approveAccessRequest(admin, approveInput(second.id), { now }),
+    );
+    expect(data).toMatchObject({
+      created: false,
+      blocked: true,
+      invite: null,
+      inviteWithheld: true,
+    });
+    expect(mail.invites).toHaveLength(0);
+    expect(await linkCount(created.userId)).toBe(linksBefore);
+    // Access is still extended: approving neither unblocks nor skips that.
+    expect(data.accessExpiresAt).not.toBeNull();
+    const audit = await AuditLogModel.findOne({
+      action: "access_request.approve",
+      "target.id": second.id,
+    }).lean();
+    expect(audit?.meta).toMatchObject({ invite: "withheld" });
+  });
+
+  it("a blocked customer is no reason to withhold when no invite is due", async () => {
+    const first = await pending();
+    const created = expectOk(
+      await approveAccessRequest(admin, approveInput(first.id), { now }),
+    );
+    await seedUserFields(created.userId, { banned: true, banExpires: null });
+    const second = await pending(first.email);
+    const data = expectOk(
+      await approveAccessRequest(admin, approveInput(second.id), { now }),
+    );
+    expect(data).toMatchObject({ invite: null, inviteWithheld: false });
+  });
+
   it("a customer who set a password gets no invite", async () => {
     const first = await pending();
     expectOk(await approveAccessRequest(admin, approveInput(first.id)));
@@ -426,14 +473,14 @@ describe("reads", () => {
     const renewal = await pending(approved.email, { kind: "renewal" });
     const fresh = await pending();
 
-    const queue = await listAccessRequests({ tab: "pending" });
+    const queue = await listAccessRequests(admin, { tab: "pending" });
     expect(queue.rows.map((row) => row.id).sort()).toEqual(
       [renewal.id, fresh.id].sort(),
     );
     const byId = new Map(queue.rows.map((row) => [row.id, row]));
     expect(byId.get(renewal.id)?.existingCustomer).toBe(true);
     expect(byId.get(fresh.id)?.existingCustomer).toBe(false);
-    const handled = await listAccessRequests({ tab: "handled" });
+    const handled = await listAccessRequests(admin, { tab: "handled" });
     expect(handled.rows.map((row) => row.id)).toEqual([approved.id]);
   });
 
@@ -443,14 +490,18 @@ describe("reads", () => {
       await approveAccessRequest(admin, approveInput(approved.id), { now }),
     );
     const again = await pending(approved.email);
-    const detail = await getAccessRequest({ requestId: again.id }, { now });
+    const detail = await getAccessRequest(
+      admin,
+      { requestId: again.id },
+      { now },
+    );
     expect(detail?.existingAccount).toMatchObject({
       userId: created.userId,
       isCustomer: true,
       blocked: false,
       invite: { state: "pending" },
     });
-    expect(await getAccessRequest({ requestId: "nope" })).toBeNull();
+    expect(await getAccessRequest(admin, { requestId: "nope" })).toBeNull();
   });
 });
 

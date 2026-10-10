@@ -29,7 +29,7 @@ import {
 } from "../../../../../test/helpers/auth-harness";
 import { testPublicId } from "../../../../../test/helpers/public-ids";
 
-import { GET } from "./route";
+import { GET, HEAD } from "./route";
 
 const request = vi.hoisted(() => ({ headers: new Headers() }));
 vi.mock("next/headers", () => ({ headers: async () => request.headers }));
@@ -336,6 +336,69 @@ describe("the download log", () => {
     expect(logged).toContain("[datasheet]");
     expect(logged).not.toContain(STORAGE_KEY);
     expect(logged).not.toMatch(/https?:|X-Amz/);
+  });
+});
+
+describe("browser prefetch and HEAD (QA L-1)", () => {
+  it.each([
+    ["sec-purpose", "prefetch"],
+    ["sec-purpose", "prefetch;prerender"],
+    ["purpose", "prefetch"],
+    ["x-moz", "prefetch"],
+    ["x-purpose", "preview"],
+  ])(
+    "%s: %s is a 204 with nothing read, counted or logged",
+    async (name, value) => {
+      const before = await logsOf("active");
+      request.headers = new Headers({
+        cookie: cookies.active ?? "",
+        [name]: value,
+      });
+      const findProduct = vi.spyOn(ProductModel, "findOne");
+      const response = await GET(
+        new Request(`${AUTH_BASE}/api/datasheet/${PRODUCTS.published}`, {
+          headers: { cookie: cookies.active ?? "", [name]: value },
+        }),
+        { params: Promise.resolve({ productId: PRODUCTS.published }) },
+      );
+      expect(response.status).toBe(204);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.text()).toBe("");
+      expect(findProduct).not.toHaveBeenCalled();
+      expect(await logsOf("active")).toBe(before);
+      findProduct.mockRestore();
+    },
+  );
+
+  it("a prefetch of a draft or a bad id says nothing either (204 before any lookup)", async () => {
+    for (const productId of [PRODUCTS.draft, PRODUCTS.badId]) {
+      const response = await GET(
+        new Request(`${AUTH_BASE}/api/datasheet/${productId}`, {
+          headers: { "sec-purpose": "prefetch" },
+        }),
+        { params: Promise.resolve({ productId }) },
+      );
+      expect(response.status).toBe(204);
+    }
+  });
+
+  it("a header that merely mentions the word is not a prefetch", async () => {
+    request.headers = new Headers({ cookie: cookies.active ?? "" });
+    const response = await GET(
+      new Request(`${AUTH_BASE}/api/datasheet/${PRODUCTS.published}`, {
+        headers: { purpose: "noprefetch" },
+      }),
+      { params: Promise.resolve({ productId: PRODUCTS.published }) },
+    );
+    expect(response.status).toBe(303);
+  });
+
+  it("HEAD is 405, Allow: GET, never cached, and runs nothing", () => {
+    const response = HEAD();
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 });
 

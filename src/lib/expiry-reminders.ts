@@ -11,7 +11,7 @@ import type { Types } from "mongoose";
 import { z } from "zod";
 
 import { type AccountContext, updateAccountFields } from "@/lib/account-writes";
-import { CUSTOMERS_ONLY } from "@/lib/admin/customers";
+import { CUSTOMERS_ONLY, INVITE_SETTLED } from "@/lib/admin/customers";
 import { getAuthContext } from "@/lib/auth";
 import { getCompanyAlertEmail } from "@/lib/contact-settings";
 import { connectDb } from "@/lib/db";
@@ -142,7 +142,11 @@ const optionsSchema = z
  * - not blocked (no ban, or a timed ban that has ended, as isBanned());
  * - access ends after now and within 7 days (null expiry and already
  *   expired are out);
- * - not yet reminded about THIS expiry date.
+ * - not yet reminded about THIS expiry date;
+ * - not waiting on an invite: never invited, or a password chosen at or
+ *   after the latest invite (ADR 0072 amendment). A customer who never
+ *   accepted their invite gets no reminder; once they set a password they
+ *   become due like anyone else.
  * Exported so tests and the dashboard can agree with the run.
  */
 export function dueFilter(now: Date): Record<string, unknown> {
@@ -157,6 +161,7 @@ export function dueFilter(now: Date): Record<string, unknown> {
         },
       },
       { $expr: { $ne: ["$expiryReminderFor", "$accessExpiresAt"] } },
+      INVITE_SETTLED,
     ],
   };
 }

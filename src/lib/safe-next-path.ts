@@ -19,15 +19,25 @@ const PROBE_ORIGIN = "https://next-path.invalid";
  * - control characters (C0, DEL) and whitespace, which parsers strip, so
  *   `/\t/evil.com` would become `//evil.com`;
  * - it must start with exactly one `/`, so `javascript:`, `https:` and
- *   relative forms are refused too.
+ *   relative forms are refused too;
+ * - a `.` or `..` path segment: the URL parser removes them, so
+ *   `/..//evil.com` or `/.//evil.com` would resolve to the path
+ *   `//evil.com`. No real page path has one.
  */
 function unsafeForm(value: string): boolean {
   return (
     !value.startsWith("/") ||
     value.startsWith("//") ||
     value.includes("\\") ||
-    /[\s\x00-\x1f\x7f]/.test(value)
+    /[\s\x00-\x1f\x7f]/.test(value) ||
+    hasDotSegment(value)
   );
+}
+
+/* True when the path part (before `?` or `#`) has a `.` or `..` segment. */
+function hasDotSegment(value: string): boolean {
+  const path = value.split(/[?#]/, 1)[0] ?? "";
+  return path.split("/").some((segment) => segment === "." || segment === "..");
 }
 
 /**
@@ -61,5 +71,7 @@ export function safeNextPath(raw: unknown): string | null {
   // Belt and braces: the URL parser must keep it on our origin.
   const resolved = URL.parse(raw, PROBE_ORIGIN);
   if (!resolved || resolved.origin !== PROBE_ORIGIN) return null;
+  // ...and its resolved path must not be protocol-relative either.
+  if (resolved.pathname.startsWith("//")) return null;
   return raw;
 }

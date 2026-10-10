@@ -11,17 +11,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { endOfUtcDay } from "@/lib/access-expiry";
 import { getDb } from "@/lib/db";
+import { createInviteLink } from "@/lib/invite";
 import { acquireLock, buildKey, releaseLock } from "@/lib/rate-limit";
 import { SETTINGS_KEYS } from "@/lib/schemas/settings";
 import { AuditLogModel, SiteContentModel, UserModel } from "@/models";
 import { LoginAttemptModel } from "@/models/login-attempt";
 import {
+  authCall,
   rawUser,
   seedUserFields,
   setupAuthHarness,
 } from "../../test/helpers/auth-harness";
 
 import {
+  dueFilter,
   runExpiryReminders,
   type ExpiryReminderOptions,
 } from "./expiry-reminders";
@@ -219,6 +222,87 @@ describe("who is due", () => {
     });
     await run();
     expect(remindedEmails()).toEqual([user.email]);
+  });
+});
+
+describe("customers who never accepted their invite (ADR 0072 amendment)", () => {
+  it("are skipped: invite pending, invite expired, re-invited after a password", async () => {
+    const accepted = await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - 3 * DAY),
+      inviteExpiresAt: new Date(NOW.getTime()),
+      passwordSetAt: new Date(NOW.getTime() - 2 * DAY),
+    });
+    const sameInstant = await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - DAY),
+      passwordSetAt: new Date(NOW.getTime() - DAY),
+    });
+    await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - DAY),
+      inviteExpiresAt: new Date(NOW.getTime() + 2 * DAY),
+    }); // pending, no password yet
+    await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - 5 * DAY),
+      inviteExpiresAt: new Date(NOW.getTime() - 2 * DAY),
+    }); // the link ran out unused
+    await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - DAY),
+      inviteExpiresAt: new Date(NOW.getTime() + 2 * DAY),
+      passwordSetAt: new Date(NOW.getTime() - 9 * DAY),
+    }); // re-invited after an earlier password: not accepted yet
+    await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - DAY),
+      passwordSetAt: null,
+    });
+
+    const summary = await run();
+    expect(summary.due).toBe(2);
+    expect(remindedEmails()).toEqual(
+      [accepted.email, sameInstant.email].sort(),
+    );
+    // The digest lists only the reminded customers.
+    expect(mail.digests).toHaveLength(1);
+    expect(
+      mail.digests[0]?.customers.map((c: { name: string }) => c.name).sort(),
+    ).toEqual([accepted.name, sameInstant.name].sort());
+  });
+
+  it("only invite-pending customers due: no reminder and no digest", async () => {
+    await makeUser({
+      accessExpiresAt: endsIn(2),
+      invitedAt: new Date(NOW.getTime() - DAY),
+      inviteExpiresAt: new Date(NOW.getTime() + 2 * DAY),
+    });
+    const summary = await run();
+    expect(summary).toMatchObject({ due: 0, sent: 0, digest: "skipped" });
+    expect(mail.reminders).toHaveLength(0);
+  });
+
+  it("a customer who sets their password through the invite becomes due", async () => {
+    const user = await makeUser({ accessExpiresAt: endsIn(3) });
+    const link = await createInviteLink(user.id);
+    const isDue = async () =>
+      (await UserModel.find(dueFilter(NOW), { _id: 1 }).lean()).some(
+        (doc) => String(doc._id) === user.id,
+      );
+    expect(await isDue()).toBe(false);
+    await run();
+    expect(mail.reminders).toHaveLength(0);
+
+    const response = await authCall("/reset-password", {
+      token: new URL(link.url).searchParams.get("token"),
+      newPassword: "reminder-own-password-123",
+    });
+    expect(response.status).toBe(200);
+    expect(await isDue()).toBe(true);
+    await run();
+    expect(remindedEmails()).toEqual([user.email]);
+    expect((await rawUser(user.id))?.expiryReminderFor).toEqual(endsIn(3));
   });
 });
 

@@ -5,6 +5,7 @@
 // (sessions + epoch), access math, the list filters and their boundaries,
 // search escaping, the customer page, and audit meta without emails.
 
+import { Collection } from "mongodb";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getDb } from "@/lib/db";
@@ -45,6 +46,11 @@ import {
   type AdminActor,
   type InviteOutcome,
 } from "./customers";
+import {
+  ACTOR_REFUSED_MESSAGE,
+  AdminActorError,
+  assertAdminActor,
+} from "./actor";
 import type { ServiceResult } from "./write-result";
 
 const mail = vi.hoisted(() => ({
@@ -625,7 +631,9 @@ describe("listCustomers (plan Q10)", () => {
   }, 120_000);
 
   const listIds = async (input: Record<string, unknown>) =>
-    (await listCustomers(input, { now })).rows.map((row) => row.id).sort();
+    (await listCustomers(admin, input, { now })).rows
+      .map((row) => row.id)
+      .sort();
   const pick = (...labels: string[]) =>
     labels.map((label) => ids[label]).sort();
 
@@ -667,7 +675,7 @@ describe("listCustomers (plan Q10)", () => {
   });
 
   it("the row states agree with the filters", async () => {
-    const rows = (await listCustomers({}, { now })).rows;
+    const rows = (await listCustomers(admin, {}, { now })).rows;
     const byId = new Map(rows.map((row) => [row.id, row]));
     expect(byId.get(ids.invitePending ?? "")?.invite.state).toBe("pending");
     expect(byId.get(ids.inviteExpired ?? "")?.invite.state).toBe("expired");
@@ -686,17 +694,19 @@ describe("listCustomers (plan Q10)", () => {
   });
 
   it("sorts by expiry (soonest first, no expiry last) and by name", async () => {
-    const byExpiry = (await listCustomers({ sort: "expiry" }, { now })).rows;
+    const byExpiry = (await listCustomers(admin, { sort: "expiry" }, { now }))
+      .rows;
     expect(byExpiry[0]?.id).toBe(ids.expiredNow);
     expect(byExpiry.at(-1)?.accessExpiresAt).toBeNull();
-    const names = (await listCustomers({ sort: "name" }, { now })).rows.map(
-      (row) => row.name.toLowerCase(),
-    );
+    const names = (
+      await listCustomers(admin, { sort: "name" }, { now })
+    ).rows.map((row) => row.name.toLowerCase());
     expect(names).toEqual([...names].sort());
   });
 
   it("bad input falls back to the first page of everything", async () => {
     const page = await listCustomers(
+      admin,
       { status: "nope", sort: "evil", page: -3 },
       { now },
     );
@@ -705,7 +715,7 @@ describe("listCustomers (plan Q10)", () => {
   });
 
   it("dashboard counts match the filters", async () => {
-    expect(await getCustomerCounts({ now })).toEqual({
+    expect(await getCustomerCounts(admin, { now })).toEqual({
       expiringSoon: 1,
       invitesExpired: 2,
     });
@@ -727,7 +737,7 @@ describe("getCustomer", () => {
       datasheet: (await rawUser(created.userId))?._id,
       downloadedAt: new Date(),
     });
-    const page = await getCustomer({ userId: created.userId });
+    const page = await getCustomer(admin, { userId: created.userId });
     expect(page?.customer).toMatchObject({
       id: created.userId,
       email: created.email,
@@ -744,9 +754,9 @@ describe("getCustomer", () => {
   });
 
   it("null for an unknown id, a malformed id and the admin", async () => {
-    expect(await getCustomer({ userId: "0".repeat(24) })).toBeNull();
-    expect(await getCustomer({ userId: "nope" })).toBeNull();
-    expect(await getCustomer({ userId: admin.id })).toBeNull();
+    expect(await getCustomer(admin, { userId: "0".repeat(24) })).toBeNull();
+    expect(await getCustomer(admin, { userId: "nope" })).toBeNull();
+    expect(await getCustomer(admin, { userId: admin.id })).toBeNull();
   });
 });
 
@@ -798,10 +808,109 @@ describe("the actor must be a real signed-in admin (second line behind requireAd
     expect((await rawUser(victim.userId))?.banned).not.toBe(true);
   });
 
-  // Documented boundary: updateCustomerProfile and setCustomerAccess write
-  // through account-writes.ts, not a Better Auth admin endpoint, so the
-  // Server Action's requireAdmin() is their only role check (the P7/P8
-  // action guard tests cover it).
+  it("every service re-checks the actor from the database (QA M-1)", async () => {
+    const victim = await newCustomer();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const before = await rawUser(victim.userId);
+    // Another admin: active, but not the one named by the actor id.
+    const other = await signedInAdmin(harness, "second-admin@example.com");
+    // An admin still on a temporary password.
+    const { user: tempAdmin } = await harness.auth.api.createUser({
+      body: {
+        email: "temp-admin@example.com",
+        password: "temp-admin-password-1",
+        name: "Temp Admin",
+        role: "admin",
+        data: { mustChangePassword: true },
+      },
+    });
+    const tempCookie = await signIn(
+      "temp-admin@example.com",
+      "temp-admin-password-1",
+    );
+    const cases: [AdminActor, string][] = [
+      [{ id: admin.id, headers: new Headers() }, "signed_out"],
+      [{ id: admin.id, headers: other.headers }, "actor_mismatch"],
+      [
+        { id: tempAdmin.id, headers: new Headers({ cookie: tempCookie }) },
+        "must_change_password",
+      ],
+    ];
+    for (const [actor, reason] of cases) {
+      const results: ServiceResult<unknown>[] = [
+        await updateCustomerProfile(actor, {
+          userId: victim.userId,
+          name: "Renamed",
+          company: null,
+          country: null,
+        }),
+        await setCustomerAccess(actor, {
+          userId: victim.userId,
+          access: { kind: "none" },
+        }),
+        await regenerateInvite(actor, {
+          userId: victim.userId,
+          delivery: "copy",
+        }),
+        await sendCustomerResetLink(actor, { userId: victim.userId }),
+      ];
+      for (const result of results) {
+        expect(result.ok, reason).toBe(false);
+        expect(!result.ok && result.denied, reason).toBe(reason);
+        expect(formErrors(result)).toEqual([ACTOR_REFUSED_MESSAGE]);
+      }
+      await expect(listCustomers(actor, {})).rejects.toBeInstanceOf(
+        AdminActorError,
+      );
+      await expect(
+        getCustomer(actor, { userId: victim.userId }),
+      ).rejects.toMatchObject({ reason });
+      await expect(getCustomerCounts(actor)).rejects.toBeInstanceOf(
+        AdminActorError,
+      );
+    }
+    const after = await rawUser(victim.userId);
+    expect(after?.name).toBe(before?.name);
+    expect(after?.accessExpiresAt).toEqual(before?.accessExpiresAt);
+    expect(after?.invitedAt).toEqual(before?.invitedAt);
+  });
+
+  it("a banned admin is refused, the real admin is not", async () => {
+    const banned = await signedInAdmin(harness, "banned-admin@example.com");
+    await seedUserFields(banned.id, { banned: true, banExpires: null });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await setCustomerAccess(banned, {
+      userId: (await newCustomer()).userId,
+      access: { kind: "none" },
+    });
+    expect(!result.ok && result.denied).toBe("not_admin");
+    await expect(assertAdminActor(admin)).resolves.toBeUndefined();
+  });
+
+  it("a database failure while reading the session is 'try again', not allowed", async () => {
+    const victim = await newCustomer();
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The database is down when Better Auth reads the session (its Mongo
+    // adapter reads with an aggregate; the service itself reads with find).
+    const down = Object.assign(new Error("down"), {
+      name: "MongoNetworkError",
+    });
+    vi.spyOn(Collection.prototype, "aggregate").mockImplementationOnce(
+      () => ({ toArray: () => Promise.reject(down) }) as never,
+    );
+    const result = await setCustomerAccess(admin, {
+      userId: victim.userId,
+      access: { kind: "none" },
+    });
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.denied).toBeUndefined();
+    // Refused by the actor check itself, not by a later step.
+    // (Better Auth wraps the driver error in its APIError.)
+    expect(errorLog).toHaveBeenCalledWith(
+      "[customers] actor not checked: APIError",
+    );
+    expect((await rawUser(victim.userId))?.accessExpiresAt).not.toBeNull();
+  });
 });
 
 describe("one-time credentials survive a failed audit write (ADR 0070)", () => {
