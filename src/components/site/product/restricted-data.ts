@@ -25,6 +25,26 @@ export const datasheetUrl = (productId: string): string =>
   `/api/datasheet/${encodeURIComponent(productId)}`;
 
 /**
+ * Sign in, then back to this product page (plan Q7): the same
+ * `/login?next=%2Fproduct%2F<slug>` the datasheet route redirects to.
+ */
+export const signInUrl = (slug: string): string =>
+  `/login?${new URLSearchParams({ next: `/product/${slug}` }).toString()}`;
+
+/**
+ * The request form for this product (P6); `renew` is the expired customer's
+ * renewal, the same target the datasheet route sends them to (ADR 0071).
+ */
+export const requestAccessUrl = (
+  productId: string,
+  options: { renew?: boolean } = {},
+): string => {
+  const query = new URLSearchParams(options.renew ? { renew: "1" } : {});
+  query.set("product", productId);
+  return `/request-access?${query.toString()}`;
+};
+
+/**
  * The datasheet button state the route sends (`@/lib/datasheet-state`). Kept
  * here so page modules never import that file: it reaches permissions/auth
  * (the page's static guard); the unit test checks the two stay equal.

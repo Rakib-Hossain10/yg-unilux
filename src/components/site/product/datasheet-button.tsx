@@ -8,7 +8,12 @@
  * /api/datasheet/[productId], which re-checks the session (rule 2).
  */
 
-import { datasheetUrl, type DatasheetButtonState } from "./restricted-data";
+import {
+  datasheetUrl,
+  requestAccessUrl,
+  signInUrl,
+  type DatasheetButtonState,
+} from "./restricted-data";
 
 /* lg:pr-4: in the one-row slot (restricted-slots.tsx, lg:pr-1) a text link
    keeps the same 20 px from the border as the label on the left. */
@@ -34,9 +39,12 @@ function DownloadIcon() {
 export function DatasheetButton({
   state,
   productId,
+  productSlug,
 }: {
   state: DatasheetButtonState;
   productId: string;
+  /** For the sign-in link's `next` (back to this page). Public. */
+  productSlug: string;
 }) {
   switch (state) {
     case "download":
@@ -60,23 +68,38 @@ export function DatasheetButton({
     case "expired":
       return (
         <p data-datasheet-state="expired" className="text-sm text-grey-600">
-          <a href="/contact" className={textLink}>
+          {/* The renewal form (plan Q6), the same target the datasheet
+              route sends an expired customer to (ADR 0071). */}
+          <a
+            href={requestAccessUrl(productId, { renew: true })}
+            className={textLink}
+          >
             Access expired — contact us
           </a>
         </p>
       );
     case "signin":
       return (
-        <p data-datasheet-state="signin" className="text-sm text-grey-600">
-          {/* The row holds only the link until the panel is wide enough
-              (2xl); screen readers always get the sentence. */}
-          <span className="lg:max-2xl:sr-only">
-            Available to approved customers.{" "}
-          </span>
-          <a href="/login" className={textLink}>
-            Sign in to download
-          </a>
-        </p>
+        <div data-datasheet-state="signin" className="text-sm text-grey-600">
+          {/* In the one-row slot (lg+) the row holds only the two links;
+              screen readers always get the sentence. */}
+          <p className="lg:sr-only">Available to approved customers.</p>
+          <p className="flex flex-wrap items-center gap-x-5 lg:gap-x-1">
+            {/* One inline span inside the flex link keeps the space and
+                the underline continuous. */}
+            <a href={signInUrl(productSlug)} className={textLink}>
+              <span>
+                Sign in{" "}
+                {/* Shortened where the lg panel is narrowest (lg–xl); the
+                    link's name stays "Sign in to download". */}
+                <span className="lg:max-xl:sr-only">to download</span>
+              </span>
+            </a>
+            <a href={requestAccessUrl(productId)} className={textLink}>
+              Request access
+            </a>
+          </p>
+        </div>
       );
     case "coming-soon":
       return (

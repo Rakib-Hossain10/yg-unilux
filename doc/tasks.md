@@ -25,7 +25,11 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - L-1: datasheet route answers prefetch with 204, `HEAD` with 405; L-2: `safeNextPath` refuses dot segments and `//` pathnames; I-1: approve withholds the invite for a blocked customer (`inviteWithheld`);
     - user decision: invite-pending customers get no expiry reminder (ADR 0072 amendment, `INVITE_SETTLED`).
     - QA tests: `test/phase5-gate-a-{services,routes,guards}.qa.test.ts`, `e2e/phase5-gate-a.qa.spec.ts`; all 9 `it.fails` flipped. 4713 unit (1 expected-fail, 3 skipped), 23 e2e on the gate-A/download/account specs, lint/typecheck OK, no review High.
-  - **▶ NEXT: P6 request-access UI** (`site-frontend`/Opus): `/request-access` (+ `?renew=1&product=<id>`) on the P3 access-request service; see "Open from P3/P2" below. Then P7 admin queue, P8 admin customers (`admin-panel-builder`), **QA gate B after P8**.
+  - **P6 done** (2026-10-10, `site-frontend`/Opus, **ADR 0074**): `/request-access` (`src/app/(site)/request-access/{page,actions}.ts(x)`, `src/components/site/request-access/*`): Q2 fields, `?product=`/`?renew=1`, prefill from the DB session, honeypot + server `startedAt`, works without JS; the ONE public Server Action (allowlisted in `test/admin-write-path.qa.test.ts`, exports only `requestAccessAction`); WhatsApp `wa.me` link (hidden without a number); `getPublishedProductLabel` in `src/lib/catalog/product-ref.ts`; product page "Sign in" (`next=/product/<slug>`) + "Request access", expired → `/request-access?renew=1&product=<id>`. 4741 unit (1 expected-fail, 3 skipped), 62 e2e (request-access 13 + account/download/product specs), lint/typecheck OK, review findings fixed (2 Low left, in ADR 0074).
+  - **▶ NEXT: P7 admin access-request queue** (`admin-panel-builder`/Opus) on the P3 service (`listAccessRequests`, `getAccessRequest`, `approveAccessRequest`, `rejectAccessRequest`, `createManualAccessRequest`, `deleteAccessRequest`, ADR 0069/0073). Then P8 admin customers (`admin-panel-builder`), **QA gate B after P8**.
+  - **Gate B must also check (from P6):** the public Server Action allowlist entry; form abuse on `POST /request-access`; `getPublishedProductLabel` (written by `site-frontend`, backend review wanted).
+  - **User/client must confirm (from P6):** the country list leaves out mainland China (HK, Macao, Taiwan listed).
+  - **Later (from P6):** Phase 7 links the consent text to the privacy notice (`TODO(Phase 7)`); tidy stale "arrives in P6" comments + `prefetch={false}` in `reset-expired.tsx`/`my-downloads`; Low: unit parity test for `requestAccessUrl` vs the route's `renewalPath`, unit test for `getPublishedProductRef`.
   - **Must-dos for P7/P8 (from gate A):**
     - call services with `{ id: viewer.user.id, headers: await headers() }` after `requireAdmin()`; map `denied` (writes) / `AdminActorError` (reads) to `forbidden()`; reads now take `actor` first;
     - L-3: for `source: "form"` requests, default invite delivery to email and warn before "show once to copy" (form contact details are unverified and latest-wins);
@@ -507,7 +511,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] P3 services: access requests + customers (ADR 0069, 0070)
 - [x] P4 `/api/datasheet/[productId]` (ADR 0071)
 - [x] P5 expiry cron (ADR 0072) → QA gate A
-- [ ] P6 request-access UI, P7 admin queue, P8 admin customers → QA gate B
+- [ ] P6 request-access UI ✅ (ADR 0074), P7 admin queue, P8 admin customers → QA gate B
 - [ ] P9 exit e2e → gate C
 - [ ] Request Access form + WhatsApp link
 - [ ] Admin queue: approve with expiry / reject; Resend emails
@@ -643,4 +647,5 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-10: P4 datasheet download done (`backend-architect`/Opus; ADR 0071): route with the Q9 answers, 60 s presign of datasheet keys only, 60/h per-user limit, log before redirect (fail closed). 4581 unit + 2 e2e green, no review High. Next: P5 expiry cron, then QA gate A.
 - 2026-10-10: P5 expiry cron done (`backend-architect`/Opus; ADR 0072): timing-safe Bearer route, 7-day window idempotent via `expiryReminderFor`, global lock + Resend keys, admin digest, counts-only audit, `vercel.json` 08:00 UTC, dry-run CLI. Review Medium (a failed batch read lost the digest and audit) fixed as `aborted`. 4630 unit green. Next: QA gate A.
 - 2026-10-10: QA gate A PASS (`qa-security-reviewer`/Opus) with M-1 (admin services trusted the actor), L-1 (prefetch/HEAD on datasheet route), L-2 (`safeNextPath` dot segments), I-1; all fixed by `backend-architect`/Opus (ADR 0073). User decided invite-pending customers get no expiry reminder (ADR 0072 amendment). Two API connection drops mid-run; both agents resumed. 4713 unit + 23 e2e green. Next: P6 request-access UI.
+- 2026-10-10: P6 request-access UI done (`site-frontend`/Opus; ADR 0074): `/request-access` with no-JS Server Action (one allowlisted public action), session prefill, WhatsApp link, product-page sign-in/request/renew links. Review Mediums (select lost value, e2e fill timing) fixed. 4741 unit + 62 e2e green. Next: P7 admin queue.
 - 2026-10-09: QA gate B on L4–L6 failed on 3 findings (L-1 comment, M-1 draft category link, L-2 menu close), all fixed; gate B tests added. 4119 unit + 254 e2e green. Next: L7.

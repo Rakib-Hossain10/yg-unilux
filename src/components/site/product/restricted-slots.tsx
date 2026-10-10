@@ -12,6 +12,7 @@
 
 import { DatasheetButton } from "./datasheet-button";
 import { DatasheetBlock, RestrictedSpecsBlock } from "./restricted-block";
+import { requestAccessUrl, signInUrl } from "./restricted-data";
 
 const signInLink =
   "inline-flex min-h-11 items-center underline underline-offset-4 decoration-grey-400 transition-colors duration-(--duration-quick) hover:decoration-ink";
@@ -27,9 +28,11 @@ const signInLink =
  */
 export function DatasheetSlot({
   productId,
+  productSlug,
   hasDatasheet,
 }: {
   productId: string;
+  productSlug: string;
   hasDatasheet: boolean;
 }) {
   return (
@@ -45,10 +48,12 @@ export function DatasheetSlot({
         Datasheet
       </p>
       <DatasheetBlock
+        productSlug={productSlug}
         fallback={
           <DatasheetButton
             state={hasDatasheet ? "signin" : "coming-soon"}
             productId={productId}
+            productSlug={productSlug}
           />
         }
       />
@@ -56,7 +61,13 @@ export function DatasheetSlot({
   );
 }
 
-export function RestrictedSpecsSlot() {
+export function RestrictedSpecsSlot({
+  productId,
+  productSlug,
+}: {
+  productId: string;
+  productSlug: string;
+}) {
   return (
     <div
       data-slot="restricted-specs"
@@ -66,9 +77,20 @@ export function RestrictedSpecsSlot() {
         fallback={
           <p>
             Some specifications are shared with approved customers only.{" "}
-            <a href="/login" className={`${signInLink} text-ink`}>
+            <a
+              href={signInUrl(productSlug)}
+              className={`${signInLink} text-ink`}
+            >
               Sign in to see them
+            </a>{" "}
+            or{" "}
+            <a
+              href={requestAccessUrl(productId)}
+              className={`${signInLink} text-ink`}
+            >
+              request access
             </a>
+            .
           </p>
         }
       />

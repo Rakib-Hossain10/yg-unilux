@@ -2,7 +2,8 @@
 // whose restricted columns are all filled. A visitor sees only the fallback
 // (and no restricted value in the HTML, ever); an active customer gets the
 // rows, which follow the optic switch, and the download link; an expired
-// customer gets "Access expired — contact us"; the slot height holds.
+// customer gets "Access expired — contact us" (to the renewal form); the
+// slot height holds.
 
 import { type Browser, expect, type Page, test } from "@playwright/test";
 import { type Db, type MongoClient } from "mongodb";
@@ -111,7 +112,10 @@ test("a visitor sees the fallback and no restricted value anywhere", async ({
   await expect(datasheet(page)).toContainText("Sign in to download");
   await expect(
     datasheet(page).getByRole("link", { name: "Sign in to download" }),
-  ).toHaveAttribute("href", "/login");
+  ).toHaveAttribute("href", `/login?next=%2Fproduct%2F${SLUG}`);
+  await expect(
+    datasheet(page).getByRole("link", { name: "Request access" }),
+  ).toHaveAttribute("href", `/request-access?product=${productId}`);
   await expect(restricted(page)).toContainText("Sign in to see them");
   await expect(page.locator("[data-restricted]")).toHaveCount(0);
   const html = await page.content();
@@ -128,6 +132,13 @@ test("without JavaScript the fallback line is the whole block", async ({
   await page.goto(`/product/${SLUG}`);
   await expect(datasheet(page)).toContainText("Sign in to download");
   await expect(restricted(page)).toContainText("Sign in to see them");
+  // The server-rendered links already carry next= and the product (P6).
+  await expect(
+    datasheet(page).getByRole("link", { name: "Sign in to download" }),
+  ).toHaveAttribute("href", `/login?next=%2Fproduct%2F${SLUG}`);
+  await expect(
+    restricted(page).getByRole("link", { name: "request access" }),
+  ).toHaveAttribute("href", `/request-access?product=${productId}`);
   await context.close();
 });
 
@@ -225,7 +236,11 @@ test("an expired customer is told to contact us and sees no value", async ({
   const contact = datasheet(page).getByRole("link", {
     name: "Access expired — contact us",
   });
-  await expect(contact).toHaveAttribute("href", "/contact");
+  // The renewal form for this product (P6), like the datasheet route.
+  await expect(contact).toHaveAttribute(
+    "href",
+    `/request-access?renew=1&product=${productId}`,
+  );
   await expect(
     restricted(page).locator('[data-restricted="expired"]'),
   ).toBeVisible();

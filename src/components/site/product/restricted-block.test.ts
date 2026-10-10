@@ -37,6 +37,12 @@ const accessMatch: Same<RestrictedAccess, RouteAccess> = true;
 void accessMatch;
 
 const PRODUCT_ID = "0123456789abcdef01234567";
+const SLUG = "arc-ar-013a";
+const SIGN_IN = "/login?next=%2Fproduct%2Farc-ar-013a";
+const REQUEST = `/request-access?product=${PRODUCT_ID}`;
+const RENEW = `/request-access?renew=1&amp;product=${PRODUCT_ID}`;
+/* The text a reader gets: tags dropped (a link may hold a hidden span). */
+const textOf = (html: string) => html.replace(/<[^>]+>/g, "");
 
 type Allowed = Extract<RestrictedAnswer, { allowed: true }>;
 
@@ -236,7 +242,11 @@ describe("restrictedSpecsFor / restrictedRows", () => {
 describe("DatasheetButton", () => {
   const html = (state: DatasheetButtonState) =>
     renderToStaticMarkup(
-      createElement(DatasheetButton, { state, productId: PRODUCT_ID }),
+      createElement(DatasheetButton, {
+        state,
+        productId: PRODUCT_ID,
+        productSlug: SLUG,
+      }),
     );
 
   it("download is a plain link to the datasheet route", () => {
@@ -246,11 +256,14 @@ describe("DatasheetButton", () => {
     expect(out).not.toMatch(/r2|cloudflarestorage|X-Amz|\.xlsx"/i);
   });
 
-  it("expired links to contact, signin to /login, coming-soon has no link", () => {
-    expect(html("expired")).toContain('href="/contact"');
+  it("expired links to the renewal form, signin to /login with next and to the request form, coming-soon has no link", () => {
+    expect(html("expired")).toContain(`href="${RENEW}"`);
     expect(html("expired")).toContain("Access expired — contact us");
-    expect(html("signin")).toContain('href="/login"');
-    expect(html("signin")).toContain("Sign in to download");
+    expect(html("expired")).not.toContain("/contact");
+    expect(html("signin")).toContain(`href="${SIGN_IN}"`);
+    expect(textOf(html("signin"))).toContain("Sign in to download");
+    expect(html("signin")).toContain(`href="${REQUEST}"`);
+    expect(textOf(html("signin"))).toContain("Request access");
     expect(html("coming-soon")).toContain("Datasheet coming soon");
     expect(html("coming-soon")).not.toContain("<a");
   });
@@ -287,15 +300,23 @@ describe("restricted slots: server render", () => {
       createElement(DatasheetSlot, {
         key: "d",
         productId: PRODUCT_ID,
+        productSlug: SLUG,
         hasDatasheet: true,
       }),
-      createElement(RestrictedSpecsSlot, { key: "r" }),
+      createElement(RestrictedSpecsSlot, {
+        key: "r",
+        productId: PRODUCT_ID,
+        productSlug: SLUG,
+      }),
     ]);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(out).toContain('data-slot="datasheet"');
     expect(out).toContain('data-slot="restricted-specs"');
-    expect(out).toContain("Sign in to download");
+    expect(textOf(out)).toContain("Sign in to download");
     expect(out).toContain("Sign in to see them");
+    // Both fallbacks (datasheet row and restricted rows) carry both links.
+    expect(out.split(`href="${SIGN_IN}"`)).toHaveLength(3);
+    expect(out.split(`href="${REQUEST}"`)).toHaveLength(3);
     expect(out).toContain("min-h-31");
     expect(out).not.toContain("/api/datasheet/");
     expect(out).not.toContain("/api/catalog/restricted");
@@ -305,10 +326,11 @@ describe("restricted slots: server render", () => {
     const out = render(
       createElement(DatasheetSlot, {
         productId: PRODUCT_ID,
+        productSlug: SLUG,
         hasDatasheet: false,
       }),
     );
     expect(out).toContain("Datasheet coming soon");
-    expect(out).not.toContain("Sign in to download");
+    expect(textOf(out)).not.toContain("Sign in to download");
   });
 });

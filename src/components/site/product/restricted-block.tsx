@@ -26,6 +26,7 @@ import { useOptionalVariantSelection } from "./product-detail-client";
 import {
   loadRestrictedAnswer,
   restrictedRows,
+  requestAccessUrl,
   restrictedSlotView,
   restrictedSpecsFor,
   type RestrictedAnswer,
@@ -69,13 +70,21 @@ export function RestrictedDataProvider({
 }
 
 /** The datasheet button for this viewer, or the fallback until it is known. */
-export function DatasheetBlock({ fallback }: { fallback: ReactNode }) {
+export function DatasheetBlock({
+  fallback,
+  productSlug,
+}: {
+  fallback: ReactNode;
+  /** Public; only for the sign-in link's `next` (back to this page). */
+  productSlug: string;
+}) {
   const restricted = use(RestrictedContext);
   if (!restricted?.answer) return fallback;
   return (
     <DatasheetButton
       state={restricted.answer.state}
       productId={restricted.productId}
+      productSlug={productSlug}
     />
   );
 }
@@ -181,12 +190,15 @@ export function RestrictedSpecsBlock({ fallback }: { fallback: ReactNode }) {
   const restricted = use(RestrictedContext);
   const answer = restricted?.answer;
   if (answer?.allowed) return <RestrictedRows answer={answer} />;
-  if (restrictedSlotView(answer) === "expired") {
+  if (restricted && restrictedSlotView(answer) === "expired") {
     return (
       <p data-restricted="expired">
         Some specifications are shared with approved customers only, and your
         access has ended.{" "}
-        <a href="/contact" className={textLink}>
+        <a
+          href={requestAccessUrl(restricted.productId, { renew: true })}
+          className={textLink}
+        >
           Access expired — contact us
         </a>
       </p>
