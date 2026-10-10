@@ -363,8 +363,9 @@ describe("browser prefetch and HEAD (QA L-1)", () => {
     ["purpose", "prefetch"],
     ["x-moz", "prefetch"],
     ["x-purpose", "preview"],
+    ["next-router-prefetch", "1"],
   ])(
-    "%s: %s is a 204 with nothing read, counted or logged",
+    "%s: %s is a 503 (Retry-After: 0) with nothing read, counted or logged",
     async (name, value) => {
       const before = await logsOf("active");
       request.headers = new Headers({
@@ -378,7 +379,10 @@ describe("browser prefetch and HEAD (QA L-1)", () => {
         }),
         { params: Promise.resolve({ productId: PRODUCTS.published }) },
       );
-      expect(response.status).toBe(204);
+      // Not 2xx: Chromium discards a non-2xx speculative answer and asks
+      // again on the click; a kept 204 would abort the real download.
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("0");
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       expect(response.headers.get("location")).toBeNull();
       expect(await response.text()).toBe("");
@@ -388,7 +392,7 @@ describe("browser prefetch and HEAD (QA L-1)", () => {
     },
   );
 
-  it("a prefetch of a draft or a bad id says nothing either (204 before any lookup)", async () => {
+  it("a prefetch of a draft or a bad id says nothing either (503 before any lookup)", async () => {
     for (const productId of [PRODUCTS.draft, PRODUCTS.badId]) {
       const response = await GET(
         new Request(`${AUTH_BASE}/api/datasheet/${productId}`, {
@@ -396,7 +400,7 @@ describe("browser prefetch and HEAD (QA L-1)", () => {
         }),
         { params: Promise.resolve({ productId }) },
       );
-      expect(response.status).toBe(204);
+      expect(response.status).toBe(503);
     }
   });
 

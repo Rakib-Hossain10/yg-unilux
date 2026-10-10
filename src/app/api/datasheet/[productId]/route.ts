@@ -4,7 +4,7 @@
 // every answer is `Cache-Control: private, no-store`.
 //
 // Order of checks (each step answers before the next one runs):
-//   0. a browser prefetch (Sec-Purpose/Purpose: prefetch)  → 204, nothing read
+//   0. a speculative request (prefetch/prerender)         → 503, nothing read
 //   1. productId must be an ObjectId                      → 404
 //   2. product published (draft/unknown = 404 for everyone, the admin too)
 //      and a datasheet attached ("coming soon" is public) → 404
@@ -111,22 +111,32 @@ function renewalPath(productId: string): string {
 /*
  * A speculative request: Chromium sends `Sec-Purpose: prefetch` (or
  * `prefetch;prerender`), older browsers `Purpose: prefetch`, Firefox
- * `X-Moz: prefetch`, old Safari `X-Purpose: preview`. A download must cost a
- * slot, a presigned URL and a log row only when the person clicks.
+ * `X-Moz: prefetch`, old Safari `X-Purpose: preview`, the Next router
+ * `Next-Router-Prefetch: 1`. A download must cost a slot, a presigned URL and
+ * a log row only when the person clicks.
  */
 const PREFETCH_TOKEN = /(?:^|[\s,;])(?:prefetch|preview)(?:$|[\s,;=])/i;
 
 function isPrefetch(headers: Headers): boolean {
-  return ["sec-purpose", "purpose", "x-purpose", "x-moz"].some((name) =>
-    PREFETCH_TOKEN.test(headers.get(name) ?? ""),
+  return (
+    headers.get("next-router-prefetch") === "1" ||
+    ["sec-purpose", "purpose", "x-purpose", "x-moz"].some((name) =>
+      PREFETCH_TOKEN.test(headers.get(name) ?? ""),
+    )
   );
 }
 
-/* Answers a prefetch with nothing: no lookup, no session read, no log. */
-function noContent(): Response {
+/*
+ * Answers a speculative request with a refusal: no lookup, no session read,
+ * no log. It must not be 2xx: Chromium keeps a 2xx speculative answer (even
+ * an empty 204) and serves the real click from it, which aborts the download
+ * (net::ERR_ABORTED). A 503 is discarded, and the click asks again. Retry-After
+ * 0 so Chromium does not pause speculation for the rest of the origin.
+ */
+function speculationRefused(): Response {
   return new Response(null, {
-    status: 204,
-    headers: { "Cache-Control": NO_STORE },
+    status: 503,
+    headers: { "Retry-After": "0", "Cache-Control": NO_STORE },
   });
 }
 
@@ -146,7 +156,7 @@ export async function GET(
   { params }: { params: Promise<{ productId: string }> },
 ): Promise<Response> {
   await connection();
-  if (isPrefetch(request.headers)) return noContent();
+  if (isPrefetch(request.headers)) return speculationRefused();
   const parsed = objectIdSchema.safeParse((await params).productId);
   if (!parsed.success) return notFound();
 

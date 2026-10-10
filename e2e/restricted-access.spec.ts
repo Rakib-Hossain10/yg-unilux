@@ -506,7 +506,8 @@ test("gate C: a Chromium prefetch/prerender of the datasheet route writes no log
         headers: { "sec-purpose": purpose },
         maxRedirects: 0,
       });
-      expect(reply.status(), purpose).toBe(204);
+      expect(reply.status(), purpose).toBe(503);
+      expect(reply.headers()["retry-after"], purpose).toBe("0");
       expect(reply.headers()["cache-control"]).toBe("private, no-store");
     }
     expect(await logsForCustomer()).toBe(before);
@@ -518,12 +519,11 @@ test("gate C: a Chromium prefetch/prerender of the datasheet route writes no log
 test("gate C: the click after a Chromium prefetch/prerender still downloads", async ({
   browser,
 }) => {
-  // FINDING (gate C manual item, ADR 0073): Chromium keeps the 204 it got
-  // for the speculative request and serves the click from it: the
-  // navigation is aborted (net::ERR_ABORTED), the app is never asked, no
-  // log row, no file. A non-2xx answer (503 + Retry-After) is discarded and
-  // refetched on the click (next test). Flip to a plain test once fixed.
-  test.fail();
+  // FINDING (gate C manual item, ADR 0073), fixed: Chromium kept the 204 it
+  // got for the speculative request and served the click from it (aborted
+  // navigation, no log row, no file). The route now answers speculation with
+  // 503 + Retry-After: 0, which Chromium discards and refetches on the click
+  // (next test).
   const { context, page } = await speculationPage(browser);
   try {
     await routeDownloads(context);
