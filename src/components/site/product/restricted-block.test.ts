@@ -258,7 +258,10 @@ describe("DatasheetButton", () => {
 
   it("expired links to the renewal form, signin to /login with next and to the request form, coming-soon has no link", () => {
     expect(html("expired")).toContain(`href="${RENEW}"`);
-    expect(html("expired")).toContain("Access expired — contact us");
+    expect(textOf(html("expired"))).toContain("Access expired");
+    expect(textOf(html("expired"))).toContain("Contact us to renew");
+    // One action only: the status is text, not a second link.
+    expect(html("expired").match(/<a /g)).toHaveLength(1);
     expect(html("expired")).not.toContain("/contact");
     expect(html("signin")).toContain(`href="${SIGN_IN}"`);
     expect(textOf(html("signin"))).toContain("Sign in to download");

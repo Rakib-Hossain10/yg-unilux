@@ -21,6 +21,13 @@ export const textLink =
   "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
 
 /**
+ * A link (or link-styled button) inside running text: it keeps the line's
+ * flow and leading, and py-3 -my-3 still gives it a 44 px tall hit area.
+ */
+export const inlineTextLink =
+  "inline -my-3 py-3 text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
+
+/**
  * The narrow, centred column every password page uses: one display heading,
  * one sentence, then the form or message.
  */
@@ -34,7 +41,7 @@ export function AccountFrame({
   children: ReactNode;
 }) {
   return (
-    <section className="flex flex-1 items-start justify-center px-4 py-16 md:items-center md:py-24">
+    <section className="flex min-h-[60svh] flex-1 items-start justify-center px-4 py-16 md:items-center md:py-24">
       <div className="w-full max-w-sm">
         <h1 className="text-center font-display text-4xl font-light text-balance">
           {title}
@@ -102,7 +109,30 @@ export function FormField({
  */
 export function FormAlert({ children }: { children?: ReactNode }) {
   return (
-    <div role="alert" className="min-h-5 text-sm text-danger">
+    <div role="alert" className="mb-2 min-h-5 text-sm text-danger">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The end of an account form: the message line and the submit button as ONE
+ * block, so the form's field rhythm (space-y-5) runs once above it and the
+ * reserved message line sits tight on the button instead of adding a gap.
+ * -mt-2 pulls the block into the 20 px rhythm gap: last field to button is
+ * 12 + 20 (reserved line) + 8 = 40 px, one clear step before the action.
+ */
+export function FormActions({
+  alert,
+  children,
+}: {
+  /** The form-level message, or nothing. */
+  alert?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="-mt-2">
+      <FormAlert>{alert}</FormAlert>
       {children}
     </div>
   );

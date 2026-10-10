@@ -2,7 +2,7 @@
 // whose restricted columns are all filled. A visitor sees only the fallback
 // (and no restricted value in the HTML, ever); an active customer gets the
 // rows, which follow the optic switch, and the download link; an expired
-// customer gets "Access expired — contact us" (to the renewal form); the
+// customer gets "Access expired" + "Contact us to renew" (to the renewal form); the
 // slot height holds.
 
 import { type Browser, expect, type Page, test } from "@playwright/test";
@@ -234,7 +234,7 @@ test("an expired customer is told to contact us and sees no value", async ({
   await gotoAndWaitForAnswer(page, `/product/${SLUG}`);
   expect((await datasheet(page).boundingBox())?.height).toBe(before);
   const contact = datasheet(page).getByRole("link", {
-    name: "Access expired — contact us",
+    name: "Contact us to renew",
   });
   // The renewal form for this product (P6), like the datasheet route.
   await expect(contact).toHaveAttribute(

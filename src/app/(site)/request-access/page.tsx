@@ -3,6 +3,9 @@
 // and /my-downloads' target). ?product=<id> names the published product the
 // visitor came from; anything else in it is ignored. A signed-in user's
 // name, email, company and country are prefilled from the DATABASE session.
+// A viewer whose access is ACTIVE (database session, same rule as the
+// download route) sees that state instead of the form; an expired customer
+// gets the renewal wording even without ?renew=1.
 // Rendered per request (it reads the session and the query), so Next sends
 // `private, no-store`; never indexed. Metadata holds no visitor data.
 
@@ -11,6 +14,10 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import {
+  type AccessStatus,
+  accessStatus,
+} from "@/components/site/account/access-status";
 import { textLink } from "@/components/site/account/account-ui";
 import { productTitle } from "@/components/site/product/product-display";
 import { COUNTRIES } from "@/components/site/request-access/countries";
@@ -28,6 +35,7 @@ import {
 import { getWhatsappNumber, whatsappLink } from "@/lib/contact-settings";
 import { issueFormStamp } from "@/lib/form-stamp";
 import { getViewer, type Viewer } from "@/lib/permissions";
+import { formatDate } from "@/lib/time-zone";
 import { countrySchema } from "@/lib/schemas/access-request";
 import { hasSessionCookie } from "@/lib/session-cookie";
 
@@ -103,6 +111,56 @@ function withCountryChoice(values: RequestFormValues): {
     : { prefill: { ...values, country: undefined }, extraCountry: null };
 }
 
+/* The viewer's access when it is usable now, else null (form shown). */
+type ActiveAccess = Extract<
+  AccessStatus,
+  { kind: "admin" } | { kind: "active" } | { kind: "open" }
+>;
+
+function activeAccess(status: AccessStatus | null): ActiveAccess | null {
+  return status?.kind === "admin" ||
+    status?.kind === "active" ||
+    status?.kind === "open"
+    ? status
+    : null;
+}
+
+/* The short "you already have access" state that replaces the form. */
+function AccessState({ access }: { access: ActiveAccess }) {
+  return (
+    <div className="space-y-8" data-request-state="active">
+      <p className="border-l-2 border-ink py-1 pl-5 font-display text-2xl leading-snug font-light text-pretty md:text-3xl">
+        {access.kind === "active" ? (
+          <>
+            You have datasheet access until{" "}
+            <time dateTime={access.until.toISOString()}>
+              {formatDate(access.until, { label: true })}
+            </time>
+            .
+          </>
+        ) : access.kind === "open" ? (
+          "You have datasheet access with no end date."
+        ) : (
+          "As the site administrator, you can download every datasheet."
+        )}
+      </p>
+      <p className="max-w-md text-[0.9375rem] leading-relaxed text-pretty text-grey-700">
+        Every product page offers its datasheet as an Excel file. Your past
+        downloads are listed under My downloads.
+      </p>
+      <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+        {/* Plain <a>: account pages are full page loads (ADR 0027). */}
+        <a href="/my-downloads" className={textLink}>
+          My downloads
+        </a>
+        <Link href="/products" className={textLink}>
+          Browse products
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 const STEPS: Record<"new" | "renew", readonly string[]> = {
   new: [
     "We read every request ourselves and reply by email.",
@@ -119,12 +177,17 @@ const STEPS: Record<"new" | "renew", readonly string[]> = {
 export default async function RequestAccessPage({
   searchParams,
 }: PageProps<"/request-access">) {
-  const { renew, productId } = requestPageParams(await searchParams);
+  const params = requestPageParams(await searchParams);
+  const { productId } = params;
   const [viewer, product, digits] = await Promise.all([
     currentViewer(),
     productFor(productId),
     getWhatsappNumber(),
   ]);
+  const status = viewer ? accessStatus(viewer.user, new Date()) : null;
+  const active = activeAccess(status);
+  // An expired customer is renewing, whichever link brought them here.
+  const renew = params.renew || status?.kind === "expired";
 
   const productName = product ? productTitle(product) : null;
   const productPath = product ? `/product/${product.slug}` : null;
@@ -152,12 +215,18 @@ export default async function RequestAccessPage({
       <div className="grid gap-12 lg:grid-cols-12 lg:grid-rows-[auto_1fr] lg:gap-x-16 lg:gap-y-10">
         <header className="lg:col-span-5 lg:row-start-1">
           <h1 className="font-display text-4xl leading-[1.05] font-light text-balance md:text-5xl lg:text-6xl">
-            {renew ? "Renew datasheet access" : "Request datasheet access"}
+            {active
+              ? "Datasheet access"
+              : renew
+                ? "Renew datasheet access"
+                : "Request datasheet access"}
           </h1>
           <p className="mt-5 max-w-md text-[0.9375rem] leading-relaxed text-pretty text-grey-700">
-            {renew
-              ? "When access ends, your sign-in still works but downloads pause. Send this form and we will extend it."
-              : "Technical datasheets are shared with trade customers we know. One approval opens every datasheet on the site."}
+            {active
+              ? "Your account is already approved. There is nothing to request."
+              : renew
+                ? "When access ends, your sign-in still works but downloads pause. Send this form and we will extend it."
+                : "Technical datasheets are shared with trade customers we know. One approval opens every datasheet on the site."}
           </p>
 
           {productName && productPath ? (
@@ -177,62 +246,71 @@ export default async function RequestAccessPage({
         </header>
 
         <div className="lg:col-span-7 lg:col-start-6 lg:row-span-2 lg:row-start-1 lg:border-l lg:border-grey-200 lg:pl-16">
-          <div className="max-w-2xl">
-            <RequestAccessForm
-              renew={renew}
-              productId={product?.productId ?? null}
-              startedAt={issueFormStamp()}
-              prefill={prefill}
-              extraCountry={extraCountry}
-              submitLabel={renew ? "Send renewal request" : "Send request"}
-              afterSent={afterSent}
-            />
+          {/* Full column width below lg, so the form lines up with the
+              hairlines above and below it. */}
+          <div className="lg:max-w-2xl">
+            {active ? (
+              <AccessState access={active} />
+            ) : (
+              <RequestAccessForm
+                renew={renew}
+                productId={product?.productId ?? null}
+                startedAt={issueFormStamp()}
+                prefill={prefill}
+                extraCountry={extraCountry}
+                submitLabel={renew ? "Send renewal request" : "Send request"}
+                afterSent={afterSent}
+              />
+            )}
           </div>
         </div>
 
-        {/* Below the form on small screens, beside it from lg. */}
-        <aside className="lg:col-span-5 lg:row-start-2">
-          <section
-            aria-labelledby="request-steps"
-            className="border-t border-grey-200 pt-6"
-          >
-            <h2 id="request-steps" className="text-sm font-medium">
-              What happens next
-            </h2>
-            <ol className="mt-4 space-y-4">
-              {STEPS[renew ? "renew" : "new"].map((step, index) => (
-                <li
-                  key={step}
-                  className="grid grid-cols-[1.75rem_1fr] text-sm leading-relaxed text-grey-700"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="font-display text-lg leading-tight text-grey-500 lining-nums"
+        {/* Below the form on small screens, beside it from lg. Nothing to
+            explain to a viewer who already has access. */}
+        {active ? null : (
+          <aside className="lg:col-span-5 lg:row-start-2">
+            <section
+              aria-labelledby="request-steps"
+              className="border-t border-grey-200 pt-6"
+            >
+              <h2 id="request-steps" className="text-sm font-medium">
+                What happens next
+              </h2>
+              <ol className="mt-4 space-y-4">
+                {STEPS[renew ? "renew" : "new"].map((step, index) => (
+                  <li
+                    key={step}
+                    className="grid grid-cols-[1.75rem_1fr] text-sm leading-relaxed text-grey-700"
                   >
-                    {index + 1}
-                  </span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-          </section>
+                    <span
+                      aria-hidden="true"
+                      className="font-display text-lg leading-tight text-grey-500 lining-nums"
+                    >
+                      {index + 1}
+                    </span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
 
-          {whatsapp ? (
-            <p className="mt-10 border-t border-grey-200 pt-6 text-sm text-grey-700">
-              Prefer a conversation?{" "}
-              <a
-                href={whatsapp}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-whatsapp
-                className={textLink}
-              >
-                Message us on WhatsApp
-                <span className="sr-only"> (opens in a new tab)</span>
-              </a>
-            </p>
-          ) : null}
-        </aside>
+            {whatsapp ? (
+              <p className="mt-10 border-t border-grey-200 pt-6 text-sm text-grey-700">
+                Prefer a conversation?{" "}
+                <a
+                  href={whatsapp}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-whatsapp
+                  className={textLink}
+                >
+                  Message us on WhatsApp
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              </p>
+            ) : null}
+          </aside>
+        )}
       </div>
     </div>
   );

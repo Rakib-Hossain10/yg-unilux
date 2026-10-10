@@ -89,8 +89,9 @@ export function DatasheetBlock({
   );
 }
 
-const textLink =
-  "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
+/* A link inside running text; py-3 -my-3 keeps a 44 px hit area. */
+const inlineTextLink =
+  "inline -my-3 py-3 text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
 
 const notApplicable = (
   <span className="text-grey-600">
@@ -197,10 +198,11 @@ export function RestrictedSpecsBlock({ fallback }: { fallback: ReactNode }) {
         access has ended.{" "}
         <a
           href={requestAccessUrl(restricted.productId, { renew: true })}
-          className={textLink}
+          className={inlineTextLink}
         >
-          Access expired — contact us
+          Contact us to renew
         </a>
+        .
       </p>
     );
   }

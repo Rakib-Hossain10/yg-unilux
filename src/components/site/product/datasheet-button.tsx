@@ -15,10 +15,10 @@ import {
   type DatasheetButtonState,
 } from "./restricted-data";
 
-/* lg:pr-4: in the one-row slot (restricted-slots.tsx, lg:pr-1) a text link
+/* 2xl:pr-4: in the one-row slot (restricted-slots.tsx, 2xl:pr-1) a text link
    keeps the same 20 px from the border as the label on the left. */
 const textLink =
-  "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink lg:pr-4";
+  "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink 2xl:pr-4";
 
 /* A line-drawn arrow into a tray, at text size. */
 function DownloadIcon() {
@@ -58,42 +58,38 @@ export function DatasheetButton({
             <DownloadIcon />
             Download datasheet
           </a>
-          {/* Visually hidden in the one-row slot while the lg panel is too
-              narrow for it (lg–xl); screen readers always get it. */}
-          <span className="text-xs text-grey-600 lg:max-xl:sr-only">
+          <span className="text-xs text-grey-600 2xl:pr-4">
             Excel workbook (.xlsx)
           </span>
         </p>
       );
     case "expired":
       return (
-        <p data-datasheet-state="expired" className="text-sm text-grey-600">
-          {/* The renewal form (plan Q6), the same target the datasheet
-              route sends an expired customer to (ADR 0071). */}
+        <p
+          data-datasheet-state="expired"
+          className="flex flex-wrap items-center gap-x-5 text-sm text-grey-600"
+        >
+          {/* A status, not an action: grey text. The one action is the
+              renewal form (plan Q6), the same target the datasheet route
+              sends an expired customer to (ADR 0071). */}
+          <span>Access expired</span>
           <a
             href={requestAccessUrl(productId, { renew: true })}
             className={textLink}
           >
-            Access expired — contact us
+            Contact us to renew
           </a>
         </p>
       );
     case "signin":
       return (
         <div data-datasheet-state="signin" className="text-sm text-grey-600">
-          {/* In the one-row slot (lg+) the row holds only the two links;
+          {/* In the one-row slot (2xl) the row holds only the two links;
               screen readers always get the sentence. */}
-          <p className="lg:sr-only">Available to approved customers.</p>
-          <p className="flex flex-wrap items-center gap-x-5 lg:gap-x-1">
-            {/* One inline span inside the flex link keeps the space and
-                the underline continuous. */}
+          <p className="2xl:sr-only">Available to approved customers.</p>
+          <p className="flex flex-wrap items-center gap-x-5 2xl:gap-x-1">
             <a href={signInUrl(productSlug)} className={textLink}>
-              <span>
-                Sign in{" "}
-                {/* Shortened where the lg panel is narrowest (lg–xl); the
-                    link's name stays "Sign in to download". */}
-                <span className="lg:max-xl:sr-only">to download</span>
-              </span>
+              Sign in to download
             </a>
             <a href={requestAccessUrl(productId)} className={textLink}>
               Request access

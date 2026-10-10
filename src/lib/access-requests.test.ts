@@ -215,6 +215,133 @@ describe("signed start stamp (QA gate B L-1)", () => {
   });
 });
 
+describe("field validation runs before the anti-spam checks (gate C)", () => {
+  const EMPTY = {
+    name: "",
+    email: "",
+    company: "",
+    country: "",
+    consent: undefined,
+  };
+
+  /* The field-error keys of an answer, or a failure. */
+  async function fieldErrorKeys(answer: Promise<unknown>) {
+    const result = (await answer) as Awaited<
+      ReturnType<typeof submitAccessRequest>
+    >;
+    if (result.ok || !("errors" in result)) {
+      throw new Error(`expected field errors, got ${JSON.stringify(result)}`);
+    }
+    return Object.keys(result.errors.fieldErrors).sort();
+  }
+
+  async function expectNothingStored() {
+    expect(await AccessRequestModel.countDocuments()).toBe(0);
+    expect(await LoginAttemptModel.countDocuments()).toBe(0);
+    await settle();
+    expect(alerts).toHaveLength(0);
+  }
+
+  it("an empty form sent faster than the minimum fill time gets field errors, not thanks", async () => {
+    const keys = await fieldErrorKeys(
+      submitAccessRequest(
+        form({ ...EMPTY, startedAt: stampAgo(500) }),
+        context(),
+      ),
+    );
+    expect(keys).toEqual(["company", "consent", "country", "email", "name"]);
+    await expectNothingStored();
+  });
+
+  it("a valid form sent faster than the minimum fill time is thanked and dropped", async () => {
+    const answer = await submitAccessRequest(
+      form({ startedAt: stampAgo(500) }),
+      context(),
+    );
+    expect(answer).toStrictEqual({ ok: true });
+    await expectNothingStored();
+  });
+
+  // Chosen: field errors win over the honeypot. A person never fills the
+  // hidden field, but an autofill tool might; with fields left empty the
+  // person must see what to fix, never a "thank you" for a dropped form.
+  // A bot learns only which of its own values are malformed.
+  it("a filled honeypot with invalid fields gets field errors, nothing stored", async () => {
+    const keys = await fieldErrorKeys(
+      submitAccessRequest(
+        form({ ...EMPTY, website: "spam.example" }),
+        context(),
+      ),
+    );
+    expect(keys).toEqual(["company", "consent", "country", "email", "name"]);
+    await expectNothingStored();
+  });
+
+  it.each([
+    ["no stamp", () => undefined],
+    ["a forged stamp", () => "1"],
+    ["a stamp from the future", () => stampAgo(-60_000)],
+    [
+      "a genuine stamp over 24 h old",
+      () => stampAgo(FORM_STAMP_MAX_AGE_MS + 1),
+    ],
+  ])(
+    "an invalid form with %s gets field errors, nothing stored",
+    async (_label, stamp) => {
+      const keys = await fieldErrorKeys(
+        submitAccessRequest(
+          form({ email: "nope", startedAt: stamp() }),
+          context(),
+        ),
+      );
+      expect(keys).toEqual(["email"]);
+      await expectNothingStored();
+    },
+  );
+
+  it("fast field errors are the same for a customer's email and a new one (no enumeration)", async () => {
+    const email = nextEmail();
+    const bad = { company: "", startedAt: stampAgo(100) };
+    // The email already has a pending request and is a signed-in customer.
+    await submitAccessRequest(form({ email }), context());
+    await settle();
+    const before = {
+      rows: await AccessRequestModel.countDocuments(),
+      slots: await LoginAttemptModel.countDocuments(),
+      alerts: alerts.length,
+    };
+    const known = await submitAccessRequest(
+      form({ ...bad, email }),
+      context({ viewer: { userId: "a".repeat(24), email, role: "customer" } }),
+    );
+    const unknown = await submitAccessRequest(form(bad), context());
+    expect(known).toStrictEqual(unknown);
+    expect(await fieldErrorKeys(Promise.resolve(known))).toEqual(["company"]);
+    await settle();
+    expect({
+      rows: await AccessRequestModel.countDocuments(),
+      slots: await LoginAttemptModel.countDocuments(),
+      alerts: alerts.length,
+    }).toStrictEqual(before);
+  });
+
+  it("field errors need no AUTH_SECRET; a valid form without it is our outage", async () => {
+    const invalid = form({ email: "nope" });
+    const valid = form();
+    vi.stubEnv("AUTH_SECRET", "");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(
+      await fieldErrorKeys(submitAccessRequest(invalid, context())),
+    ).toEqual(["email"]);
+    expect(await submitAccessRequest(valid, context())).toStrictEqual({
+      ok: false,
+      unavailable: true,
+    });
+    errors.mockRestore();
+    await expectNothingStored();
+  });
+});
+
 describe("storing and merging", () => {
   it("stores a new pending request with consent and kind, and alerts once", async () => {
     const email = nextEmail();

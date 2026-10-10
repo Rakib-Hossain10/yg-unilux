@@ -135,8 +135,28 @@ describe("requestAccessAction", () => {
     const state = await requestAccessAction(IDLE_STATE, post({ name: "<b>" }));
     expect(state).toMatchObject({
       status: "invalid",
-      fieldErrors: { name: "Use letters" },
+      fieldErrors: { name: "Use letters." },
       values: { name: "<b>", consent: true },
+      startedAt: STAMP,
+    });
+  });
+
+  it("an empty post still reaches the service (no early drop) and its field errors keep the stamp", async () => {
+    mocks.submit.mockResolvedValue({
+      ok: false,
+      errors: {
+        formErrors: [],
+        fieldErrors: { name: ["Enter your name"], email: ["Enter an email"] },
+      },
+    });
+    const state = await requestAccessAction(
+      IDLE_STATE,
+      post({ name: "", email: "", company: "", country: "", consent: "" }),
+    );
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(state).toMatchObject({
+      status: "invalid",
+      fieldErrors: { name: "Enter your name.", email: "Enter an email." },
       startedAt: STAMP,
     });
   });

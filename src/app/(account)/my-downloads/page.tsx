@@ -83,7 +83,9 @@ function AccessLine({ status }: { status: AccessStatus }) {
     case "expired":
       return (
         <>
-          <p className="font-display text-3xl font-light md:text-4xl">
+          {/* Warm grey, not ink: an ended access reads apart from an
+              active one at a glance. */}
+          <p className="font-display text-3xl font-light text-grey-600 md:text-4xl">
             {status.since ? (
               <>
                 Ended on{" "}
@@ -152,7 +154,7 @@ export default async function MyDownloadsPage({
           <h1 className="font-display text-4xl font-light md:text-5xl">
             My downloads
           </h1>
-          <p className="mt-3 text-sm break-all text-grey-600">
+          <p className="mt-3 text-sm [overflow-wrap:anywhere] text-grey-600">
             Signed in as {viewer.user.email}
           </p>
         </div>

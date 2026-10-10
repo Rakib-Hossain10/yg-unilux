@@ -5,8 +5,19 @@
 
 import Link from "next/link";
 
-import { AccountFrame, secondaryButton, textLink } from "./account-ui";
+import {
+  AccountFrame,
+  primaryButton,
+  secondaryButton,
+  textLink,
+} from "./account-ui";
 
+/*
+ * rel=noreferrer on every way on: this page's URL may hold a token.
+ * A reset link (no invite): the user already has an account, so a new reset
+ * link is the main way on and "Request access" the quiet one. An invite: no
+ * password was ever set, so asking us (WhatsApp, the form) comes first.
+ */
 export function ResetExpired({
   whatsappHref,
   invite,
@@ -15,25 +26,51 @@ export function ResetExpired({
   whatsappHref: string | null;
   invite: boolean;
 }) {
+  const whatsapp = whatsappHref ? (
+    <a
+      href={whatsappHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={secondaryButton}
+    >
+      Message us on WhatsApp
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
+  ) : null;
+
+  if (!invite) {
+    return (
+      <AccountFrame
+        title="This link has expired"
+        intro="Links to set a password work for a limited time and only once. Send yourself a new one."
+      >
+        <div className="mt-10 flex flex-col items-stretch gap-3">
+          <a href="/forgot-password" rel="noreferrer" className={primaryButton}>
+            Send me a new reset link
+          </a>
+          {whatsapp}
+        </div>
+        <p className="mt-6 text-center text-sm">
+          <Link
+            href="/request-access"
+            prefetch={false}
+            rel="noreferrer"
+            className={textLink}
+          >
+            Request access
+          </Link>
+        </p>
+      </AccountFrame>
+    );
+  }
+
   return (
     <AccountFrame
       title="This link has expired"
       intro="Links to set a password work for a limited time and only once. Ask us for a new one."
     >
       <div className="mt-10 flex flex-col items-stretch gap-3">
-        {whatsappHref ? (
-          <a
-            href={whatsappHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={secondaryButton}
-          >
-            Message us on WhatsApp
-            <span className="sr-only"> (opens in a new tab)</span>
-          </a>
-        ) : null}
-        {/* /request-access arrives in Phase 5 P6; not prefetched until then.
-            rel=noreferrer: this page's URL may hold a token. */}
+        {whatsapp}
         <Link
           href="/request-access"
           prefetch={false}
@@ -43,13 +80,6 @@ export function ResetExpired({
           Request access
         </Link>
       </div>
-      {invite ? null : (
-        <p className="mt-6 text-center text-sm">
-          <a href="/forgot-password" rel="noreferrer" className={textLink}>
-            Send me a new reset link
-          </a>
-        </p>
-      )}
     </AccountFrame>
   );
 }

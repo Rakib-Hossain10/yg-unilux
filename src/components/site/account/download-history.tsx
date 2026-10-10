@@ -10,7 +10,7 @@ import type {
   DownloadHistoryRow,
 } from "@/lib/download-history";
 
-import { formatMoment } from "./access-status";
+import { MOMENT_ZONE_LABEL, formatMomentShort } from "./access-status";
 import { textLink } from "./account-ui";
 
 const columns =
@@ -76,8 +76,12 @@ function HistoryRow({
       <p className="mt-1 text-sm text-grey-600 tabular-nums md:mt-0">
         <span className="sr-only">Downloaded </span>
         <time dateTime={row.downloadedAt.toISOString()}>
-          {formatMoment(row.downloadedAt)}
+          {formatMomentShort(row.downloadedAt)}
         </time>
+        {/* The md+ column header names the zone once; on a phone (no
+            header) and for screen readers (the header is hidden from
+            them) each row still says it. */}
+        <span className="md:sr-only"> ({MOMENT_ZONE_LABEL})</span>
       </p>
       <div className="mt-1 md:mt-0 md:text-right">
         {again ? (
@@ -167,7 +171,7 @@ export function DownloadHistory({
           >
             <span>Product</span>
             <span>File</span>
-            <span>Downloaded</span>
+            <span>Downloaded ({MOMENT_ZONE_LABEL})</span>
             <span />
           </div>
           <ol className="max-md:mt-4 max-md:border-t max-md:border-grey-200">

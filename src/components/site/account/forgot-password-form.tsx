@@ -12,7 +12,13 @@ import { z } from "zod";
 
 import { RESET_PASSWORD_PAGE } from "@/lib/account-destination";
 
-import { FormAlert, FormField, primaryButton, textLink } from "./account-ui";
+import {
+  FormActions,
+  FormField,
+  inlineTextLink,
+  primaryButton,
+  textLink,
+} from "./account-ui";
 import { MESSAGES, forgotPasswordOutcome } from "./auth-messages";
 
 const schema = z.object({
@@ -76,15 +82,17 @@ export function ForgotPasswordForm() {
           <button
             type="button"
             onClick={() => setSent(false)}
-            className={`${textLink} min-h-0 cursor-pointer`}
+            className={`${inlineTextLink} cursor-pointer`}
           >
             try another address
           </button>
           .
         </p>
-        <a href="/login" className={textLink}>
-          Back to sign in
-        </a>
+        <p className="text-sm">
+          <a href="/login" className={textLink}>
+            Back to sign in
+          </a>
+        </p>
       </div>
     );
   }
@@ -111,11 +119,11 @@ export function ForgotPasswordForm() {
         }}
       />
 
-      <FormAlert>{formError}</FormAlert>
-
-      <button type="submit" disabled={isSubmitting} className={primaryButton}>
-        {isSubmitting ? "Sending…" : "Send reset link"}
-      </button>
+      <FormActions alert={formError}>
+        <button type="submit" disabled={isSubmitting} className={primaryButton}>
+          {isSubmitting ? "Sending…" : "Send reset link"}
+        </button>
+      </FormActions>
 
       <p className="text-center text-sm">
         <a href="/login" className={textLink}>

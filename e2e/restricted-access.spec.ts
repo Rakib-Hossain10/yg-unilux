@@ -636,7 +636,7 @@ test("5. the admin ends access: the button says expired, the route sends to rene
     slot.getByRole("link", { name: "Download datasheet" }),
   ).toHaveCount(0);
   await expect(
-    slot.getByRole("link", { name: "Access expired — contact us" }),
+    slot.getByRole("link", { name: "Contact us to renew" }),
   ).toHaveAttribute("href", RENEW_PATH);
 
   // The route itself (the old link, "Download again", a bookmark).

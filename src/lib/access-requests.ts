@@ -47,8 +47,8 @@ export const ACCESS_REQUEST_UNAVAILABLE =
  * The answer. `{ ok: true }` is the SAME object shape for a new request, a
  * merged duplicate, an existing customer, a limited sender, a honeypot hit
  * and a too-fast form, so nothing tells them apart (no enumeration).
- * Only invalid input (about the visitor's own typing) and an outage of our
- * own systems differ.
+ * Only invalid input (about the visitor's own typing, checked first, even
+ * for a bot) and an outage of our own systems differ.
  */
 export type SubmitAccessRequestResult =
   | { ok: true }
@@ -89,7 +89,7 @@ function readField(source: unknown, key: string): unknown {
 type EarlyRefusal = "automated" | "stale";
 
 /*
- * Checked BEFORE validation, so a bot learns nothing from field errors:
+ * Checked AFTER field validation, on a form that would otherwise be stored:
  * - "automated": the honeypot has text, or the form's stamp is missing,
  *   malformed, forged (bad MAC) or from the future, or came back faster
  *   than a person can fill the form → the silent `{ ok: true }`;
@@ -156,9 +156,10 @@ function isDuplicateKey(error: unknown): boolean {
 
 /**
  * Handles one public submission. Steps:
- * 1. honeypot / signed stamp + minimum fill time → silent `{ ok: true }`,
+ * 1. Zod (rule 8) → field errors (also for a fast or honeypot post: a
+ *    person who left fields empty is never thanked); nothing stored;
+ * 2. honeypot / signed stamp + minimum fill time → silent `{ ok: true }`,
  *    nothing stored; a genuine stamp over 24 h old → "reload" form error;
- * 2. Zod (rule 8) → field errors;
  * 3. limits per network (HMAC'd) and per email → silent `{ ok: true }`;
  * 4. one pending request per email: a second one MERGES into the first
  *    (latest values win; never a new row), else a new pending row;
@@ -172,6 +173,20 @@ export async function submitAccessRequest(
   context: SubmitAccessRequestContext,
 ): Promise<SubmitAccessRequestResult> {
   const now = context.now ?? new Date();
+
+  // Field validation first, so a person who sends an empty or half-filled
+  // form quickly is shown what to fix, never thanked (gate C). The errors
+  // are about the typed values only: no account is read, no limiter slot
+  // is used and nothing is stored, so they reveal nothing to a bot either.
+  const parsed = publicAccessRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    const flat = z.flattenError(parsed.error);
+    return {
+      ok: false,
+      errors: { formErrors: flat.formErrors, fieldErrors: flat.fieldErrors },
+    };
+  }
+
   try {
     const refusal = refuseEarly(input, now);
     if (refusal === "automated") return received();
@@ -189,14 +204,6 @@ export async function submitAccessRequest(
     throw error;
   }
 
-  const parsed = publicAccessRequestSchema.safeParse(input);
-  if (!parsed.success) {
-    const flat = z.flattenError(parsed.error);
-    return {
-      ok: false,
-      errors: { formErrors: flat.formErrors, fieldErrors: flat.fieldErrors },
-    };
-  }
   const data = parsed.data;
 
   try {

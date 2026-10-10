@@ -170,8 +170,9 @@ describe("stateForAnswer", () => {
     expect(state).toEqual({
       status: "invalid",
       fieldErrors: {
-        name: "Use letters",
-        consent: "Please accept the privacy notice",
+        // Every field error reads as a sentence on the public page.
+        name: "Use letters.",
+        consent: "Please accept the privacy notice.",
       },
       formError: FIELD_ERRORS_SUMMARY,
       values: {
@@ -184,6 +185,31 @@ describe("stateForAnswer", () => {
         consent: false,
       },
       startedAt: STAMP,
+    });
+  });
+
+  it("adds a full stop only where a message has no end punctuation", () => {
+    const state = stateForAnswer(
+      {
+        ok: false,
+        errors: {
+          formErrors: [],
+          fieldErrors: {
+            name: ["Enter a name.  "],
+            email: ["Is this right?"],
+            company: ["Enter a company "],
+          },
+        },
+      },
+      posted,
+      MESSAGES,
+    );
+    expect(state).toMatchObject({
+      fieldErrors: {
+        name: "Enter a name.",
+        email: "Is this right?",
+        company: "Enter a company.",
+      },
     });
   });
 

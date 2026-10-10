@@ -19,3 +19,6 @@ QA gate B passed with no High/Medium. L-1: the minimum fill time on `/request-ac
 - Not done (gate B I-3, Info): the expiry picker reads `new Date()` in render; a render across China midnight could mismatch on hydration. Negligible.
 - Gate B I-4: dashboard `getCounts()` has no actor check; decided with the ADR 0073 "other services" question before the Phase 5 exit.
 - Optional later: accept the previous key's stamps for 24 h after a secret rotation.
+
+## Amendment (2026-10-10, gate C UI finding): field validation first
+`/request-access` runs Zod field validation before the honeypot / signed-stamp / min-fill checks: invalid input (even with a filled honeypot or a bad, stale or fast stamp) gets field errors, with no row, no limiter slot and no alert, and the answer does not depend on any account. Only a valid submission that looks automated gets the silent identical thanks; a genuine stamp over 24 h old still gets "reload". So a person who taps Send on an empty form is never thanked for nothing.

@@ -9,9 +9,10 @@
 
 import { useState } from "react";
 
-import { secondaryButton } from "./account-ui";
+import { inlineTextLink, secondaryButton } from "./account-ui";
 
-export function SignOutButton({ className = "" }: { className?: string }) {
+/* The shared sign-out request and its busy / failed state. */
+function useSignOut() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -38,6 +39,21 @@ export function SignOutButton({ className = "" }: { className?: string }) {
     window.location.replace("/");
   }
 
+  return { busy, failed, signOut };
+}
+
+/* Always in the DOM (empty = no height), so its text is announced. */
+function SignOutAlert({ failed }: { failed: boolean }) {
+  return (
+    <p role="alert" className="text-sm text-danger [&:not(:empty)]:mt-2">
+      {failed ? "Sign-out failed. Please try again." : null}
+    </p>
+  );
+}
+
+/** The full-width outlined button (/my-downloads). */
+export function SignOutButton({ className = "" }: { className?: string }) {
+  const { busy, failed, signOut } = useSignOut();
   return (
     <div className={className}>
       <button
@@ -48,10 +64,28 @@ export function SignOutButton({ className = "" }: { className?: string }) {
       >
         {busy ? "Signing out…" : "Sign out"}
       </button>
-      {/* Always in the DOM (empty = no height), so its text is announced. */}
-      <p role="alert" className="text-sm text-danger [&:not(:empty)]:mt-2">
-        {failed ? "Sign-out failed. Please try again." : null}
-      </p>
+      <SignOutAlert failed={failed} />
+    </div>
+  );
+}
+
+/**
+ * A quiet text-link version, for pages where signing out is a way out rather
+ * than the page's purpose (the forced /change-password).
+ */
+export function SignOutTextButton({ className = "" }: { className?: string }) {
+  const { busy, failed, signOut } = useSignOut();
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        onClick={signOut}
+        disabled={busy}
+        className={`${inlineTextLink} cursor-pointer disabled:cursor-default disabled:opacity-60 disabled:hover:decoration-grey-400`}
+      >
+        {busy ? "Signing out…" : "Sign out"}
+      </button>
+      <SignOutAlert failed={failed} />
     </div>
   );
 }

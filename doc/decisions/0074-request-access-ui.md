@@ -38,3 +38,10 @@ P6 puts a page on the P3 `submitAccessRequest` service: `/request-access` (Q2 fi
 - Phase 7 links the consent text to the privacy notice (`TODO(Phase 7)`).
 - Known trade-off from ADR 0069: a form posted within 3 s of rendering is thanked and dropped, even when it is empty.
 - Left open (Low): parity between `requestAccessUrl` and the route's private `renewalPath` is tested only in e2e; `getPublishedProductRef` has no unit test. Stale "arrives in P6" comments and `prefetch={false}` in `reset-expired.tsx` / `my-downloads` can be tidied.
+
+## Amendment (2026-10-10, Phase 5 gate C UI)
+- The one-row datasheet slot starts at `2xl` (was `lg`); below that "Datasheet" sits above the button, and the lg–xl text shortening is removed.
+- Expired customer: grey "Access expired" status + ONE link "Contact us to renew" (`/request-access?renew=1&product=<id>`); the spec-table note ends "…your access has ended. Contact us to renew." No duplicated link, no spaced em dash.
+- `/request-access` shows a "You have datasheet access until <day> (China time)" state (links to My downloads and products) for an active viewer; an admin sees an admin note; an expired viewer is always on the renewal path.
+- Public field errors end with a full stop (added in `stateForAnswer`); shared schema messages stay short for the admin.
+- `FormActions` (live alert + button as one block) and `inlineTextLink` are the account-form standard; forced `/change-password` has a "Sign out" text button; the non-invite expired reset view leads with "Send me a new reset link".

@@ -12,7 +12,12 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
-import { FormAlert, FormField, primaryButton, textLink } from "./account-ui";
+import {
+  FormActions,
+  FormField,
+  inlineTextLink,
+  primaryButton,
+} from "./account-ui";
 import {
   MAX_PASSWORD_LENGTH,
   MESSAGES,
@@ -145,21 +150,24 @@ export function ChangePasswordForm({
         }}
       />
 
-      <FormAlert>
-        {problem?.kind === "form" ? problem.message : null}
-        {problem?.kind === "signed-out" ? (
-          <>
-            {problem.message}{" "}
-            <a href="/login" className={textLink}>
-              Sign in
-            </a>
-          </>
-        ) : null}
-      </FormAlert>
-
-      <button type="submit" disabled={isSubmitting} className={primaryButton}>
-        {isSubmitting ? "Saving…" : submitLabel}
-      </button>
+      <FormActions
+        alert={
+          problem?.kind === "form" ? (
+            problem.message
+          ) : problem?.kind === "signed-out" ? (
+            <>
+              {problem.message}{" "}
+              <a href="/login" className={inlineTextLink}>
+                Sign in
+              </a>
+            </>
+          ) : null
+        }
+      >
+        <button type="submit" disabled={isSubmitting} className={primaryButton}>
+          {isSubmitting ? "Saving…" : submitLabel}
+        </button>
+      </FormActions>
     </form>
   );
 }

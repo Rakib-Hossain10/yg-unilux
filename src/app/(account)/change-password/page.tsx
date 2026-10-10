@@ -9,6 +9,7 @@ import type { Metadata } from "next";
 
 import { AccountFrame, textLink } from "@/components/site/account/account-ui";
 import { ChangePasswordForm } from "@/components/site/account/change-password-form";
+import { SignOutTextButton } from "@/components/site/account/sign-out-button";
 import {
   ADMIN_HOME,
   MY_DOWNLOADS_PAGE,
@@ -50,7 +51,11 @@ export default async function ChangePasswordPage({
         destination={destination}
         submitLabel={forced ? "Save and continue" : "Change password"}
       />
-      {forced ? null : (
+      {forced ? (
+        // A way out for someone who signed in on the wrong account or does
+        // not want to choose a password now (full page load, ADR 0027).
+        <SignOutTextButton className="mt-6 text-center text-sm" />
+      ) : (
         <p className="mt-6 text-center text-sm">
           {/* Plain <a>: the admin home is its own document (CSP, ADR 0027). */}
           <a href={home} className={textLink}>

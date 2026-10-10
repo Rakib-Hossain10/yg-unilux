@@ -4,7 +4,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { accessStatus, formatDay, formatMoment } from "./access-status";
+import {
+  MOMENT_ZONE_LABEL,
+  accessStatus,
+  formatDay,
+  formatMoment,
+  formatMomentShort,
+} from "./access-status";
 
 const now = new Date("2026-10-09T12:00:00.000Z");
 // The end of 31 Mar 2027 in China time.
@@ -63,6 +69,16 @@ describe("date formats", () => {
     expect(formatDay(new Date(endOfDay.getTime() + 1))).toBe("1 Apr 2027");
     expect(formatMoment(new Date("2026-10-09T23:30:00.000Z"))).toBe(
       "10 Oct 2026, 07:30 (China time)",
+    );
+  });
+
+  it("has a short moment for lists whose header names the zone once", () => {
+    const moment = new Date("2026-09-04T09:00:00.000Z");
+    expect(formatMomentShort(moment)).toBe("4 Sep 2026, 17:00");
+    expect(MOMENT_ZONE_LABEL).toBe("China time");
+    // The long form is the short one plus the label, nothing else changes.
+    expect(formatMoment(moment)).toBe(
+      `${formatMomentShort(moment)} (${MOMENT_ZONE_LABEL})`,
     );
   });
 });

@@ -13,7 +13,7 @@ import { z } from "zod";
 import { destinationAfterSignIn } from "@/lib/account-destination";
 
 import {
-  FormAlert,
+  FormActions,
   FormField,
   primaryButton,
   textLink,
@@ -143,29 +143,33 @@ export function LoginForm({ next }: { next: string | null }) {
             ...register("password"),
           }}
         />
-        <a href="/forgot-password" className={`${textLink} text-sm`}>
-          Forgot your password?
-        </a>
+        {/* One row under the password: the choice that belongs to this
+            sign-in on the left, the way out on the right (wraps at 320 px). */}
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-x-6">
+          <label
+            htmlFor="remember-me"
+            className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm"
+          >
+            <input
+              id="remember-me"
+              type="checkbox"
+              className="size-4 cursor-pointer accent-ink"
+              {...register("rememberMe")}
+            />
+            Keep me signed in
+          </label>
+          <a href="/forgot-password" className={`${textLink} text-sm`}>
+            Forgot your password?
+          </a>
+        </div>
       </div>
 
-      <div className="flex min-h-11 items-center gap-2.5">
-        <input
-          id="remember-me"
-          type="checkbox"
-          className="size-4 accent-ink"
-          {...register("rememberMe")}
-        />
-        <label htmlFor="remember-me" className="text-sm">
-          Keep me signed in
-        </label>
-      </div>
-
-      {/* Announced to screen readers when it appears. */}
-      <FormAlert>{formError}</FormAlert>
-
-      <button type="submit" disabled={isSubmitting} className={primaryButton}>
-        {isSubmitting ? "Signing in…" : "Sign in"}
-      </button>
+      {/* The message line is announced to screen readers when it appears. */}
+      <FormActions alert={formError}>
+        <button type="submit" disabled={isSubmitting} className={primaryButton}>
+          {isSubmitting ? "Signing in…" : "Sign in"}
+        </button>
+      </FormActions>
     </form>
   );
 }

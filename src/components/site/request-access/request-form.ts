@@ -150,6 +150,16 @@ const ERROR_FIELDS: ReadonlySet<string> = new Set<RequestErrorField>([
   "consent",
 ]);
 
+/*
+ * The schema's messages are shared with the admin screens, which show them
+ * as short labels; on this public page every field error is a sentence and
+ * ends with a full stop, like /login's.
+ */
+function asSentence(message: string): string {
+  const text = message.trim();
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
 /**
  * The form state for one answer. `messages` are the service's own texts
  * (ACCESS_REQUEST_THANKS / _UNAVAILABLE), passed in by the Server Action.
@@ -176,7 +186,7 @@ export function stateForAnswer(
   for (const [field, list] of Object.entries(answer.errors.fieldErrors)) {
     const first = list[0];
     if (first && ERROR_FIELDS.has(field)) {
-      fieldErrors[field as RequestErrorField] = first;
+      fieldErrors[field as RequestErrorField] = asSentence(first);
     }
   }
   const visible = Object.keys(fieldErrors).length > 0;

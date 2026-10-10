@@ -14,7 +14,7 @@ import { z } from "zod";
 
 import {
   AccountFrame,
-  FormAlert,
+  FormActions,
   FormField,
   primaryButton,
 } from "./account-ui";
@@ -151,11 +151,15 @@ export function ResetPasswordForm({
           }}
         />
 
-        <FormAlert>{formError}</FormAlert>
-
-        <button type="submit" disabled={isSubmitting} className={primaryButton}>
-          {isSubmitting ? copy.busy : copy.submit}
-        </button>
+        <FormActions alert={formError}>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className={primaryButton}
+          >
+            {isSubmitting ? copy.busy : copy.submit}
+          </button>
+        </FormActions>
       </form>
     </AccountFrame>
   );

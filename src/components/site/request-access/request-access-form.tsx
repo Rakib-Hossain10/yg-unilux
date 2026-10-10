@@ -210,7 +210,26 @@ export function RequestAccessForm({
           />
         </Field>
 
-        <Field id="request-email" label="Work email" error={errors.email}>
+        <Field id="request-company" label="Company" error={errors.company}>
+          <input
+            id="request-company"
+            name="company"
+            type="text"
+            autoComplete="organization"
+            required
+            maxLength={MAX_COMPANY_LENGTH}
+            defaultValue={values.company ?? ""}
+            className={inputClass}
+            {...described("request-company", errors.company)}
+          />
+        </Field>
+
+        <Field
+          id="request-email"
+          label="Work email"
+          error={errors.email}
+          className="sm:col-span-2"
+        >
           <input
             id="request-email"
             name="email"
@@ -223,20 +242,6 @@ export function RequestAccessForm({
             defaultValue={values.email ?? ""}
             className={inputClass}
             {...described("request-email", errors.email)}
-          />
-        </Field>
-
-        <Field id="request-company" label="Company" error={errors.company}>
-          <input
-            id="request-company"
-            name="company"
-            type="text"
-            autoComplete="organization"
-            required
-            maxLength={MAX_COMPANY_LENGTH}
-            defaultValue={values.company ?? ""}
-            className={inputClass}
-            {...described("request-company", errors.company)}
           />
         </Field>
 
@@ -343,7 +348,7 @@ export function RequestAccessForm({
           >
             {pending ? "Sending…" : submitLabel}
           </button>
-          <p className="text-sm text-grey-600">
+          <p className="text-sm text-pretty text-grey-600">
             We reply by email. No account is made until we approve it.
           </p>
         </div>

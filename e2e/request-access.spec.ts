@@ -4,8 +4,9 @@
 // the typed values kept, a signed-in user is prefilled from the session, the
 // product page links here (sign-in `next`, request access, expired → renew),
 // WhatsApp stays hidden without a number, and axe passes at 360 and 1280 px.
-// The service drops a form sent within 3 s of rendering (silently, same
-// thanks), so each real submit waits that long first.
+// The service drops a VALID form sent within 3 s of rendering (silently,
+// same thanks), so each real submit waits that long first; an invalid form
+// gets its field errors at once (gate C).
 
 import { randomUUID } from "node:crypto";
 
@@ -279,7 +280,7 @@ test.describe("submitting", () => {
       "United Kingdom",
     );
     await expect(page.locator("#request-consent-error")).toHaveText(
-      "Please accept the privacy notice",
+      "Please accept the privacy notice.",
     );
     expect(await rowsFor(email)).toHaveLength(0);
     await page.context().close();
@@ -313,7 +314,7 @@ test.describe("submitting", () => {
       "request-email-error",
     );
     await expect(page.locator("#request-email-error")).toHaveText(
-      "Enter a valid email address",
+      "Enter a valid email address.",
     );
     await expect(requestForm(page).getByLabel("Country")).toHaveAttribute(
       "aria-invalid",
@@ -332,7 +333,7 @@ test.describe("submitting", () => {
     await expect(requestForm(page).getByLabel("Company")).toHaveValue("Acme");
     // An untouched select gets the schema's own words, not a type error.
     await expect(page.locator("#request-country-error")).toHaveText(
-      "Choose a country",
+      "Choose a country.",
     );
     await expect(page).toHaveTitle(/Request datasheet access/);
 
@@ -345,6 +346,27 @@ test.describe("submitting", () => {
     await submit(page);
     await expect(page.getByRole("status")).toHaveText(THANKS);
     expect(await rowsFor(email)).toHaveLength(1);
+  });
+
+  test("an empty form sent at once gets field errors, never the thanks (gate C)", async ({
+    page,
+  }) => {
+    await page.goto("/request-access");
+    await waitForHydration(page.getByRole("button", { name: "Send request" }));
+    // No minimum-fill wait: field validation runs before the anti-spam checks.
+    await submit(page);
+    await expect(page.locator("[data-request-message]")).toContainText(
+      "Some details need another look",
+    );
+    await expect(page.getByText(THANKS)).toHaveCount(0);
+    await expect(requestForm(page).getByLabel("Name")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    await expect(requestForm(page).getByLabel("Work email")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
   });
 
   test("a filled honeypot gets the very same thanks and stores nothing", async ({
@@ -386,6 +408,16 @@ test.describe("submitting", () => {
 
 test.describe("signed in", () => {
   test("prefills from the session, not the URL", async ({ browser }) => {
+    // An expired customer still gets the (renewal) form.
+    await db.collection("users").updateOne(
+      { email: E2E_CUSTOMER.email },
+      {
+        $set: {
+          mustChangePassword: false,
+          accessExpiresAt: new Date(Date.now() - 86_400_000),
+        },
+      },
+    );
     const context = await browser.newContext({
       storageState: loadState("customer"),
     });
@@ -398,6 +430,70 @@ test.describe("signed in", () => {
       E2E_CUSTOMER.name,
     );
     await context.close();
+  });
+
+  test("an expired customer gets the renewal wording without ?renew=1", async ({
+    browser,
+  }) => {
+    await db.collection("users").updateOne(
+      { email: E2E_CUSTOMER.email },
+      {
+        $set: {
+          mustChangePassword: false,
+          accessExpiresAt: new Date(Date.now() - 86_400_000),
+        },
+      },
+    );
+    const context = await browser.newContext({
+      storageState: loadState("customer"),
+    });
+    const page = await context.newPage();
+    await page.goto("/request-access");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Renew datasheet access" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Send renewal request" }),
+    ).toBeVisible();
+    await context.close();
+  });
+
+  test("a customer with active access sees it instead of the form", async ({
+    browser,
+  }) => {
+    for (const [accessExpiresAt, line] of [
+      [
+        new Date("2099-03-31T15:59:59.999Z"),
+        "You have datasheet access until 31 Mar 2099 (China time).",
+      ],
+      [null, "You have datasheet access with no end date."],
+    ] as const) {
+      await db
+        .collection("users")
+        .updateOne(
+          { email: E2E_CUSTOMER.email },
+          { $set: { mustChangePassword: false, accessExpiresAt } },
+        );
+      const context = await browser.newContext({
+        storageState: loadState("customer"),
+      });
+      const page = await context.newPage();
+      await page.goto(`/request-access?renew=1&product=${PRODUCT_ID}`);
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Datasheet access" }),
+      ).toBeVisible();
+      await expect(page.locator('[data-request-state="active"]')).toContainText(
+        line,
+      );
+      await expect(requestForm(page)).toHaveCount(0);
+      await expect(
+        page
+          .locator('[data-request-state="active"]')
+          .getByRole("link", { name: "My downloads" }),
+      ).toHaveAttribute("href", "/my-downloads");
+      expect(await axeViolations(page)).toEqual([]);
+      await context.close();
+    }
   });
 });
 
@@ -466,17 +562,17 @@ test.describe("links from the product page", () => {
     await expect(
       page
         .locator('[data-slot="datasheet"]')
-        .getByRole("link", { name: "Access expired — contact us" }),
+        .getByRole("link", { name: "Contact us to renew" }),
     ).toHaveAttribute("href", renew);
     await expect(
       page
         .locator('[data-slot="restricted-specs"]')
-        .getByRole("link", { name: "Access expired — contact us" }),
+        .getByRole("link", { name: "Contact us to renew" }),
     ).toHaveAttribute("href", renew);
 
     await page
       .locator('[data-slot="datasheet"]')
-      .getByRole("link", { name: "Access expired — contact us" })
+      .getByRole("link", { name: "Contact us to renew" })
       .click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Renew datasheet access" }),

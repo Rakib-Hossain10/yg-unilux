@@ -5,7 +5,13 @@
 // so the customer sees the day the admin picked. Server-side only (permissions.ts is server-only).
 
 import { type AccessUser, checkDatasheetAccess } from "@/lib/permissions";
-import { formatDate, formatDateTime } from "@/lib/time-zone";
+import {
+  APP_TIME_ZONE,
+  APP_TIME_ZONE_LABEL,
+  formatDate,
+  formatDateTime,
+  formatDateTimeIn,
+} from "@/lib/time-zone";
 
 export type AccessStatus =
   | { kind: "admin" }
@@ -52,3 +58,14 @@ export function formatDay(date: Date): string {
 export function formatMoment(date: Date): string {
   return formatDateTime(date);
 }
+
+/**
+ * "9 Oct 2026, 14:05": the same moment without the zone words, for lists
+ * whose column header names the zone once (MOMENT_ZONE_LABEL).
+ */
+export function formatMomentShort(date: Date): string {
+  return formatDateTimeIn(date, APP_TIME_ZONE);
+}
+
+/** "China time": the words a column header shows once. */
+export const MOMENT_ZONE_LABEL = APP_TIME_ZONE_LABEL;
