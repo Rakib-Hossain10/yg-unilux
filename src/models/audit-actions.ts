@@ -33,22 +33,46 @@ export const ADMIN_AUDIT_ACTIONS = [
   "settings.email.update",
   // One entry per committed import batch (Phase 3); target = the staged file.
   "import.commit",
+  // Phase 5 (ADR 0069): the access-request queue. target = the request.
+  "access_request.approve",
+  "access_request.reject",
+  "access_request.create_manual",
+  "access_request.delete",
+  // Phase 5 (ADR 0070): customer accounts. target = the customer's user id.
+  "customer.create",
+  "customer.update",
+  "customer.access.set",
+  // "End access now" (access ends at once; not a ban).
+  "customer.access.end",
+  "customer.ban",
+  "customer.unban",
+  "customer.password.link",
+  "customer.password.temp",
+  "customer.sessions.revoke",
+  "customer.invite.resend",
 ] as const;
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
 
 /**
- * Entries written outside the admin panel, by Phase 1 code:
- * - `auth.rate_limited`: an anonymous sign-in lockout (src/lib/auth.ts), the
- *   only kind of entry allowed without an actor;
+ * Entries written outside the admin panel:
+ * - `auth.rate_limited`: an anonymous sign-in lockout (src/lib/auth.ts);
  * - `admin.cli_*`: the seed-admin CLI creating the admin or resetting its
- *   password (src/lib/seed-admin.ts).
+ *   password (src/lib/seed-admin.ts);
+ * - `cron.expiry_reminders`: one entry per daily expiry-reminder run
+ *   (Phase 5 P5), counts only.
+ * Only `auth.*` and `cron.*` entries may have no actor
+ * (ACTORLESS_AUDIT_PREFIXES).
  */
 export const SYSTEM_AUDIT_ACTIONS = [
   "auth.rate_limited",
   "admin.cli_create",
   "admin.cli_reset_password",
+  "cron.expiry_reminders",
 ] as const;
 export type SystemAuditAction = (typeof SYSTEM_AUDIT_ACTIONS)[number];
+
+/** Action prefixes written with no signed-in actor (security events, cron). */
+export const ACTORLESS_AUDIT_PREFIXES = ["auth.", "cron."] as const;
 
 /** Every action the auditLog collection accepts. */
 export const AUDIT_ACTIONS = [
@@ -66,5 +90,9 @@ export const AUDIT_TARGET_TYPES = [
   "settings",
   /** A bulk import run, addressed by its staged file's uuid (imports/<uuid>.xlsx). */
   "import",
+  /** An accessRequests document (Phase 5). */
+  "access_request",
+  /** A customer account, addressed by its Better Auth user id (Phase 5). */
+  "customer",
 ] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPES)[number];

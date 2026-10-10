@@ -9,6 +9,8 @@
 
 import { refresh } from "next/cache";
 
+import { forbidden } from "next/navigation";
+
 import type {
   ActionData,
   ActionFailure,
@@ -25,6 +27,8 @@ import type { ServiceResult } from "@/lib/admin/write-result";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
 
+import { pageActor } from "../admin-reads";
+
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
  * browser can send anything. The services re-parse it with the same strict
@@ -38,6 +42,8 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
 function failure(
   result: ServiceResult<unknown> & { ok: false },
 ): ActionFailure {
+  // A refused actor is a 403, never a form message (ADR 0073).
+  if (result.denied) forbidden();
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
@@ -58,7 +64,7 @@ export async function presignDatasheetUploadAction(
   input: unknown,
 ): Promise<ActionData<DatasheetUploadTicket>> {
   const viewer = await requireAdmin();
-  const result = await presignDatasheetUpload(viewer.user.id, input);
+  const result = await presignDatasheetUpload(await pageActor(viewer), input);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
   return { ok: true, data: result.data };
@@ -72,7 +78,7 @@ export async function finalizeDatasheetAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  return writeResult(await finalizeDatasheet(viewer.user.id, input));
+  return writeResult(await finalizeDatasheet(await pageActor(viewer), input));
 }
 
 /** Renames a datasheet (the label only; the stored file is untouched). */
@@ -80,7 +86,7 @@ export async function renameDatasheetAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  return writeResult(await renameDatasheet(viewer.user.id, input));
+  return writeResult(await renameDatasheet(await pageActor(viewer), input));
 }
 
 /**
@@ -91,5 +97,5 @@ export async function deleteDatasheetAction(
   id: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  return writeResult(await deleteDatasheet(viewer.user.id, id));
+  return writeResult(await deleteDatasheet(await pageActor(viewer), id));
 }

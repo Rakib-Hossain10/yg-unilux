@@ -22,6 +22,7 @@ import { getProductForEdit } from "@/lib/admin/products";
 import { requireAdmin } from "@/lib/permissions";
 import { publishCheck } from "@/lib/schemas/product";
 
+import { pageActor, readAsAdmin } from "../../admin-reads";
 import { adminCloudName } from "../../cloudinary-cloud-name";
 
 // Static only (ADR 0036): never the product's name.
@@ -38,14 +39,15 @@ export default async function EditProductPage({
   params,
   searchParams,
 }: PageProps<"/admin/products/[id]">) {
-  await requireAdmin();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
   const [{ id }, query] = await Promise.all([params, searchParams]);
   // The service validates the id; a bad one is simply "not found".
   const [product, tree, areas, datasheets] = await Promise.all([
-    getProductForEdit(id),
-    listCategoryTree(),
-    listAreas(),
-    listDatasheets(),
+    readAsAdmin(() => getProductForEdit(actor, id)),
+    readAsAdmin(() => listCategoryTree(actor)),
+    readAsAdmin(() => listAreas(actor)),
+    readAsAdmin(() => listDatasheets(actor)),
   ]);
   if (!product) notFound();
 

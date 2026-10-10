@@ -27,8 +27,14 @@ import { checkXlsx } from "@/lib/xlsx-signature";
 import { DatasheetModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { testActor } from "./helpers/admin-actor";
 import { setupMemoryDb } from "./helpers/memory-db";
 import { testPublicId } from "./helpers/public-ids";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("./helpers/admin-actor")).fakeSessionFromDb,
+}));
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PRELOAD = path.join(root, "e2e", "fake-providers", "preload.mjs");
@@ -105,7 +111,8 @@ describe("e2e fake-provider preload stays out of the app", () => {
     };
     walk(server);
     expect(hits).toEqual([]);
-  });
+    // Walks the whole build output: well over 5 s under full-suite load.
+  }, 60_000);
 
   /*
    * Loads the real preload in a fresh Node process whose http/https request
@@ -277,7 +284,8 @@ vi.mock("@/lib/storage", () => ({
 
 setupMemoryDb("yg_phase2_exit_qa_test");
 
-const ADMIN = new mongoose.Types.ObjectId().toHexString();
+const admin = testActor();
+const ADMIN = admin.id;
 const INCOMING = "incoming/dddddddd-dddd-4ddd-8ddd-dddddddddddd.xlsx";
 
 async function workbook(): Promise<Uint8Array> {
@@ -299,7 +307,7 @@ describe("finalizeDatasheet stores only what it verified", () => {
   it("control: a plain upload stores the verified workbook", async () => {
     const good = await workbook();
     bucket.objects.set(INCOMING, good);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING,
       fileName: "family.xlsx",
@@ -325,7 +333,7 @@ describe("finalizeDatasheet stores only what it verified", () => {
       if (key === INCOMING) bucket.objects.set(INCOMING, evil);
     };
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING,
       fileName: "family.xlsx",
@@ -353,7 +361,7 @@ describe("finalizeDatasheet stores only what it verified", () => {
       if (key === INCOMING) bucket.objects.set(INCOMING, evil);
     };
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING,
       fileName: "family.xlsx",
@@ -381,7 +389,7 @@ describe("finalizeDatasheet stores only what it verified", () => {
       if (key === INCOMING) bucket.objects.set(INCOMING, evil);
     };
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: doc._id.toHexString(),
       incomingKey: INCOMING,

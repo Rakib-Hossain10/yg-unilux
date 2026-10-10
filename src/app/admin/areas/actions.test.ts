@@ -9,12 +9,15 @@ import { AUDIT_FAILED_MESSAGE } from "@/lib/admin/write-result";
 import { mongoose } from "@/lib/db";
 import { AreaModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../../test/helpers/memory-db";
 
 import {
   createAreaAction,
   deleteAreaAction,
   moveAreaAction,
+  setAreaImageAction,
+  signAreaImageUpload,
   updateAreaAction,
 } from "./actions";
 
@@ -29,7 +32,9 @@ const auditFails = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
-  getSessionFromDb: getSession,
+  getSessionFromDb: (
+    await import("../../../../test/helpers/admin-actor")
+  ).sessionsWithTestActors(getSession),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 // redirect() and forbidden() throw in Next; these throw a readable error.
@@ -57,7 +62,8 @@ setupMemoryDb("yg_admin_area_actions_test");
 
 const { ObjectId } = mongoose.Types;
 const ADMIN_ID = new ObjectId().toHexString();
-const SEED_ACTOR = new ObjectId().toHexString();
+const seeder = testActor();
+const SEED_ACTOR = seeder.id;
 
 /* A Better Auth session user with the fields the guard reads. */
 function signedInAs(fields: Record<string, unknown>) {
@@ -97,7 +103,7 @@ beforeEach(async () => {
 });
 
 async function seed(name: string): Promise<string> {
-  const result = await createArea(SEED_ACTOR, { name });
+  const result = await createArea(seeder, { name });
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   return result.data.id;
 }
@@ -306,5 +312,39 @@ describe("as the admin", () => {
       expect(await AreaModel.findById(office).lean()).toBeNull();
       expect(nextCache.refresh).toHaveBeenCalledOnce();
     });
+  });
+});
+
+const CALLS: [string, () => Promise<unknown>][] = [
+  ["create", () => createAreaAction({ name: "Office", slug: "", bwImage: "" })],
+  [
+    "update",
+    () => updateAreaAction(retail, { name: "Shops", slug: "", bwImage: "" }),
+  ],
+  ["move", () => moveAreaAction(retail, "down")],
+  ["delete", () => deleteAreaAction(retail)],
+  ["sign image", () => signAreaImageUpload(retail)],
+  ["set image", () => setAreaImageAction({ areaId: retail, publicId: null })],
+];
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(async () => {
+    signedInAs({});
+    const admin: unknown = await getSession();
+    // The services' own re-check from the database sees a customer (e.g.
+    // demoted between the two reads); requireAdmin() still saw the admin.
+    signedInAs({ role: "customer" });
+    getSession.mockResolvedValueOnce(admin);
+  });
+
+  it.each(CALLS)("%s", async (_name, call) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const audits = await AuditLogModel.countDocuments();
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    // Refused by the service's check, not by requireAdmin().
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/actor refused: not_admin$/),
+    );
+    expect(await AuditLogModel.countDocuments()).toBe(audits);
   });
 });

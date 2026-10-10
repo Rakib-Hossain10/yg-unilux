@@ -18,7 +18,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
-import { E2E_ADMIN, E2E_CUSTOMER } from "./fixtures/accounts";
+import {
+  E2E_ADMIN,
+  E2E_CUSTOMER,
+  E2E_DOWNLOAD_CUSTOMER,
+  E2E_EXPIRED_ACCESS_ENDED,
+  E2E_EXPIRED_CUSTOMER,
+  E2E_MAIL_CUSTOMER,
+  E2E_READY_ACCESS_UNTIL,
+  E2E_READY_CUSTOMER,
+  E2E_TEMP_CUSTOMER,
+} from "./fixtures/accounts";
 import { seedAreaPages } from "./fixtures/area-pages";
 import { E2E_MONGODB_URI_FILE } from "./fixtures/database";
 import { seedListingGateB } from "./fixtures/listing-gate-b";
@@ -26,6 +36,7 @@ import { seedListingMotion } from "./fixtures/listing-motion";
 import { seedListingPages } from "./fixtures/listing-pages";
 import { seedProductPages } from "./fixtures/product-pages";
 import {
+  E2E_CRON_SECRET,
   E2E_FAKE_PROVIDERS_PORT,
   E2E_PROVIDER_ENV,
 } from "./fixtures/providers-port";
@@ -63,6 +74,8 @@ const testEnv = {
   GEO_BLOCK_ENABLED: "true",
   // Fake provider credentials (also used for the build, see providers-port.ts).
   ...E2E_PROVIDER_ENV,
+  // The Phase 5 exit spec runs the expiry cron over HTTP (restricted-access).
+  CRON_SECRET: E2E_CRON_SECRET,
 };
 
 async function seed(uri: string): Promise<void> {
@@ -74,6 +87,7 @@ async function seed(uri: string): Promise<void> {
   const { indexedModels } = await import("@/models");
   const { createAuth } = await import("@/lib/auth");
   const { seedAdmin } = await import("@/lib/seed-admin");
+  const { updateAccountFields } = await import("@/lib/account-writes");
 
   await connectDb();
   try {
@@ -84,6 +98,25 @@ async function seed(uri: string): Promise<void> {
     // A customer straight from createUser keeps mustChangePassword: true,
     // like a real new account; /admin must still answer 403.
     await auth.api.createUser({ body: { ...E2E_CUSTOMER } });
+    // The email specs' own customer (reset/invite links, Resend sink).
+    await auth.api.createUser({ body: { ...E2E_MAIL_CUSTOMER } });
+    // Phase 5 P2 account pages: one account per flow (accounts.ts).
+    await auth.api.createUser({ body: { ...E2E_TEMP_CUSTOMER } });
+    const context = await auth.$context;
+    for (const [account, accessExpiresAt] of [
+      [E2E_READY_CUSTOMER, E2E_READY_ACCESS_UNTIL],
+      [E2E_EXPIRED_CUSTOMER, E2E_EXPIRED_ACCESS_ENDED],
+      [E2E_DOWNLOAD_CUSTOMER, E2E_READY_ACCESS_UNTIL],
+    ] as const) {
+      const { user } = await auth.api.createUser({ body: { ...account } });
+      // As if the customer had already chosen their own password, through
+      // the one writer of our user fields (ADR 0068).
+      await updateAccountFields(context, user.id, {
+        mustChangePassword: false,
+        passwordSetAt: new Date(),
+        accessExpiresAt,
+      });
+    }
     // Every product-page spec's products, BEFORE `next start`: the cached
     // published-slug list fills on the first product-page visit, so a
     // product a spec inserted later would 404 (gate B harness fix).

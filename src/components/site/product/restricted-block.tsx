@@ -26,6 +26,7 @@ import { useOptionalVariantSelection } from "./product-detail-client";
 import {
   loadRestrictedAnswer,
   restrictedRows,
+  requestAccessUrl,
   restrictedSlotView,
   restrictedSpecsFor,
   type RestrictedAnswer,
@@ -69,19 +70,28 @@ export function RestrictedDataProvider({
 }
 
 /** The datasheet button for this viewer, or the fallback until it is known. */
-export function DatasheetBlock({ fallback }: { fallback: ReactNode }) {
+export function DatasheetBlock({
+  fallback,
+  productSlug,
+}: {
+  fallback: ReactNode;
+  /** Public; only for the sign-in link's `next` (back to this page). */
+  productSlug: string;
+}) {
   const restricted = use(RestrictedContext);
   if (!restricted?.answer) return fallback;
   return (
     <DatasheetButton
       state={restricted.answer.state}
       productId={restricted.productId}
+      productSlug={productSlug}
     />
   );
 }
 
-const textLink =
-  "inline-flex min-h-11 items-center text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
+/* A link inside running text; py-3 -my-3 keeps a 44 px hit area. */
+const inlineTextLink =
+  "inline -my-3 py-3 text-ink underline decoration-grey-400 underline-offset-4 transition-colors duration-(--duration-quick) hover:decoration-ink";
 
 const notApplicable = (
   <span className="text-grey-600">
@@ -181,14 +191,18 @@ export function RestrictedSpecsBlock({ fallback }: { fallback: ReactNode }) {
   const restricted = use(RestrictedContext);
   const answer = restricted?.answer;
   if (answer?.allowed) return <RestrictedRows answer={answer} />;
-  if (restrictedSlotView(answer) === "expired") {
+  if (restricted && restrictedSlotView(answer) === "expired") {
     return (
       <p data-restricted="expired">
         Some specifications are shared with approved customers only, and your
         access has ended.{" "}
-        <a href="/contact" className={textLink}>
-          Access expired — contact us
+        <a
+          href={requestAccessUrl(restricted.productId, { renew: true })}
+          className={inlineTextLink}
+        >
+          Contact us to renew
         </a>
+        .
       </p>
     );
   }

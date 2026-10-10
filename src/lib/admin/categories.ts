@@ -25,9 +25,9 @@ import { uniqueSlug, UniqueSlugError } from "@/lib/slug";
 import { CategoryModel, ProductModel } from "@/models";
 import type { Category } from "@/models/category";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import { signCloudinaryUpload, verifyUploadedImage } from "./uploads";
 import {
-  assertActorId,
   auditAndFinish,
   fieldError,
   formError,
@@ -109,7 +109,10 @@ const DISPLAY_ORDER = { order: 1, _id: 1 } as const;
  * (tens of categories). A row whose parent is missing is shown at the top
  * level, so it stays visible and can be fixed or deleted.
  */
-export async function listCategoryTree(): Promise<CategoryTreeNode[]> {
+export async function listCategoryTree(
+  actor: AdminActor,
+): Promise<CategoryTreeNode[]> {
+  await assertAdminActor(actor);
   await connectDb();
   const rows = await CategoryModel.find({}, TREE_PROJECTION)
     .sort(DISPLAY_ORDER)
@@ -141,8 +144,10 @@ export async function listCategoryTree(): Promise<CategoryTreeNode[]> {
 
 /** One category for the edit form, or null if the id is bad or unknown. */
 export async function getCategoryForEdit(
+  actor: AdminActor,
   id: unknown,
 ): Promise<CategoryForEdit | null> {
+  await assertAdminActor(actor);
   const parsedId = categoryIdSchema.safeParse(id);
   if (!parsedId.success) return null;
 
@@ -273,10 +278,11 @@ function toObjectId(id: string | null): Types.ObjectId | null {
  * name ("-2", "-3" ... if taken); a typed slug must be free under the parent.
  */
 export async function createCategory(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "categories");
+  if (refused) return refused;
   await connectDb();
 
   const parsed = categoryInputSchema.safeParse(input);
@@ -310,7 +316,7 @@ export async function createCategory(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "category.create",
       target: { type: "category", id: id.toHexString() },
       meta: { parentId: parent?.toHexString() ?? null },
@@ -360,11 +366,12 @@ async function resolveSlug(
  * nothing is written, audited or revalidated.
  */
 export async function updateCategory(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
   input: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "categories");
+  if (refused) return refused;
   await connectDb();
 
   const parsedId = categoryIdSchema.safeParse(id);
@@ -441,7 +448,7 @@ export async function updateCategory(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "category.update",
       target: { type: "category", id: parsedId.data },
       meta: { fields },
@@ -463,10 +470,11 @@ function sameId(a: Types.ObjectId | null, b: Types.ObjectId | null): boolean {
  * Moving the first one up (or the last one down) changes nothing.
  */
 export async function moveCategory(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ moved: boolean }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "categories");
+  if (refused) return refused;
   await connectDb();
 
   const parsed = moveCategorySchema.safeParse(input);
@@ -509,7 +517,7 @@ export async function moveCategory(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "category.reorder",
       target: { type: "category", id: parsed.data.id },
       meta: {
@@ -528,10 +536,11 @@ export async function moveCategory(
  * many, so they know what to move first.
  */
 export async function deleteCategory(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "categories");
+  if (refused) return refused;
   await connectDb();
 
   const parsedId = categoryIdSchema.safeParse(id);
@@ -570,7 +579,7 @@ export async function deleteCategory(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "category.delete",
       target: { type: "category", id: parsedId.data },
       meta: { parentId: self.parent?.toHexString() ?? null },
@@ -597,15 +606,17 @@ const IMAGE_FIELD: Record<CategoryImageSlot, "icon" | "coverImage"> = {
  * written, so there are no tags.
  */
 export async function signCategoryImageUpload(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<SignedUpload>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "categories");
+  if (refused) return refused;
   const parsed = signCategoryImageSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { categoryId, slot } = parsed.data;
+  // signCloudinaryUpload re-checks the actor (one more session read).
   return signCloudinaryUpload(
-    actorId,
+    actor,
     { target: "category", id: categoryId },
     { formats: CATEGORY_IMAGE_FORMATS[slot] },
   );
@@ -636,7 +647,7 @@ function isStoredImage(
  * field only, never the id.
  */
 export async function setCategoryImage(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<
   ServiceResult<{
@@ -645,7 +656,8 @@ export async function setCategoryImage(
     publicId: string | null;
   }>
 > {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "categories");
+  if (refused) return refused;
   const parsed = setCategoryImageSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { categoryId, slot, publicId } = parsed.data;
@@ -686,7 +698,7 @@ export async function setCategoryImage(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "category.update",
       target: { type: "category", id: categoryId },
       meta: { fields: [field], cleared: publicId === null },

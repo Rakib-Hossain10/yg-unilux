@@ -91,6 +91,22 @@ const longSecret = rule(
   z.string().min(32),
   "a random string of at least 32 characters",
 );
+/*
+ * Sent by Vercel Cron as `Authorization: Bearer <secret>`, so it must fit in
+ * one header token: printable ASCII, no spaces (the cron route checks the
+ * same character class, ADR 0072). A passphrase with a space would
+ * otherwise be accepted here and refuse every cron call with a silent 401.
+ */
+/** "Bearer " + the secret fits the route's 512-character header cap. */
+export const MAX_CRON_SECRET_LENGTH = 505;
+const cronSecretRule = rule(
+  z
+    .string()
+    .min(32)
+    .max(MAX_CRON_SECRET_LENGTH)
+    .regex(/^[!-~]+$/),
+  `a random string of 32 to ${MAX_CRON_SECRET_LENGTH} printable ASCII characters without spaces`,
+);
 
 /** "no-reply@example.com" or "YG UniLUX <no-reply@example.com>". */
 const emailFrom = rule(
@@ -322,8 +338,9 @@ export const env = {
   },
 
   cronSecret(): string {
-    return read("cron authentication", { CRON_SECRET: { rule: longSecret } })
-      .CRON_SECRET;
+    return read("cron authentication", {
+      CRON_SECRET: { rule: cronSecretRule },
+    }).CRON_SECRET;
   },
 
   /**

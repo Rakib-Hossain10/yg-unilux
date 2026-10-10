@@ -17,6 +17,7 @@ import {
   SETTINGS_KEYS,
 } from "@/lib/schemas/settings";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
@@ -35,10 +36,16 @@ import {
 } from "./products";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
+
 setupMemoryDb("yg_admin_products_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
 
 let spot: string; // main category "Spot Lights"
 let track: string; // main category "Magnetic Track"
@@ -107,7 +114,7 @@ function fieldErrorsOf<T>(result: ServiceResult<T>): Record<string, string[]> {
 }
 
 async function draft(name = "Arc", mainCategory = spot) {
-  return expectOk(await createDraft(ADMIN, { name, mainCategory })).id;
+  return expectOk(await createDraft(admin, { name, mainCategory })).id;
 }
 
 /* A minimal valid form payload for updateProduct. */
@@ -143,7 +150,7 @@ async function actions(): Promise<string[]> {
 
 describe("createDraft", () => {
   it("creates a draft with a unique slug, audits it and returns product tags", async () => {
-    const result = await createDraft(ADMIN, {
+    const result = await createDraft(admin, {
       name: "Arc",
       mainCategory: spot,
     });
@@ -157,13 +164,13 @@ describe("createDraft", () => {
     expect(await actions()).toEqual(["product.create"]);
 
     const second = expectOk(
-      await createDraft(ADMIN, { name: "Arc", mainCategory: spot }),
+      await createDraft(admin, { name: "Arc", mainCategory: spot }),
     );
     expect((await ProductModel.findById(second.id).lean())?.slug).toBe("arc-2");
   });
 
   it("refuses a missing category, bad input and operator objects", async () => {
-    const missing = await createDraft(ADMIN, {
+    const missing = await createDraft(admin, {
       name: "Arc",
       mainCategory: new ObjectId().toHexString(),
     });
@@ -171,15 +178,15 @@ describe("createDraft", () => {
     expect(missing.tags).toEqual([]);
 
     expect(
-      (await createDraft(ADMIN, { name: "", mainCategory: spot })).ok,
+      (await createDraft(admin, { name: "", mainCategory: spot })).ok,
     ).toBe(false);
     expect(
-      (await createDraft(ADMIN, { name: "Arc", mainCategory: { $ne: null } }))
+      (await createDraft(admin, { name: "Arc", mainCategory: { $ne: null } }))
         .ok,
     ).toBe(false);
     expect(
       (
-        await createDraft(ADMIN, {
+        await createDraft(admin, {
           name: "Arc",
           mainCategory: spot,
           status: "published",
@@ -187,7 +194,7 @@ describe("createDraft", () => {
       ).ok,
     ).toBe(false);
     expect(
-      (await createDraft(ADMIN, { name: "零售", mainCategory: spot })).ok,
+      (await createDraft(admin, { name: "零售", mainCategory: spot })).ok,
     ).toBe(false);
     expect(await ProductModel.countDocuments()).toBe(0);
     expect(await actions()).toEqual([]);
@@ -195,14 +202,17 @@ describe("createDraft", () => {
 
   it("throws before writing for a bad actor id", async () => {
     await expect(
-      createDraft("admin", { name: "Arc", mainCategory: spot }),
+      createDraft(
+        { id: "admin", headers: new Headers() },
+        { name: "Arc", mainCategory: spot },
+      ),
     ).rejects.toThrow(TypeError);
   });
 
   it("keeps the draft and still returns tags when the audit write fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("boom"));
-    const result = await createDraft(ADMIN, {
+    const result = await createDraft(admin, {
       name: "Arc",
       mainCategory: spot,
     });
@@ -219,13 +229,13 @@ describe("getProductForEdit", () => {
   it("returns the form values and images, or null for bad/unknown ids", async () => {
     const id = await draft();
     await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({ family: "Arc", specs: { driver: ["Lifud"] } }),
     );
     await addImage(id);
 
-    const edit = await getProductForEdit(id);
+    const edit = await getProductForEdit(admin, id);
     expect(edit).toMatchObject({
       id,
       values: {
@@ -242,15 +252,17 @@ describe("getProductForEdit", () => {
       },
       images: [{ publicId: imageOf(id), order: 0, kind: "gallery" }],
     });
-    expect(await getProductForEdit(new ObjectId().toHexString())).toBeNull();
-    expect(await getProductForEdit("nope")).toBeNull();
-    expect(await getProductForEdit({ $ne: null })).toBeNull();
+    expect(
+      await getProductForEdit(admin, new ObjectId().toHexString()),
+    ).toBeNull();
+    expect(await getProductForEdit(admin, "nope")).toBeNull();
+    expect(await getProductForEdit(admin, { $ne: null })).toBeNull();
   });
 
   it("round-trips: saving the loaded values changes nothing", async () => {
     const id = await draft();
     await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({
         description: "Text",
@@ -262,8 +274,8 @@ describe("getProductForEdit", () => {
         filters: { cctK: [3000, 4000] },
       }),
     );
-    const edit = await getProductForEdit(id);
-    const again = await updateProduct(ADMIN, id, edit?.values);
+    const edit = await getProductForEdit(admin, id);
+    const again = await updateProduct(admin, id, edit?.values);
     expect(again).toEqual({ ok: true, data: { id }, tags: [] });
   });
 });
@@ -272,7 +284,7 @@ describe("updateProduct", () => {
   it("saves changed fields only, audits field names and returns product tags", async () => {
     const id = await draft();
     const result = await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({ family: "Arc", areas: [area], datasheetId: datasheet }),
     );
@@ -298,7 +310,7 @@ describe("updateProduct", () => {
     const id = await draft();
     // Default: every filtered column is public.
     await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({ filters: { cctK: [3000], cri: [90], wattage: [10] } }),
     );
@@ -314,7 +326,7 @@ describe("updateProduct", () => {
     });
     expectOk(
       await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({ filters: { cctK: [3000, 4000], cri: [90], wattage: [10] } }),
       ),
@@ -327,11 +339,11 @@ describe("updateProduct", () => {
 
   it("is a no-op when nothing changed: no write, audit or tags", async () => {
     const id = await draft();
-    await updateProduct(ADMIN, id, form());
+    await updateProduct(admin, id, form());
     const before = await ProductModel.findById(id).lean();
     const auditBefore = await AuditLogModel.countDocuments();
 
-    const result = await updateProduct(ADMIN, id, form());
+    const result = await updateProduct(admin, id, form());
     expect(result).toEqual({ ok: true, data: { id }, tags: [] });
     expect(await AuditLogModel.countDocuments()).toBe(auditBefore);
     expect((await ProductModel.findById(id).lean())?.updatedAt).toEqual(
@@ -341,9 +353,9 @@ describe("updateProduct", () => {
 
   it("unsets optional fields cleared in the form and never touches images", async () => {
     const id = await draft();
-    await updateProduct(ADMIN, id, form({ family: "Arc", description: "x" }));
+    await updateProduct(admin, id, form({ family: "Arc", description: "x" }));
     await addImage(id);
-    await updateProduct(ADMIN, id, form({ family: "", description: "" }));
+    await updateProduct(admin, id, form({ family: "", description: "" }));
     const doc = await ProductModel.findById(id).lean();
     expect(doc?.family).toBeUndefined();
     expect(doc?.description).toBeUndefined();
@@ -352,10 +364,10 @@ describe("updateProduct", () => {
 
   it("refuses unknown keys such as images or featured", async () => {
     const id = await draft();
-    expect((await updateProduct(ADMIN, id, form({ images: [] }))).ok).toBe(
+    expect((await updateProduct(admin, id, form({ images: [] }))).ok).toBe(
       false,
     );
-    expect((await updateProduct(ADMIN, id, form({ featured: true }))).ok).toBe(
+    expect((await updateProduct(admin, id, form({ featured: true }))).ok).toBe(
       false,
     );
   });
@@ -364,7 +376,7 @@ describe("updateProduct", () => {
     const id = await draft();
     const ghost = new ObjectId().toHexString();
     const result = await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({
         mainCategory: ghost,
@@ -387,7 +399,7 @@ describe("updateProduct", () => {
   it("refuses the main category repeated as an extra category", async () => {
     const id = await draft();
     const result = await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({ extraCategories: [spot] }),
     );
@@ -395,24 +407,24 @@ describe("updateProduct", () => {
   });
 
   it("returns not found for bad and unknown ids and throws for a bad actor", async () => {
-    expect((await updateProduct(ADMIN, "nope", form())).ok).toBe(false);
-    expect((await updateProduct(ADMIN, { $ne: null }, form())).ok).toBe(false);
+    expect((await updateProduct(admin, "nope", form())).ok).toBe(false);
+    expect((await updateProduct(admin, { $ne: null }, form())).ok).toBe(false);
     const gone = await updateProduct(
-      ADMIN,
+      admin,
       new ObjectId().toHexString(),
       form(),
     );
     expect(!gone.ok && gone.errors.formErrors[0]).toMatch(/no longer exists/);
-    await expect(updateProduct("x", await draft(), form())).rejects.toThrow(
-      TypeError,
-    );
+    await expect(
+      updateProduct({ id: "x", headers: new Headers() }, await draft(), form()),
+    ).rejects.toThrow(TypeError);
   });
 
   it("keeps the change and returns tags when the audit write fails", async () => {
     const id = await draft();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("boom"));
-    const result = await updateProduct(ADMIN, id, form({ family: "Arc" }));
+    const result = await updateProduct(admin, id, form({ family: "Arc" }));
     expect(result.ok).toBe(false);
     expect(result.tags).toEqual(["products", `product:${id}`]);
     expect((await ProductModel.findById(id).lean())?.family).toBe("Arc");
@@ -421,7 +433,7 @@ describe("updateProduct", () => {
   describe("trackSize rule", () => {
     it("is refused for a non-Magnetic-Track product", async () => {
       const id = await draft();
-      const result = await updateProduct(ADMIN, id, form({ trackSize: 10 }));
+      const result = await updateProduct(admin, id, form({ trackSize: 10 }));
       expect(fieldErrorsOf(result).trackSize).toBeDefined();
       expect(
         (await ProductModel.findById(id).lean())?.trackSize,
@@ -432,7 +444,7 @@ describe("updateProduct", () => {
       const a = await draft("A", track);
       expectOk(
         await updateProduct(
-          ADMIN,
+          admin,
           a,
           form({ mainCategory: track, trackSize: 10 }),
         ),
@@ -440,7 +452,7 @@ describe("updateProduct", () => {
       const b = await draft("B", track5);
       expectOk(
         await updateProduct(
-          ADMIN,
+          admin,
           b,
           form({
             mainCategory: track5,
@@ -452,7 +464,7 @@ describe("updateProduct", () => {
       const c = await draft("C", spot);
       expectOk(
         await updateProduct(
-          ADMIN,
+          admin,
           c,
           form({
             extraCategories: [track5],
@@ -469,19 +481,19 @@ describe("updateProduct", () => {
       expect(
         (
           await updateProduct(
-            ADMIN,
+            admin,
             id,
             form({ mainCategory: track, trackSize: 7 }),
           )
         ).ok,
       ).toBe(false);
       await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({ mainCategory: track, trackSize: 10 }),
       );
       await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({ mainCategory: track, trackSize: null }),
       );
@@ -494,10 +506,10 @@ describe("updateProduct", () => {
   describe("duplicate model no.", () => {
     it("pre-check maps a model no. used by another product to variants.N.modelNo", async () => {
       const a = await draft("A");
-      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "X1" }] }));
+      await updateProduct(admin, a, form({ variants: [{ modelNo: "X1" }] }));
       const b = await draft("B");
       const result = await updateProduct(
-        ADMIN,
+        admin,
         b,
         form({ name: "B", variants: [{ modelNo: "Y1" }, { modelNo: "X1" }] }),
       );
@@ -511,14 +523,14 @@ describe("updateProduct", () => {
 
     it("maps the unique-index error (race) to the same field error", async () => {
       const a = await draft("A");
-      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "X1" }] }));
+      await updateProduct(admin, a, form({ variants: [{ modelNo: "X1" }] }));
       const b = await draft("B");
       // Skip the pre-check so the partial unique index is what refuses.
       vi.spyOn(ProductModel, "find").mockReturnValue({
         lean: () => Promise.resolve([]),
       } as never);
       const result = await updateProduct(
-        ADMIN,
+        admin,
         b,
         form({ name: "B", variants: [{ modelNo: "Y1" }, { modelNo: "X1" }] }),
       );
@@ -529,10 +541,10 @@ describe("updateProduct", () => {
 
     it("pre-check refuses a model no. another product has in another case (ADR 0055)", async () => {
       const a = await draft("A");
-      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
+      await updateProduct(admin, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
       const b = await draft("B");
       const result = await updateProduct(
-        ADMIN,
+        admin,
         b,
         form({ name: "B", variants: [{ modelNo: "Y1" }, { modelNo: "zz-9" }] }),
       );
@@ -546,13 +558,13 @@ describe("updateProduct", () => {
 
     it("maps a case-only unique-index clash (race) to the right row", async () => {
       const a = await draft("A");
-      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
+      await updateProduct(admin, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
       const b = await draft("B");
       vi.spyOn(ProductModel, "find").mockReturnValue({
         lean: () => Promise.resolve([]),
       } as never);
       const result = await updateProduct(
-        ADMIN,
+        admin,
         b,
         form({ name: "B", variants: [{ modelNo: "Y1" }, { modelNo: "zz-9" }] }),
       );
@@ -563,9 +575,9 @@ describe("updateProduct", () => {
 
     it("keeps its own model no. when only the case changes", async () => {
       const a = await draft("A");
-      await updateProduct(ADMIN, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
+      await updateProduct(admin, a, form({ variants: [{ modelNo: "ZZ-9" }] }));
       const result = await updateProduct(
-        ADMIN,
+        admin,
         a,
         form({ variants: [{ modelNo: "zz-9" }] }),
       );
@@ -577,18 +589,18 @@ describe("updateProduct", () => {
     it("finds a product by any case of its model no. in the list search", async () => {
       const a = await draft("A");
       await updateProduct(
-        ADMIN,
+        admin,
         a,
         form({ variants: [{ modelNo: "AR-013A1" }] }),
       );
-      const page = await listProducts({ q: "ar-013a1" });
+      const page = await listProducts(admin, { q: "ar-013a1" });
       expect(page.items.map((item) => item.id)).toEqual([a]);
     });
 
     it("refuses repeats inside one product (case-insensitive)", async () => {
       const id = await draft();
       const result = await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({ variants: [{ modelNo: "a1" }, { modelNo: "A1" }] }),
       );
@@ -614,10 +626,10 @@ describe("updateProduct", () => {
         },
       },
     );
-    const loaded = await getProductForEdit(id);
+    const loaded = await getProductForEdit(admin, id);
     if (!loaded) throw new Error("fixture missing");
     const result = await updateProduct(
-      ADMIN,
+      admin,
       id,
       { ...loaded.values, description: "Changed" },
       { expectedUpdatedAt: loaded.updatedAt },
@@ -633,18 +645,18 @@ describe("updateProduct", () => {
       const a = await draft("A");
       const b = await draft("B");
       expect((await ProductModel.findById(b).lean())?.slug).toBe("b");
-      await updateProduct(ADMIN, b, form({ name: "B2", slug: "" }));
+      await updateProduct(admin, b, form({ name: "B2", slug: "" }));
       expect((await ProductModel.findById(b).lean())?.slug).toBe("b");
 
       const taken = await updateProduct(
-        ADMIN,
+        admin,
         b,
         form({ name: "B2", slug: "a" }),
       );
       expect(fieldErrorsOf(taken).slug).toBeDefined();
 
       expectOk(
-        await updateProduct(ADMIN, b, form({ name: "B2", slug: "b-new" })),
+        await updateProduct(admin, b, form({ name: "B2", slug: "b-new" })),
       );
       expect((await ProductModel.findById(b).lean())?.slug).toBe("b-new");
       expect(a).toBeTruthy();
@@ -656,7 +668,7 @@ describe("updateProduct", () => {
       const id = await draft();
       await addImage(id);
       const result = await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({ status: "published" }),
       );
@@ -665,9 +677,9 @@ describe("updateProduct", () => {
       // A draft's save expires only the product tags.
       expect(result.tags).toEqual(["products", `product:${id}`]);
 
-      await publishProduct(ADMIN, id);
+      await publishProduct(admin, id);
       const live = await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({ name: "Arc 2", status: "draft" }),
       );
@@ -685,10 +697,10 @@ describe("updateProduct", () => {
 
     it("refuses a save that would leave a published product unpublishable", async () => {
       const id = await draft();
-      await updateProduct(ADMIN, id, form());
+      await updateProduct(admin, id, form());
       await addImage(id);
-      await publishProduct(ADMIN, id);
-      const result = await updateProduct(ADMIN, id, form({ variants: [] }));
+      await publishProduct(admin, id);
+      const result = await updateProduct(admin, id, form({ variants: [] }));
       expect(Object.keys(fieldErrorsOf(result)).sort()).toEqual([
         "status",
         "variants",
@@ -715,7 +727,7 @@ describe("updateProduct", () => {
 
     it("saves while the version matches, refuses once someone wrote since", async () => {
       const id = await draft();
-      const ok = await updateProduct(ADMIN, id, form(), {
+      const ok = await updateProduct(admin, id, form(), {
         expectedUpdatedAt: await versionOf(id),
       });
       expect(ok.ok).toBe(true);
@@ -723,7 +735,7 @@ describe("updateProduct", () => {
       const loaded = await versionOf(id);
       await touch(id);
       const before = await ProductModel.findById(id).lean();
-      const stale = await updateProduct(ADMIN, id, form({ name: "Old tab" }), {
+      const stale = await updateProduct(admin, id, form({ name: "Old tab" }), {
         expectedUpdatedAt: loaded,
       });
       expect(stale).toEqual({
@@ -738,33 +750,33 @@ describe("updateProduct", () => {
     it("refuses a malformed version but allows none", async () => {
       const id = await draft();
       for (const bad of [undefined, "", "2026-13-01", { $gt: "" }, 0]) {
-        const result = await updateProduct(ADMIN, id, form(), {
+        const result = await updateProduct(admin, id, form(), {
           expectedUpdatedAt: bad,
         });
         expect(!result.ok && result.errors.formErrors).toEqual([
           PRODUCT_CHANGED,
         ]);
       }
-      expect((await updateProduct(ADMIN, id, form())).ok).toBe(true);
+      expect((await updateProduct(admin, id, form())).ok).toBe(true);
     });
 
     it("guards publish and unpublish the same way", async () => {
       const id = await draft();
-      await updateProduct(ADMIN, id, form());
+      await updateProduct(admin, id, form());
       await addImage(id);
       const loaded = await versionOf(id);
       await touch(id);
-      const stale = await publishProduct(ADMIN, id, {
+      const stale = await publishProduct(admin, id, {
         expectedUpdatedAt: loaded,
       });
       expect(!stale.ok && stale.errors.formErrors).toEqual([PRODUCT_CHANGED]);
       expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
 
-      const fresh = await publishProduct(ADMIN, id, {
+      const fresh = await publishProduct(admin, id, {
         expectedUpdatedAt: await versionOf(id),
       });
       expect(fresh.ok).toBe(true);
-      const unpub = await unpublishProduct(ADMIN, id, {
+      const unpub = await unpublishProduct(admin, id, {
         expectedUpdatedAt: loaded,
       });
       expect(!unpub.ok && unpub.errors.formErrors).toEqual([PRODUCT_CHANGED]);
@@ -796,10 +808,10 @@ describe("updateProduct", () => {
 
     it("refuses a save when another write lands between read and write", async () => {
       const id = await draft();
-      await updateProduct(ADMIN, id, form());
+      await updateProduct(admin, id, form());
       const loaded = await versionOf(id);
       writeAfterNextRead(id);
-      const result = await updateProduct(ADMIN, id, form({ name: "Racer" }), {
+      const result = await updateProduct(admin, id, form({ name: "Racer" }), {
         expectedUpdatedAt: loaded,
       });
       expect(result).toEqual({
@@ -813,11 +825,11 @@ describe("updateProduct", () => {
 
     it("refuses a publish when another write lands between read and write", async () => {
       const id = await draft();
-      await updateProduct(ADMIN, id, form());
+      await updateProduct(admin, id, form());
       await addImage(id);
       const loaded = await versionOf(id);
       writeAfterNextRead(id);
-      const result = await publishProduct(ADMIN, id, {
+      const result = await publishProduct(admin, id, {
         expectedUpdatedAt: loaded,
       });
       expect(!result.ok && result.errors.formErrors).toEqual([PRODUCT_CHANGED]);
@@ -831,16 +843,16 @@ describe("updateProduct", () => {
 describe("publishProduct / unpublishProduct", () => {
   it("refuses publish until variant, category and image exist", async () => {
     const id = await draft();
-    const first = await publishProduct(ADMIN, id);
+    const first = await publishProduct(admin, id);
     expect(Object.keys(fieldErrorsOf(first)).sort()).toEqual([
       "images",
       "status",
       "variants",
     ]);
 
-    await updateProduct(ADMIN, id, form());
+    await updateProduct(admin, id, form());
     await addImage(id);
-    const done = await publishProduct(ADMIN, id);
+    const done = await publishProduct(admin, id);
     expect(done).toEqual({
       ok: true,
       data: { id },
@@ -852,39 +864,39 @@ describe("publishProduct / unpublishProduct", () => {
 
   it("is a no-op when already in that state, and unpublish returns to draft", async () => {
     const id = await draft();
-    expect(await unpublishProduct(ADMIN, id)).toEqual({
+    expect(await unpublishProduct(admin, id)).toEqual({
       ok: true,
       data: { id },
       tags: [],
     });
-    await updateProduct(ADMIN, id, form());
+    await updateProduct(admin, id, form());
     await addImage(id);
-    await publishProduct(ADMIN, id);
-    expect(await publishProduct(ADMIN, id)).toEqual({
+    await publishProduct(admin, id);
+    expect(await publishProduct(admin, id)).toEqual({
       ok: true,
       data: { id },
       tags: [],
     });
 
-    const result = await unpublishProduct(ADMIN, id);
+    const result = await unpublishProduct(admin, id);
     expect(result.ok).toBe(true);
     expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
     expect((await actions()).at(-1)).toBe("product.unpublish");
   });
 
   it("handles unknown/bad ids and audit failure", async () => {
-    expect((await publishProduct(ADMIN, new ObjectId().toHexString())).ok).toBe(
+    expect((await publishProduct(admin, new ObjectId().toHexString())).ok).toBe(
       false,
     );
-    expect((await publishProduct(ADMIN, { $ne: null })).ok).toBe(false);
-    expect((await unpublishProduct(ADMIN, "x")).ok).toBe(false);
+    expect((await publishProduct(admin, { $ne: null })).ok).toBe(false);
+    expect((await unpublishProduct(admin, "x")).ok).toBe(false);
 
     const id = await draft();
-    await updateProduct(ADMIN, id, form());
+    await updateProduct(admin, id, form());
     await addImage(id);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("boom"));
-    const result = await publishProduct(ADMIN, id);
+    const result = await publishProduct(admin, id);
     expect(result.ok).toBe(false);
     expect(result.tags).toContain("categories");
     expect((await ProductModel.findById(id).lean())?.status).toBe("published");
@@ -894,7 +906,7 @@ describe("publishProduct / unpublishProduct", () => {
 describe("publishProduct re-checks stored references (gate B I-2)", () => {
   async function ready(over: Record<string, unknown> = {}) {
     const id = await draft();
-    expectOk(await updateProduct(ADMIN, id, form(over)));
+    expectOk(await updateProduct(admin, id, form(over)));
     await addImage(id);
     return id;
   }
@@ -902,7 +914,7 @@ describe("publishProduct re-checks stored references (gate B I-2)", () => {
   it("refuses when the main category was deleted since the last save", async () => {
     const id = await ready();
     await CategoryModel.deleteOne({ _id: spot });
-    const result = await publishProduct(ADMIN, id);
+    const result = await publishProduct(admin, id);
     expect(fieldErrorsOf(result).mainCategory?.[0]).toContain("no longer");
     expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
   });
@@ -910,24 +922,24 @@ describe("publishProduct re-checks stored references (gate B I-2)", () => {
   it("refuses when the attached datasheet was deleted", async () => {
     const id = await ready({ datasheetId: datasheet });
     await DatasheetModel.deleteOne({ _id: datasheet });
-    const result = await publishProduct(ADMIN, id);
+    const result = await publishProduct(admin, id);
     expect(fieldErrorsOf(result).datasheetId?.[0]).toContain("no longer");
     expect((await ProductModel.findById(id).lean())?.status).toBe("draft");
   });
 
   it("publishes with an existing datasheet attached", async () => {
     const id = await ready({ datasheetId: datasheet });
-    expect((await publishProduct(ADMIN, id)).ok).toBe(true);
+    expect((await publishProduct(admin, id)).ok).toBe(true);
   });
 });
 
 describe("deleteProduct", () => {
   it("deletes the document, audits ids and counts only, returns tags", async () => {
     const id = await draft("Secret name");
-    await updateProduct(ADMIN, id, form({ name: "Secret name" }));
+    await updateProduct(admin, id, form({ name: "Secret name" }));
     await addImage(id);
 
-    const result = await deleteProduct(ADMIN, id);
+    const result = await deleteProduct(admin, id);
     expect(result).toEqual({
       ok: true,
       data: { id },
@@ -947,10 +959,10 @@ describe("deleteProduct", () => {
 
   it("also expires category and area tags for a published product", async () => {
     const id = await draft();
-    await updateProduct(ADMIN, id, form());
+    await updateProduct(admin, id, form());
     await addImage(id);
-    await publishProduct(ADMIN, id);
-    const result = await deleteProduct(ADMIN, id);
+    await publishProduct(admin, id);
+    const result = await deleteProduct(admin, id);
     expect(result.tags).toEqual([
       "products",
       `product:${id}`,
@@ -960,12 +972,14 @@ describe("deleteProduct", () => {
   });
 
   it("reports missing and bad ids", async () => {
-    expect((await deleteProduct(ADMIN, new ObjectId().toHexString())).ok).toBe(
+    expect((await deleteProduct(admin, new ObjectId().toHexString())).ok).toBe(
       false,
     );
-    expect((await deleteProduct(ADMIN, "x")).ok).toBe(false);
-    expect((await deleteProduct(ADMIN, { $ne: null })).ok).toBe(false);
-    await expect(deleteProduct("x", await draft())).rejects.toThrow(TypeError);
+    expect((await deleteProduct(admin, "x")).ok).toBe(false);
+    expect((await deleteProduct(admin, { $ne: null })).ok).toBe(false);
+    await expect(
+      deleteProduct({ id: "x", headers: new Headers() }, await draft()),
+    ).rejects.toThrow(TypeError);
   });
 });
 
@@ -986,7 +1000,7 @@ describe("listProducts", () => {
 
   it("pages 25 at a time, newest first, with page info", async () => {
     await seed(30);
-    const first = await listProducts({});
+    const first = await listProducts(admin, {});
     expect(first).toMatchObject({
       total: 30,
       page: 1,
@@ -996,10 +1010,10 @@ describe("listProducts", () => {
     expect(first.items).toHaveLength(25);
     expect(first.items[0]?.name).toBe("Product 29");
 
-    const second = await listProducts({ page: "2" });
+    const second = await listProducts(admin, { page: "2" });
     expect(second.items).toHaveLength(5);
     expect(second.items.at(-1)?.name).toBe("Product 00");
-    expect((await listProducts({ page: 9 })).items).toEqual([]);
+    expect((await listProducts(admin, { page: 9 })).items).toEqual([]);
   });
 
   it("falls back to defaults for bad page, status and category values", async () => {
@@ -1014,7 +1028,7 @@ describe("listProducts", () => {
       null,
       "str",
     ]) {
-      const page = await listProducts(bad);
+      const page = await listProducts(admin, bad);
       expect(page.page).toBe(1);
       expect(page.total).toBe(3);
     }
@@ -1022,14 +1036,14 @@ describe("listProducts", () => {
 
   it("filters by status", async () => {
     await seed(4);
-    expect((await listProducts({ status: "published" })).total).toBe(2);
-    expect((await listProducts({ status: "draft" })).total).toBe(2);
+    expect((await listProducts(admin, { status: "published" })).total).toBe(2);
+    expect((await listProducts(admin, { status: "draft" })).total).toBe(2);
   });
 
   it("searches name, family, code and variant model no., trimmed and case-insensitive", async () => {
     const id = await draft("Plain");
     await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({
         name: "Plain",
@@ -1040,29 +1054,31 @@ describe("listProducts", () => {
     );
     await draft("Other");
     for (const q of ["  orbit ", "or-9", "or-9a1", "plain"]) {
-      const page = await listProducts({ q });
+      const page = await listProducts(admin, { q });
       expect(page.items.map((i) => i.id)).toEqual([id]);
     }
-    expect((await listProducts({ q: "zzz" })).total).toBe(0);
+    expect((await listProducts(admin, { q: "zzz" })).total).toBe(0);
   });
 
   it("treats regex metacharacters literally", async () => {
     const id = await draft("Spot (2.0)+");
     await draft("Spot 2x0");
     expect(
-      (await listProducts({ q: "(2.0)+" })).items.map((i) => i.id),
+      (await listProducts(admin, { q: "(2.0)+" })).items.map((i) => i.id),
     ).toEqual([id]);
-    expect((await listProducts({ q: ".*" })).total).toBe(0);
-    expect((await listProducts({ q: "[" })).total).toBe(0);
-    expect((await listProducts({ q: "\\" })).total).toBe(0);
+    expect((await listProducts(admin, { q: ".*" })).total).toBe(0);
+    expect((await listProducts(admin, { q: "[" })).total).toBe(0);
+    expect((await listProducts(admin, { q: "\\" })).total).toBe(0);
   });
 
   it("cuts the search text to 80 characters instead of failing", async () => {
     await draft("Arc");
     const long = "Arc" + "x".repeat(200);
-    const page = await listProducts({ q: long });
+    const page = await listProducts(admin, { q: long });
     expect(page.total).toBe(0);
-    const padded = await listProducts({ q: "Arc" + " ".repeat(200) + "b" });
+    const padded = await listProducts(admin, {
+      q: "Arc" + " ".repeat(200) + "b",
+    });
     expect(padded.total).toBe(1);
   });
 
@@ -1071,7 +1087,7 @@ describe("listProducts", () => {
     const b = await draft("B", track5);
     const c = await draft("C", spot);
     await updateProduct(
-      ADMIN,
+      admin,
       c,
       form({
         name: "C",
@@ -1080,17 +1096,17 @@ describe("listProducts", () => {
       }),
     );
     await draft("D", spot);
-    const ids = (await listProducts({ category: track })).items
+    const ids = (await listProducts(admin, { category: track })).items
       .map((i) => i.id)
       .sort();
     expect(ids).toEqual([a, b, c].sort());
-    expect((await listProducts({ category: track5 })).total).toBe(2);
+    expect((await listProducts(admin, { category: track5 })).total).toBe(2);
   });
 
   it("returns list fields only, never spec values", async () => {
     const id = await draft();
     await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({
         specs: { driver: ["Secret driver"] },
@@ -1098,7 +1114,7 @@ describe("listProducts", () => {
       }),
     );
     await addImage(id);
-    const page = await listProducts({});
+    const page = await listProducts(admin, {});
     expect(page.items[0]).toEqual({
       id,
       name: "Arc",
@@ -1125,7 +1141,7 @@ describe("variant images (gate B L-C)", () => {
     await addImage(id);
     expectOk(
       await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({
           variants: [{ modelNo: "AR-013A1", imagePublicId: imageOf(id) }],
@@ -1147,7 +1163,7 @@ describe("variant images (gate B L-C)", () => {
       imageOf(other, 0), // another product's saved image
     ]) {
       const result = await updateProduct(
-        ADMIN,
+        admin,
         id,
         form({
           variants: [
@@ -1166,7 +1182,7 @@ describe("variant images (gate B L-C)", () => {
   it("refuses a variant image in a shape that isn't ours (schema)", async () => {
     const id = await draft();
     const result = await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({ variants: [{ modelNo: "AR-013A1", imagePublicId: "p/a" }] }),
     );
@@ -1183,7 +1199,7 @@ describe("variant images (gate B L-C)", () => {
       ),
     );
     const result = await updateProduct(
-      ADMIN,
+      admin,
       id,
       form({ variants: [{ modelNo: "AR-013A1", imagePublicId: imageOf(id) }] }),
     );

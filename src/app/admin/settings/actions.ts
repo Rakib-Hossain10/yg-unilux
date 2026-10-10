@@ -9,6 +9,7 @@
 // The audit entries hold no number and no address, only whether one is set.
 
 import { refresh } from "next/cache";
+import { forbidden } from "next/navigation";
 
 import type {
   ActionFailure,
@@ -23,6 +24,8 @@ import type { ServiceResult } from "@/lib/admin/write-result";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
 
+import { pageActor } from "../admin-reads";
+
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
  * browser can send anything. The services re-parse it with the same Zod
@@ -36,6 +39,8 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
 function failure(
   result: ServiceResult<unknown> & { ok: false },
 ): ActionFailure {
+  // A refused actor is a 403, never a form message (ADR 0073).
+  if (result.denied) forbidden();
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
@@ -56,7 +61,9 @@ export async function saveColumnVisibilityAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  return writeResult(await saveColumnVisibility(viewer.user.id, input));
+  return writeResult(
+    await saveColumnVisibility(await pageActor(viewer), input),
+  );
 }
 
 /** Saves the WhatsApp number ("" clears it). */
@@ -64,7 +71,7 @@ export async function saveWhatsappNumberAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  return writeResult(await saveWhatsappNumber(viewer.user.id, input));
+  return writeResult(await saveWhatsappNumber(await pageActor(viewer), input));
 }
 
 /** Saves the company email ("" clears it; the env value is used then). */
@@ -72,5 +79,5 @@ export async function saveCompanyEmailAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  return writeResult(await saveCompanyEmail(viewer.user.id, input));
+  return writeResult(await saveCompanyEmail(await pageActor(viewer), input));
 }

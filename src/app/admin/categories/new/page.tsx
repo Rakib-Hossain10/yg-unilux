@@ -10,13 +10,19 @@ import { CATEGORIES_PATH } from "@/components/admin/category-paths";
 import { listCategoryTree } from "@/lib/admin/categories";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../../admin-reads";
+
 export const metadata: Metadata = { title: "New category" };
 
 export default async function NewCategoryPage({
   searchParams,
 }: PageProps<"/admin/categories/new">) {
-  await requireAdmin();
-  const [tree, query] = await Promise.all([listCategoryTree(), searchParams]);
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
+  const [tree, query] = await Promise.all([
+    readAsAdmin(() => listCategoryTree(actor)),
+    searchParams,
+  ]);
 
   // Main categories only: the depth limit is 2 levels (ADR 0037).
   const parents = tree.map(({ id, name }) => ({ id, name }));

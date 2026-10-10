@@ -8,7 +8,7 @@ import "server-only";
 import type { Types } from "mongoose";
 import { unstable_cache } from "next/cache";
 
-import { getColumnVisibility } from "@/lib/admin/settings";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { connectDb } from "@/lib/db";
 import { CATALOG_TAGS } from "@/lib/revalidate";
 import { MAX_SLUG_LENGTH, SLUG_PATTERN } from "@/lib/slug";

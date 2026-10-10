@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { Types } from "mongoose";
 
 import { connectDb, mongoose } from "@/lib/db";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { CATALOG_TAGS, productTags, type CatalogTag } from "@/lib/revalidate";
 import { MAX_PRODUCT_NAME_LENGTH } from "@/lib/constants";
 import { objectIdSchema } from "@/lib/schemas/common";
@@ -37,6 +38,7 @@ import {
 } from "@/models/product-constants";
 import { SPEC_KEYS, type SpecValues } from "@/models/spec-columns";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import {
   assertActorId,
   auditAndFinish,
@@ -47,7 +49,7 @@ import {
   type ServiceErrors,
   type ServiceResult,
 } from "./write-result";
-import { FILTER_KEY_BY_SPEC, getColumnVisibility } from "./settings";
+import { FILTER_KEY_BY_SPEC } from "./settings";
 
 const { ObjectId } = mongoose.Types;
 
@@ -209,8 +211,10 @@ const LIST_PROJECTION = {
  * one of its children. Bad input falls back to the defaults.
  */
 export async function listProducts(
+  actor: AdminActor,
   input: unknown = {},
 ): Promise<ProductListPage> {
+  await assertAdminActor(actor);
   const raw = typeof input === "object" && input !== null ? input : {};
   const query = listQuerySchema.parse(raw);
   await connectDb();
@@ -333,8 +337,10 @@ function toInput(doc: Product): ProductInput {
 
 /** One product for the edit form, or null if the id is bad or unknown. */
 export async function getProductForEdit(
+  actor: AdminActor,
   id: unknown,
 ): Promise<ProductForEdit | null> {
+  await assertAdminActor(actor);
   const parsedId = productIdSchema.safeParse(id);
   if (!parsedId.success) return null;
 
@@ -612,10 +618,11 @@ const createDraftSchema = z.strictObject({
  * The main category must exist. The rest is filled in on the edit form.
  */
 export async function createDraft(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "products");
+  if (refused) return refused;
   await connectDb();
 
   const parsed = createDraftSchema.safeParse(input);
@@ -657,7 +664,7 @@ export async function createDraft(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "product.create",
       target: { type: "product", id: id.toHexString() },
     },
@@ -726,12 +733,13 @@ const OBJECT_FIELDS = ["specs", "filters"] as const;
  * changed, nothing is written, audited or revalidated.
  */
 export async function updateProduct(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
   input: unknown,
   options: ProductWriteOptions = {},
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "products");
+  if (refused) return refused;
   await connectDb();
 
   const parsedId = productIdSchema.safeParse(id);
@@ -877,7 +885,7 @@ export async function updateProduct(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "product.update",
       target: { type: "product", id: parsedId.data },
       meta: { fields, variantCount: values.variants.length },
@@ -988,21 +996,25 @@ async function setStatus(
 }
 
 /** Publishes a draft; refused with field errors while publishCheck() fails. */
-export function publishProduct(
-  actorId: string,
+export async function publishProduct(
+  actor: AdminActor,
   id: unknown,
   options: ProductWriteOptions = {},
 ): Promise<ServiceResult<{ id: string }>> {
-  return setStatus(actorId, id, "published", options);
+  const refused = await refuseUnlessAdmin(actor, "products");
+  if (refused) return refused;
+  return setStatus(actor.id, id, "published", options);
 }
 
 /** Takes a product back to draft. */
-export function unpublishProduct(
-  actorId: string,
+export async function unpublishProduct(
+  actor: AdminActor,
   id: unknown,
   options: ProductWriteOptions = {},
 ): Promise<ServiceResult<{ id: string }>> {
-  return setStatus(actorId, id, "draft", options);
+  const refused = await refuseUnlessAdmin(actor, "products");
+  if (refused) return refused;
+  return setStatus(actor.id, id, "draft", options);
 }
 
 /**
@@ -1011,10 +1023,11 @@ export function unpublishProduct(
  * audit entry holds ids and counts, never names.
  */
 export async function deleteProduct(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "products");
+  if (refused) return refused;
   await connectDb();
 
   const parsedId = productIdSchema.safeParse(id);
@@ -1033,7 +1046,7 @@ export async function deleteProduct(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "product.delete",
       target: { type: "product", id: parsedId.data },
       meta: {

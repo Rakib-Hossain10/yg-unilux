@@ -32,7 +32,7 @@ import {
   type ImportPreviewView,
   type PlanView,
 } from "@/components/admin/import/import-view";
-import { getColumnVisibility } from "@/lib/admin/settings";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { buildPublicId } from "@/lib/cloudinary-ids";
 import * as cloudinary from "@/lib/cloudinary";
 import { MAX_IMPORT_PLAN_ENTRIES } from "@/lib/constants";

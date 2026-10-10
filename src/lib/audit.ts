@@ -80,6 +80,8 @@ const TARGET_ID_PATTERNS: Record<AuditTargetType, RegExp> = {
   datasheet: OBJECT_ID_HEX,
   settings: SETTINGS_KEY,
   import: IMPORT_ID,
+  access_request: OBJECT_ID_HEX,
+  customer: OBJECT_ID_HEX,
 };
 
 /* Caps that keep a single entry small even before the byte check. */

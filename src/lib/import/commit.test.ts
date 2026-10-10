@@ -19,6 +19,7 @@ import * as storage from "@/lib/storage";
 import { AreaModel, CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { testActor } from "../../../test/helpers/admin-actor";
 import {
   fillTemplate,
   goldenTemplateFile,
@@ -39,6 +40,12 @@ import {
   type CommitBatchResult,
   type ImportPreview,
 } from ".";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
 
 vi.mock("@/lib/storage", () => {
   class StorageConditionError extends Error {
@@ -63,7 +70,7 @@ const { ObjectId } = mongoose.Types;
 const IMPORT_ID = "00000000-0000-4000-8000-000000000001";
 const KEY = `imports/${IMPORT_ID}.xlsx`;
 const ETAG = '"etag-1"';
-const ACTOR = new ObjectId().toHexString();
+const admin = testActor();
 
 let defaultCategory: string;
 let templateBytes: Buffer;
@@ -133,7 +140,7 @@ function stageFile(bytes: Uint8Array): void {
 type PlanPreview = Extract<ImportPreview, { kind: "plan" }>;
 
 async function preview(): Promise<PlanPreview> {
-  const result = await previewImport({
+  const result = await previewImport(admin, {
     key: KEY,
     defaultCategoryId: defaultCategory,
   });
@@ -164,7 +171,7 @@ async function commitOk(
   batch = 0,
   ack = false,
 ): Promise<{ data: CommitBatchResult; tags: string[] }> {
-  const result = await commitImportBatch(ACTOR, commitInput(p, batch, ack));
+  const result = await commitImportBatch(admin, commitInput(p, batch, ack));
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   return { data: result.data, tags: result.tags };
 }
@@ -329,7 +336,7 @@ describe("commitImportBatch: idempotence", () => {
 describe("commitImportBatch: hash and staleness checks", () => {
   it("refuses a plan hash that is not the preview's", async () => {
     const p = await preview();
-    const result = await commitImportBatch(ACTOR, {
+    const result = await commitImportBatch(admin, {
       ...commitInput(p),
       planHash: "0".repeat(64),
     });
@@ -347,7 +354,7 @@ describe("commitImportBatch: hash and staleness checks", () => {
     const input = commitInput(p);
     const hashes = [...(input.entryHashes as string[])];
     hashes[0] = "f".repeat(64);
-    const result = await commitImportBatch(ACTOR, {
+    const result = await commitImportBatch(admin, {
       ...input,
       entryHashes: hashes,
     });
@@ -362,7 +369,7 @@ describe("commitImportBatch: hash and staleness checks", () => {
   it("refuses a different file under the same key (sheet hash differs)", async () => {
     const p = await preview();
     stageFile(await templateWith(goldenTemplateRows().slice(0, 3)));
-    const result = await commitImportBatch(ACTOR, commitInput(p));
+    const result = await commitImportBatch(admin, commitInput(p));
     expect(result).toMatchObject({
       ok: false,
       errors: { formErrors: [PREVIEW_AGAIN] },
@@ -388,7 +395,7 @@ describe("commitImportBatch: hash and staleness checks", () => {
       { $set: { description: "Edited by the admin meanwhile" } },
     );
     const before = await snapshot();
-    const result = await commitImportBatch(ACTOR, commitInput(p));
+    const result = await commitImportBatch(admin, commitInput(p));
     expect(result).toMatchObject({
       ok: false,
       errors: { formErrors: [PREVIEW_AGAIN] },
@@ -401,7 +408,7 @@ describe("commitImportBatch: hash and staleness checks", () => {
     vi.mocked(storage.getImportBytes).mockRejectedValueOnce(
       new storage.StorageConditionError(),
     );
-    const result = await commitImportBatch(ACTOR, commitInput(p));
+    const result = await commitImportBatch(admin, commitInput(p));
     expect(result).toMatchObject({
       ok: false,
       errors: { formErrors: [FILE_CHANGED] },
@@ -410,7 +417,7 @@ describe("commitImportBatch: hash and staleness checks", () => {
 
   it("refuses a batch past the last one", async () => {
     const result = await commitImportBatch(
-      ACTOR,
+      admin,
       commitInput(await preview(), 1),
     );
     expect(result).toMatchObject({
@@ -423,11 +430,11 @@ describe("commitImportBatch: hash and staleness checks", () => {
     const p = await preview();
     vi.mocked(storage.getImportBytes).mockClear();
     expect(
-      (await commitImportBatch(ACTOR, { ...commitInput(p), extra: 1 })).ok,
+      (await commitImportBatch(admin, { ...commitInput(p), extra: 1 })).ok,
     ).toBe(false);
     expect(
       (
-        await commitImportBatch(ACTOR, {
+        await commitImportBatch(admin, {
           ...commitInput(p),
           key: "datasheets/x.xlsx",
         })
@@ -438,7 +445,10 @@ describe("commitImportBatch: hash and staleness checks", () => {
 
   it("throws without a signed-in admin's id", async () => {
     await expect(
-      commitImportBatch("not-an-id", commitInput(await preview())),
+      commitImportBatch(
+        { id: "not-an-id", headers: new Headers() },
+        commitInput(await preview()),
+      ),
     ).rejects.toThrow(TypeError);
   });
 });
@@ -513,7 +523,7 @@ describe("commitImportBatch: updates", () => {
     expect(arcEntry.variantsRemoved).toEqual(["AR-013A2"]);
     const before = await snapshot();
 
-    const refused = await commitImportBatch(ACTOR, commitInput(p, 0, false));
+    const refused = await commitImportBatch(admin, commitInput(p, 0, false));
     expect(refused).toMatchObject({
       ok: false,
       errors: {
@@ -857,13 +867,13 @@ describe("commitImportBatch: batches", () => {
 
 describe("finishImport", () => {
   it("deletes the staged file", async () => {
-    const result = await finishImport({ key: KEY });
+    const result = await finishImport(admin, { key: KEY });
     expect(result).toEqual({ ok: true, data: { deleted: true }, tags: [] });
     expect(storage.deleteImportUpload).toHaveBeenCalledWith(KEY);
   });
 
   it("refuses a key that is not a staged import", async () => {
-    const result = await finishImport({ key: "datasheets/a.xlsx" });
+    const result = await finishImport(admin, { key: "datasheets/a.xlsx" });
     expect(result.ok).toBe(false);
     expect(storage.deleteImportUpload).not.toHaveBeenCalled();
   });
@@ -874,7 +884,7 @@ describe("finishImport", () => {
     );
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const result = await finishImport({ key: KEY });
+      const result = await finishImport(admin, { key: KEY });
       expect(result).toEqual({ ok: true, data: { deleted: false }, tags: [] });
       expect(error.mock.calls.flat().join(" ")).not.toContain(KEY);
     } finally {

@@ -40,6 +40,7 @@ import {
   type SpecValues,
 } from "@/models/spec-columns";
 
+import { testActor } from "./helpers/admin-actor";
 import { setupMemoryDb } from "./helpers/memory-db";
 import { createNextCacheHarness, nextTick } from "./helpers/next-cache-harness";
 import { testPublicId } from "./helpers/public-ids";
@@ -47,7 +48,9 @@ import { testPublicId } from "./helpers/public-ids";
 const getSession = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
-  getSessionFromDb: getSession,
+  getSessionFromDb: (
+    await import("./helpers/admin-actor")
+  ).sessionsWithTestActors(getSession),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/server", async (importOriginal) => ({
@@ -60,7 +63,7 @@ import { GET as restrictedRoute } from "@/app/api/catalog/restricted/[productId]
 setupMemoryDb("yg_product_page_gate_b");
 
 const harness = createNextCacheHarness();
-const ACTOR = new Types.ObjectId().toHexString();
+const admin = testActor();
 
 // Every value is a unique token, so a leak is a plain substring match.
 const tok = (key: SpecKey, where: string) => `GBQ~${key}~${where}~`;
@@ -167,7 +170,7 @@ async function saveVisibility(
   changes: Partial<Record<SpecKey, "public" | "restricted">>,
 ): Promise<void> {
   await nextTick();
-  const result = await saveColumnVisibility(ACTOR, {
+  const result = await saveColumnVisibility(admin, {
     ...DEFAULT_COLUMN_VISIBILITY,
     ...changes,
   });

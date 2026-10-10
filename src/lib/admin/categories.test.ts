@@ -10,6 +10,7 @@ import { mongoose } from "@/lib/db";
 import { CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { MAX_CATEGORY_DESCRIPTION_LENGTH } from "@/lib/schemas/category";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
@@ -26,6 +27,12 @@ import {
 import { badFormatMessage, IMAGE_REJECTED } from "./uploads";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
+
 const cloudinaryMock = vi.hoisted(() => ({
   inspectImage: vi.fn(),
   destroyImage: vi.fn(),
@@ -36,7 +43,8 @@ vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 setupMemoryDb("yg_admin_categories_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
+const ADMIN = admin.id;
 
 beforeAll(async () => {
   // Indexes are built by `npm run db:indexes`, never on startup; build the
@@ -72,7 +80,7 @@ function expectOk<T>(result: ServiceResult<T>): T {
 
 /* Creates a category through the service and returns its id. */
 async function create(name: string, parent: string | null = null, slug = "") {
-  return expectOk(await createCategory(ADMIN, { name, parent, slug })).id;
+  return expectOk(await createCategory(admin, { name, parent, slug })).id;
 }
 
 /* Sibling names under `parent` in display order. */
@@ -92,7 +100,7 @@ async function auditActions(): Promise<string[]> {
 
 describe("createCategory", () => {
   it("creates a main category with a slug from the name, audits it and returns the tree tag", async () => {
-    const result = await createCategory(ADMIN, { name: "Spot Lights" });
+    const result = await createCategory(admin, { name: "Spot Lights" });
 
     expect(result).toEqual({
       ok: true,
@@ -149,7 +157,7 @@ describe("createCategory", () => {
 
   it("refuses a typed slug already used under the same parent, writing nothing", async () => {
     await create("Spot Lights");
-    const result = await createCategory(ADMIN, {
+    const result = await createCategory(admin, {
       name: "Spots",
       slug: "spot-lights",
     });
@@ -171,7 +179,7 @@ describe("createCategory", () => {
     // Simulate another write winning between the check and the insert.
     vi.spyOn(CategoryModel, "exists").mockResolvedValue(null);
 
-    const result = await createCategory(ADMIN, {
+    const result = await createCategory(admin, {
       name: "Spot",
       slug: "spot-lights",
     });
@@ -183,7 +191,7 @@ describe("createCategory", () => {
   });
 
   it("asks for a slug when the name has no letters or digits for one", async () => {
-    const result = await createCategory(ADMIN, { name: "射灯" });
+    const result = await createCategory(admin, { name: "射灯" });
     expect(!result.ok && result.errors.fieldErrors.slug).toEqual([
       expect.stringMatching(/Enter a slug/),
     ]);
@@ -195,7 +203,7 @@ describe("createCategory", () => {
     const spot = await create("Spot Lights");
     const recessed = await create("Recessed", spot);
 
-    const result = await createCategory(ADMIN, {
+    const result = await createCategory(admin, {
       name: "Deep",
       parent: recessed,
     });
@@ -211,7 +219,7 @@ describe("createCategory", () => {
   });
 
   it("refuses a parent that does not exist", async () => {
-    const result = await createCategory(ADMIN, {
+    const result = await createCategory(admin, {
       name: "Orphan",
       parent: new ObjectId().toHexString(),
     });
@@ -222,7 +230,7 @@ describe("createCategory", () => {
   });
 
   it("returns Zod field errors for bad input and writes nothing", async () => {
-    const result = await createCategory(ADMIN, { name: "", order: 5 });
+    const result = await createCategory(admin, { name: "", order: 5 });
     expect(result.ok).toBe(false);
     expect(result.tags).toEqual([]);
     expect(!result.ok && result.errors.fieldErrors.name).toBeDefined();
@@ -231,9 +239,9 @@ describe("createCategory", () => {
   });
 
   it("throws before writing when the actor id is not an ObjectId", async () => {
-    await expect(createCategory("admin", { name: "Spot" })).rejects.toThrow(
-      TypeError,
-    );
+    await expect(
+      createCategory({ id: "admin", headers: new Headers() }, { name: "Spot" }),
+    ).rejects.toThrow(TypeError);
     expect(await CategoryModel.countDocuments()).toBe(0);
   });
 
@@ -243,7 +251,7 @@ describe("createCategory", () => {
       new Error("E11000 secret value Spot Lights"),
     );
 
-    const result = await createCategory(ADMIN, { name: "Spot Lights" });
+    const result = await createCategory(admin, { name: "Spot Lights" });
 
     expect(result).toEqual({
       ok: false,
@@ -263,7 +271,7 @@ describe("createCategory", () => {
 describe("updateCategory", () => {
   it("saves changed fields, audits their names only and returns categories + products", async () => {
     const id = await create("Spot Lights");
-    const result = await updateCategory(ADMIN, id, {
+    const result = await updateCategory(admin, id, {
       name: "Spot Lighting",
       slug: "spot-lighting",
       description: "All spots.",
@@ -288,20 +296,20 @@ describe("updateCategory", () => {
 
   it("keeps the current slug when the slug is left empty", async () => {
     const id = await create("Spot Lights");
-    expectOk(await updateCategory(ADMIN, id, { name: "Spots", slug: "" }));
+    expectOk(await updateCategory(admin, id, { name: "Spots", slug: "" }));
     expect((await CategoryModel.findById(id).lean())?.slug).toBe("spot-lights");
   });
 
   it("removes the description when it is cleared", async () => {
     const id = await create("Spot Lights");
     expectOk(
-      await updateCategory(ADMIN, id, {
+      await updateCategory(admin, id, {
         name: "Spot Lights",
         description: "Text",
       }),
     );
     expectOk(
-      await updateCategory(ADMIN, id, { name: "Spot Lights", description: "" }),
+      await updateCategory(admin, id, { name: "Spot Lights", description: "" }),
     );
 
     const row = await CategoryModel.findById(id).lean();
@@ -312,7 +320,7 @@ describe("updateCategory", () => {
 
   it("writes, audits and revalidates nothing when nothing changed", async () => {
     const id = await create("Spot Lights");
-    const result = await updateCategory(ADMIN, id, {
+    const result = await updateCategory(admin, id, {
       name: "Spot Lights",
       slug: "spot-lights",
     });
@@ -326,7 +334,7 @@ describe("updateCategory", () => {
     const loose = await create("Trimless");
 
     expectOk(
-      await updateCategory(ADMIN, loose, { name: "Trimless", parent: spot }),
+      await updateCategory(admin, loose, { name: "Trimless", parent: spot }),
     );
     expect(await namesUnder(spot)).toEqual(["Recessed", "Trimless"]);
     const entry = await AuditLogModel.findOne({
@@ -340,7 +348,7 @@ describe("updateCategory", () => {
     const recessed = await create("Recessed", spot);
     const loose = await create("Trimless");
 
-    const result = await updateCategory(ADMIN, loose, {
+    const result = await updateCategory(admin, loose, {
       name: "Trimless",
       parent: recessed,
     });
@@ -353,7 +361,7 @@ describe("updateCategory", () => {
     await create("Recessed", spot);
     const track = await create("Track Lights");
 
-    const result = await updateCategory(ADMIN, spot, {
+    const result = await updateCategory(admin, spot, {
       name: "Spot Lights",
       parent: track,
     });
@@ -367,14 +375,14 @@ describe("updateCategory", () => {
     const spot = await create("Spot Lights");
     const recessed = await create("Recessed", spot);
 
-    const self = await updateCategory(ADMIN, spot, {
+    const self = await updateCategory(admin, spot, {
       name: "Spot Lights",
       parent: spot,
     });
     expect(!self.ok && self.errors.fieldErrors.parent).toEqual([
       expect.stringMatching(/its own parent/),
     ]);
-    const cycle = await updateCategory(ADMIN, spot, {
+    const cycle = await updateCategory(admin, spot, {
       name: "Spot Lights",
       parent: recessed,
     });
@@ -388,7 +396,7 @@ describe("updateCategory", () => {
     await create("Trimless", spot);
     const loose = await create("Trimless");
 
-    const result = await updateCategory(ADMIN, loose, {
+    const result = await updateCategory(admin, loose, {
       name: "Trimless",
       parent: spot,
     });
@@ -398,7 +406,7 @@ describe("updateCategory", () => {
 
   it("returns not found for an unknown or malformed id", async () => {
     for (const id of [new ObjectId().toHexString(), "nope", { $ne: null }]) {
-      const result = await updateCategory(ADMIN, id, { name: "X" });
+      const result = await updateCategory(admin, id, { name: "X" });
       expect(result).toEqual({
         ok: false,
         errors: {
@@ -417,7 +425,7 @@ describe("moveCategory", () => {
     const b = await create("B");
     const c = await create("C");
 
-    const result = await moveCategory(ADMIN, { id: b, direction: "up" });
+    const result = await moveCategory(admin, { id: b, direction: "up" });
     expect(result).toEqual({
       ok: true,
       data: { moved: true },
@@ -425,8 +433,8 @@ describe("moveCategory", () => {
     });
     expect(await namesUnder(null)).toEqual(["B", "A", "C"]);
 
-    expectOk(await moveCategory(ADMIN, { id: b, direction: "down" }));
-    expectOk(await moveCategory(ADMIN, { id: b, direction: "down" }));
+    expectOk(await moveCategory(admin, { id: b, direction: "down" }));
+    expectOk(await moveCategory(admin, { id: b, direction: "down" }));
     expect(await namesUnder(null)).toEqual(["A", "C", "B"]);
 
     const entry = await AuditLogModel.findOne({
@@ -441,13 +449,13 @@ describe("moveCategory", () => {
     const a = await create("A");
     const b = await create("B");
 
-    expect(await moveCategory(ADMIN, { id: a, direction: "up" })).toEqual({
+    expect(await moveCategory(admin, { id: a, direction: "up" })).toEqual({
       ok: true,
       data: { moved: false },
       tags: [],
     });
     expect(
-      (await moveCategory(ADMIN, { id: b, direction: "down" })).tags,
+      (await moveCategory(admin, { id: b, direction: "down" })).tags,
     ).toEqual([]);
     expect(await namesUnder(null)).toEqual(["A", "B"]);
     expect(await auditActions()).toEqual([
@@ -462,7 +470,7 @@ describe("moveCategory", () => {
     const recessed = await create("Recessed", spot);
 
     expect(
-      (await moveCategory(ADMIN, { id: recessed, direction: "up" })).ok,
+      (await moveCategory(admin, { id: recessed, direction: "up" })).ok,
     ).toBe(true);
     expect(await namesUnder(spot)).toEqual(["Recessed"]);
     expect(await namesUnder(null)).toEqual(["Spot Lights", "Track Lights"]);
@@ -477,17 +485,17 @@ describe("moveCategory", () => {
     const c = await CategoryModel.findOne({ slug: "c" }).lean();
 
     expectOk(
-      await moveCategory(ADMIN, { id: c?._id.toHexString(), direction: "up" }),
+      await moveCategory(admin, { id: c?._id.toHexString(), direction: "up" }),
     );
     expect(await namesUnder(null)).toEqual(["A", "C", "B"]);
   });
 
   it("rejects a bad direction and an unknown id", async () => {
     const a = await create("A");
-    expect((await moveCategory(ADMIN, { id: a, direction: "left" })).ok).toBe(
+    expect((await moveCategory(admin, { id: a, direction: "left" })).ok).toBe(
       false,
     );
-    const missing = await moveCategory(ADMIN, {
+    const missing = await moveCategory(admin, {
       id: new ObjectId().toHexString(),
       direction: "up",
     });
@@ -512,7 +520,7 @@ describe("deleteCategory", () => {
     const spot = await create("Spot Lights");
     const recessed = await create("Recessed", spot);
 
-    const result = await deleteCategory(ADMIN, recessed);
+    const result = await deleteCategory(admin, recessed);
     expect(result).toEqual({
       ok: true,
       data: { id: recessed },
@@ -533,7 +541,7 @@ describe("deleteCategory", () => {
     await create("Recessed", spot);
     await create("Surface", spot);
 
-    const result = await deleteCategory(ADMIN, spot);
+    const result = await deleteCategory(admin, spot);
     expect(result).toEqual({
       ok: false,
       errors: {
@@ -549,7 +557,7 @@ describe("deleteCategory", () => {
     const spot = await create("Spot Lights");
     await product(spot);
 
-    const result = await deleteCategory(ADMIN, spot);
+    const result = await deleteCategory(admin, spot);
     expect(!result.ok && result.errors.formErrors).toEqual([
       expect.stringMatching(/1 product uses it/),
     ]);
@@ -562,7 +570,7 @@ describe("deleteCategory", () => {
     await product(spot, [recessed]);
     await product(spot, [recessed]);
 
-    const result = await deleteCategory(ADMIN, recessed);
+    const result = await deleteCategory(admin, recessed);
     expect(!result.ok && result.errors.formErrors).toEqual([
       expect.stringMatching(/2 products use it/),
     ]);
@@ -575,13 +583,13 @@ describe("deleteCategory", () => {
     await create("Recessed", spot);
     await product(spot);
 
-    const result = await deleteCategory(ADMIN, spot);
+    const result = await deleteCategory(admin, spot);
     expect(!result.ok && result.errors.formErrors).toHaveLength(2);
   });
 
   it("returns not found for an unknown or malformed id", async () => {
     for (const id of [new ObjectId().toHexString(), "x", 7]) {
-      const result = await deleteCategory(ADMIN, id);
+      const result = await deleteCategory(admin, id);
       expect(!result.ok && result.errors.formErrors).toEqual([
         expect.stringMatching(/no longer exists/),
       ]);
@@ -593,7 +601,7 @@ describe("deleteCategory", () => {
     const spot = await create("Spot Lights");
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("down"));
 
-    const result = await deleteCategory(ADMIN, spot);
+    const result = await deleteCategory(admin, spot);
     expect(result).toEqual({
       ok: false,
       errors: { formErrors: [AUDIT_FAILED_MESSAGE], fieldErrors: {} },
@@ -609,9 +617,9 @@ describe("reads", () => {
     const spot = await create("Spot Lights");
     await create("10mm", track);
     await create("5mm", track);
-    await moveCategory(ADMIN, { id: spot, direction: "up" });
+    await moveCategory(admin, { id: spot, direction: "up" });
 
-    const tree = await listCategoryTree();
+    const tree = await listCategoryTree(admin);
     expect(tree.map((node) => node.name)).toEqual([
       "Spot Lights",
       "Track Lights",
@@ -630,7 +638,7 @@ describe("reads", () => {
       slug: "lost",
       parent: new ObjectId(),
     });
-    expect((await listCategoryTree()).map((node) => node.name)).toEqual([
+    expect((await listCategoryTree(admin)).map((node) => node.name)).toEqual([
       "Lost",
     ]);
   });
@@ -639,7 +647,7 @@ describe("reads", () => {
     const spot = await create("Spot Lights");
     const recessed = await create("Recessed", spot);
 
-    expect(await getCategoryForEdit(recessed)).toEqual({
+    expect(await getCategoryForEdit(admin, recessed)).toEqual({
       id: recessed,
       name: "Recessed",
       slug: "recessed",
@@ -648,8 +656,10 @@ describe("reads", () => {
       icon: null,
       coverImage: null,
     });
-    expect(await getCategoryForEdit(new ObjectId().toHexString())).toBeNull();
-    expect(await getCategoryForEdit({ $ne: null })).toBeNull();
+    expect(
+      await getCategoryForEdit(admin, new ObjectId().toHexString()),
+    ).toBeNull();
+    expect(await getCategoryForEdit(admin, { $ne: null })).toBeNull();
   });
 });
 
@@ -657,7 +667,7 @@ describe("description", () => {
   it("trims it, caps it at 2000 characters and stores nothing for blank", async () => {
     const id = await create("Spot Lights");
     expectOk(
-      await updateCategory(ADMIN, id, {
+      await updateCategory(admin, id, {
         name: "Spot Lights",
         description: "  Narrow beams.  ",
       }),
@@ -666,7 +676,7 @@ describe("description", () => {
       "Narrow beams.",
     );
 
-    const tooLong = await updateCategory(ADMIN, id, {
+    const tooLong = await updateCategory(admin, id, {
       name: "Spot Lights",
       description: "x".repeat(MAX_CATEGORY_DESCRIPTION_LENGTH + 1),
     });
@@ -676,7 +686,7 @@ describe("description", () => {
     );
     expect(
       (
-        await updateCategory(ADMIN, id, {
+        await updateCategory(admin, id, {
           name: "Spot Lights",
           description: "x".repeat(MAX_CATEGORY_DESCRIPTION_LENGTH),
         })
@@ -684,7 +694,7 @@ describe("description", () => {
     ).toBe(true);
 
     expectOk(
-      await updateCategory(ADMIN, id, {
+      await updateCategory(admin, id, {
         name: "Spot Lights",
         description: " ",
       }),
@@ -703,7 +713,7 @@ describe("category icon and cover", () => {
   it("signs an icon upload with png/svg/webp and a cover with jpg/png/webp", async () => {
     const id = await create("Spot Lights");
     const icon = expectOk(
-      await signCategoryImageUpload(ADMIN, { categoryId: id, slot: "icon" }),
+      await signCategoryImageUpload(admin, { categoryId: id, slot: "icon" }),
     );
     expect(icon.publicId).toMatch(
       new RegExp(`^yg/categories/${id}/[0-9a-f-]{36}$`),
@@ -714,7 +724,7 @@ describe("category icon and cover", () => {
       ["png", "svg", "webp"],
     );
     expectOk(
-      await signCategoryImageUpload(ADMIN, { categoryId: id, slot: "cover" }),
+      await signCategoryImageUpload(admin, { categoryId: id, slot: "cover" }),
     );
     expect(cloudinaryMock.signImageUpload).toHaveBeenLastCalledWith(
       expect.any(String),
@@ -731,7 +741,7 @@ describe("category icon and cover", () => {
       { categoryId: id, slot: "icon", publicId: "yg/x" },
       { categoryId: { $ne: null }, slot: "icon" },
     ]) {
-      expect((await signCategoryImageUpload(ADMIN, input)).ok).toBe(false);
+      expect((await signCategoryImageUpload(admin, input)).ok).toBe(false);
     }
     expect(cloudinaryMock.signImageUpload).not.toHaveBeenCalled();
   });
@@ -745,7 +755,7 @@ describe("category icon and cover", () => {
       const id = await create("Spot Lights");
       await AuditLogModel.deleteMany({});
       const publicId = img(id);
-      const result = await setCategoryImage(ADMIN, {
+      const result = await setCategoryImage(admin, {
         categoryId: id,
         slot,
         publicId,
@@ -771,20 +781,20 @@ describe("category icon and cover", () => {
   it("keeps the two slots apart", async () => {
     const id = await create("Spot Lights");
     expectOk(
-      await setCategoryImage(ADMIN, {
+      await setCategoryImage(admin, {
         categoryId: id,
         slot: "icon",
         publicId: img(id, 1),
       }),
     );
     expectOk(
-      await setCategoryImage(ADMIN, {
+      await setCategoryImage(admin, {
         categoryId: id,
         slot: "cover",
         publicId: img(id, 2),
       }),
     );
-    expect(await getCategoryForEdit(id)).toMatchObject({
+    expect(await getCategoryForEdit(admin, id)).toMatchObject({
       icon: img(id, 1),
       coverImage: img(id, 2),
     });
@@ -797,7 +807,7 @@ describe("category icon and cover", () => {
         { _id: id },
         { $set: { coverImage: img(id) } },
       );
-      const result = await setCategoryImage(ADMIN, {
+      const result = await setCategoryImage(admin, {
         categoryId: id,
         slot: "cover",
         publicId,
@@ -817,7 +827,7 @@ describe("category icon and cover", () => {
     const id = await create("Spot Lights");
     await CategoryModel.updateOne({ _id: id }, { $set: { icon: img(id) } });
     expect(
-      await setCategoryImage(ADMIN, {
+      await setCategoryImage(admin, {
         categoryId: id,
         slot: "icon",
         publicId: img(id),
@@ -838,7 +848,7 @@ describe("category icon and cover", () => {
       cloudinaryMock.inspectImage.mockResolvedValue({ ok: false, reason });
       const publicId = img(id, 3);
       expect(
-        await setCategoryImage(ADMIN, {
+        await setCategoryImage(admin, {
           categoryId: id,
           slot: "icon",
           publicId,
@@ -865,7 +875,7 @@ describe("category icon and cover", () => {
       ok: false,
       reason: "bad_format",
     });
-    const result = await setCategoryImage(ADMIN, {
+    const result = await setCategoryImage(admin, {
       categoryId: id,
       slot: "cover",
       publicId: img(id),
@@ -882,7 +892,7 @@ describe("category icon and cover", () => {
       ok: false,
       reason: "unavailable",
     });
-    const result = await setCategoryImage(ADMIN, {
+    const result = await setCategoryImage(admin, {
       categoryId: id,
       slot: "icon",
       publicId: img(id),
@@ -900,7 +910,7 @@ describe("category icon and cover", () => {
       testPublicId(0, id, "product"),
     ]) {
       expect(
-        await setCategoryImage(ADMIN, {
+        await setCategoryImage(admin, {
           categoryId: id,
           slot: "icon",
           publicId,
@@ -928,7 +938,7 @@ describe("category icon and cover", () => {
       { categoryId: missing, slot: "icon", publicId: img(missing) },
       { categoryId: id, slot: "icon", publicId: null, order: 1 },
     ]) {
-      expect((await setCategoryImage(ADMIN, input)).ok).toBe(false);
+      expect((await setCategoryImage(admin, input)).ok).toBe(false);
     }
     expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
     expect(await CategoryModel.findById(id).lean()).not.toHaveProperty("icon");
@@ -949,7 +959,7 @@ describe("category icon and cover", () => {
     const id = await create("Spot Lights");
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("down"));
-    const result = await setCategoryImage(ADMIN, {
+    const result = await setCategoryImage(admin, {
       categoryId: id,
       slot: "icon",
       publicId: img(id),

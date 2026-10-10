@@ -18,11 +18,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_IMPORT_BYTES, XLSX_MIME_TYPE } from "./constants";
 import { IMPORT_KEY_PATTERN } from "./schemas/import";
 import {
+  attachmentDisposition,
   copyObject,
   deleteImportUpload,
   getImportBytes,
   getObjectBytes,
   headObject,
+  presignGet,
   presignImportUpload,
   presignPut,
   PRESIGNED_PUT_TTL_SECONDS,
@@ -356,5 +358,98 @@ describe("getImportBytes", () => {
       Bucket: "yg-private",
       Key: KEY,
     });
+  });
+});
+
+const DATASHEET_KEY = "datasheets/0b9c6f1e-2a4d-4c8b-9e7f-1a2b3c4d5e6f.xlsx";
+
+describe("presignGet (datasheet download, ADR 0071)", () => {
+  async function signed(fileName: string) {
+    const get = await presignGet({ key: DATASHEET_KEY, fileName });
+    return { get, url: new URL(get.url) };
+  }
+
+  it("is a 60 second GET on the account host for exactly that key", async () => {
+    const { get, url } = await signed("Arc.xlsx");
+    expect(url.protocol).toBe("https:");
+    expect(url.host).toBe("acct123.r2.cloudflarestorage.com");
+    expect(url.pathname).toBe(`/yg-private/${DATASHEET_KEY}`);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("60");
+    expect(get.expiresIn).toBe(60);
+    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("signs the xlsx content type and an attachment disposition", async () => {
+    const { url } = await signed("Arc family.xlsx");
+    expect(url.searchParams.get("response-content-type")).toBe(XLSX_MIME_TYPE);
+    expect(url.searchParams.get("response-content-disposition")).toBe(
+      `attachment; filename="Arc family.xlsx"; filename*=UTF-8''Arc%20family.xlsx`,
+    );
+  });
+
+  it("keeps a non-ASCII name in filename* and an ASCII fallback", async () => {
+    const { url } = await signed("Lámpara 灯具 Ü.xlsx");
+    expect(url.searchParams.get("response-content-disposition")).toBe(
+      `attachment; filename="L_mpara __ _.xlsx"; filename*=UTF-8''L%C3%A1mpara%20%E7%81%AF%E5%85%B7%20%C3%9C.xlsx`,
+    );
+  });
+
+  it.each([
+    "imports/0b9c6f1e-2a4d-4c8b-9e7f-1a2b3c4d5e6f.xlsx",
+    "incoming/0b9c6f1e-2a4d-4c8b-9e7f-1a2b3c4d5e6f.xlsx",
+    "whistleblower/case-1/photo.jpg",
+    "datasheets/../imports/x.xlsx",
+    `${DATASHEET_KEY}?x=1`,
+    "",
+  ])("refuses to sign %j (not a stored datasheet key)", async (key) => {
+    await expect(presignGet({ key, fileName: "a.xlsx" })).rejects.toThrow(
+      TypeError,
+    );
+  });
+});
+
+describe("attachmentDisposition", () => {
+  it.each<[string, string]>([
+    [
+      'a"b\\c.xlsx',
+      `attachment; filename="a_b_c.xlsx"; filename*=UTF-8''a%22b_c.xlsx`,
+    ],
+    [
+      "evil\r\nSet-Cookie: x=1.xlsx",
+      `attachment; filename="evilSet-Cookie: x=1.xlsx"; filename*=UTF-8''evilSet-Cookie%3A%20x%3D1.xlsx`,
+    ],
+    [
+      "it's (v2)*.xlsx",
+      `attachment; filename="it's (v2)*.xlsx"; filename*=UTF-8''it%27s%20%28v2%29%2A.xlsx`,
+    ],
+    [
+      "../../x.xlsx",
+      `attachment; filename=".._.._x.xlsx"; filename*=UTF-8''.._.._x.xlsx`,
+    ],
+    [
+      "\u0000\u001f\u007f",
+      `attachment; filename="datasheet.xlsx"; filename*=UTF-8''datasheet.xlsx`,
+    ],
+    // C1 control characters are dropped too.
+    [
+      "a\u0085b\u009f.xlsx",
+      `attachment; filename="ab.xlsx"; filename*=UTF-8''ab.xlsx`,
+    ],
+    // A lone surrogate becomes U+FFFD instead of making encodeURIComponent throw.
+    [
+      `${String.fromCharCode(0xd800)}x.xlsx`,
+      `attachment; filename="_x.xlsx"; filename*=UTF-8''%EF%BF%BDx.xlsx`,
+    ],
+  ])("%j is safe in the header", (name, expected) => {
+    const value = attachmentDisposition(name);
+    expect(value).toBe(expected);
+    // A header value: printable ASCII only, never CR/LF.
+    expect(value).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it("keeps an emoji (astral) name as UTF-8 in filename*", () => {
+    expect(attachmentDisposition("💡.xlsx")).toBe(
+      `attachment; filename="_.xlsx"; filename*=UTF-8''%F0%9F%92%A1.xlsx`,
+    );
   });
 });

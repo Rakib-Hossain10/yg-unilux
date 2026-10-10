@@ -11,7 +11,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Types } from "mongoose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -26,6 +25,7 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
 import { CategoryModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { testActor } from "./helpers/admin-actor";
 import { REFUSED_CALLERS, sessionFor } from "./helpers/admin-session";
 import { setupMemoryDb } from "./helpers/memory-db";
 import { createNextCacheHarness, nextTick } from "./helpers/next-cache-harness";
@@ -41,7 +41,9 @@ vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 const getSession = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
-  getSessionFromDb: getSession,
+  getSessionFromDb: (
+    await import("./helpers/admin-actor")
+  ).sessionsWithTestActors(getSession),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/navigation", () => ({
@@ -63,7 +65,7 @@ setupMemoryDb("yg_listing_gate_a_l3_qa");
 const harness = createNextCacheHarness();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const ACTOR = new Types.ObjectId().toHexString();
+const admin = testActor();
 const img = (categoryId: string, n = 0) =>
   testPublicId(n, categoryId, "category");
 
@@ -93,8 +95,8 @@ beforeEach(async () => {
     CategoryModel.deleteMany({}),
     AuditLogModel.deleteMany({}),
   ]);
-  const a = await createCategory(ACTOR, { name: "Spot Lights", parent: null });
-  const b = await createCategory(ACTOR, { name: "Pendants", parent: null });
+  const a = await createCategory(admin, { name: "Spot Lights", parent: null });
+  const b = await createCategory(admin, { name: "Pendants", parent: null });
   if (!a.ok || !b.ok) throw new Error("seed failed");
   main = a.data.id;
   other = b.data.id;
@@ -200,7 +202,7 @@ describe("setCategoryImage: input validation", () => {
   ])("refuses %s, asks Cloudinary nothing", async (_n, raw) => {
     const publicId = typeof raw === "function" ? raw() : raw;
     const before = await snapshot();
-    const result = await setCategoryImage(ACTOR, {
+    const result = await setCategoryImage(admin, {
       categoryId: main,
       slot: "icon",
       publicId,
@@ -218,14 +220,14 @@ describe("setCategoryImage: input validation", () => {
     [{ slot: "icon", publicId: null }],
   ])("refuses a bad category id %j", async (input) => {
     const before = await snapshot();
-    expect((await setCategoryImage(ACTOR, input)).ok).toBe(false);
+    expect((await setCategoryImage(admin, input)).ok).toBe(false);
     expect(await snapshot()).toBe(before);
   });
 
   it.each(["__proto__", "constructor", "coverImage", "icon ", "ICON", ""])(
     "refuses slot %j",
     async (slot) => {
-      const result = await setCategoryImage(ACTOR, {
+      const result = await setCategoryImage(admin, {
         categoryId: main,
         slot,
         publicId: null,
@@ -236,7 +238,7 @@ describe("setCategoryImage: input validation", () => {
 
   it("refuses extra fields (no mass assignment of name / parent / order)", async () => {
     const before = await snapshot();
-    const result = await setCategoryImage(ACTOR, {
+    const result = await setCategoryImage(admin, {
       categoryId: main,
       slot: "icon",
       publicId: null,
@@ -249,7 +251,7 @@ describe("setCategoryImage: input validation", () => {
 
   it("refuses another category's upload and never deletes it", async () => {
     const theirs = img(other, 9);
-    const result = await setCategoryImage(ACTOR, {
+    const result = await setCategoryImage(admin, {
       categoryId: main,
       slot: "icon",
       publicId: theirs,
@@ -260,7 +262,7 @@ describe("setCategoryImage: input validation", () => {
   });
 
   it("verifies the upload on the server with the slot's own formats", async () => {
-    await setCategoryImage(ACTOR, {
+    await setCategoryImage(admin, {
       categoryId: main,
       slot: "icon",
       publicId: img(main, 1),
@@ -270,7 +272,7 @@ describe("setCategoryImage: input validation", () => {
       "svg",
       "webp",
     ]);
-    await setCategoryImage(ACTOR, {
+    await setCategoryImage(admin, {
       categoryId: main,
       slot: "cover",
       publicId: img(main, 2),
@@ -287,13 +289,13 @@ describe("setCategoryImage: input validation", () => {
       ok: false,
       reason: "bad_format",
     });
-    const result = await setCategoryImage(ACTOR, {
+    const result = await setCategoryImage(admin, {
       categoryId: main,
       slot: "cover",
       publicId: img(main, 3),
     });
     expect(result.ok).toBe(false);
-    expect((await getCategoryForEdit(main))?.coverImage).toBeNull();
+    expect((await getCategoryForEdit(admin, main))?.coverImage).toBeNull();
     expect(cloudinaryMock.destroyImage).toHaveBeenCalledWith(img(main, 3));
   });
 
@@ -319,7 +321,7 @@ describe("setCategoryImage: input validation", () => {
     });
     expect(
       (
-        await setCategoryImage(ACTOR, {
+        await setCategoryImage(admin, {
           categoryId: main,
           slot: "icon",
           publicId: icon,
@@ -331,7 +333,7 @@ describe("setCategoryImage: input validation", () => {
       reason: "bad_format",
     });
     cloudinaryMock.inspectImage.mockClear();
-    const refused = await setCategoryImage(ACTOR, {
+    const refused = await setCategoryImage(admin, {
       categoryId: main,
       slot: "cover",
       publicId: icon,
@@ -342,8 +344,8 @@ describe("setCategoryImage: input validation", () => {
       errors: { fieldErrors: { publicId: [expect.any(String)] } },
     });
     expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
-    expect((await getCategoryForEdit(main))?.icon).toBe(icon);
-    expect((await getCategoryForEdit(main))?.coverImage).toBeNull();
+    expect((await getCategoryForEdit(admin, main))?.icon).toBe(icon);
+    expect((await getCategoryForEdit(admin, main))?.coverImage).toBeNull();
     expect(cloudinaryMock.destroyImage).not.toHaveBeenCalledWith(icon);
   });
 
@@ -358,7 +360,7 @@ describe("setCategoryImage: input validation", () => {
     });
     expect(
       (
-        await setCategoryImage(ACTOR, {
+        await setCategoryImage(admin, {
           categoryId: main,
           slot: "cover",
           publicId: cover,
@@ -366,7 +368,7 @@ describe("setCategoryImage: input validation", () => {
       ).ok,
     ).toBe(true);
     cloudinaryMock.inspectImage.mockClear();
-    const refused = await setCategoryImage(ACTOR, {
+    const refused = await setCategoryImage(admin, {
       categoryId: main,
       slot: "icon",
       publicId: cover,
@@ -374,36 +376,36 @@ describe("setCategoryImage: input validation", () => {
     expect(refused.ok).toBe(false);
     expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
     expect(cloudinaryMock.destroyImage).not.toHaveBeenCalledWith(cover);
-    expect((await getCategoryForEdit(main))?.coverImage).toBe(cover);
+    expect((await getCategoryForEdit(admin, main))?.coverImage).toBe(cover);
   });
 });
 
 describe("description", () => {
   it("is plain text: markup is stored verbatim (rendered as text later), capped at 2000", async () => {
     const markup = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
-    const ok = await updateCategory(ACTOR, main, {
+    const ok = await updateCategory(admin, main, {
       name: "Spot Lights",
       parent: "",
       description: `  ${markup}  `,
     });
     expect(ok.ok).toBe(true);
-    expect((await getCategoryForEdit(main))?.description).toBe(markup);
+    expect((await getCategoryForEdit(admin, main))?.description).toBe(markup);
 
-    const tooLong = await updateCategory(ACTOR, main, {
+    const tooLong = await updateCategory(admin, main, {
       name: "Spot Lights",
       parent: "",
       description: "x".repeat(2001),
     });
     expect(tooLong.ok).toBe(false);
     for (const bad of [{ $set: "x" }, ["a"], 5]) {
-      const result = await updateCategory(ACTOR, main, {
+      const result = await updateCategory(admin, main, {
         name: "Spot Lights",
         parent: "",
         description: bad,
       });
       expect(result.ok, JSON.stringify(bad)).toBe(false);
     }
-    expect((await getCategoryForEdit(main))?.description).toBe(markup);
+    expect((await getCategoryForEdit(admin, main))?.description).toBe(markup);
   });
 });
 
@@ -429,7 +431,7 @@ describe("cache: an image write expires `categories` (real unstable_cache)", () 
     expect(cached.find((c) => c.id === main)?.description).toBeNull();
 
     const result = await harness.inServerAction(async () => {
-      const r = await setCategoryImage(ACTOR, {
+      const r = await setCategoryImage(admin, {
         categoryId: main,
         slot: "icon",
         publicId: img(main, 5),

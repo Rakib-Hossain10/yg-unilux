@@ -34,6 +34,17 @@ Rejected skills:
 - `mattpocock/skills@code-review` — shadows the built-in `/code-review`, depends on that author's setup, and spawns its own sub-agents (subagents cannot). Snyk: High Risk.
 - `vercel-labs/agent-skills@deploy-to-vercel` — its script uploads a tarball of the repo to a shared anonymous endpoint (`claude-skills-deploy.vercel.com`). Not acceptable for a client repo with secrets. Deploys go through the client's linked Vercel project only.
 
+Added for Phase 5 (2026-10-09, user approved, plan Q0):
+- `better-auth/skills@better-auth-best-practices` (official, ~119K installs) and `better-auth/skills@better-auth-security-best-practices` (official, ~41K). Markdown only, no scripts; read in full before the commit. Given to `backend-architect` (both) and `qa-security-reviewer` (security).
+- **Project rules win over these skills.** Parts that conflict with this project and must not be followed:
+  - `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` / `BETTER_AUTH_TRUSTED_ORIGINS` env variables (`src/lib/env.ts` refuses them; config is passed explicitly);
+  - the session cookie cache (off: sessions are read from the DB, rule 5);
+  - `x-forwarded-for` (we trust only `x-vercel-forwarded-for`, ADR 0022);
+  - audit hooks that log IPs, emails or user agents (ADR 0020/0022: no IP and no email in logs);
+  - `npx auth migrate` (indexes come from `db:indexes`, ADR 0018);
+  - fetching the latest online docs (the installed `better-auth` sources are the reference).
+- Skipped: `resend/resend-skills@resend` (we have our own sender, ADR 0021). No skill fits filter, search or menu UI beyond the installed `web-design-guidelines` and `frontend-design`.
+
 ## Consequences
 - Each phase: orchestrator plans → parallel builder agents in worktrees → `qa-security-reviewer` gates → orchestrator merges, ticks `doc/tasks.md`, writes ADRs from proposals.
 - A new agent or skill change = update this ADR (or supersede it) and `.claude/agents/`.

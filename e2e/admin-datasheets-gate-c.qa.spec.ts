@@ -273,7 +273,11 @@ test.describe("headers", () => {
     expect(adminCsp).not.toMatch(/connect-src[^;]*\*/);
 
     for (const url of ["/", "/login", "/products"]) {
-      const publicResponse = await context.request.get(url);
+      // maxRedirects 0: /login sends a signed-in admin on to /admin (Phase 5
+      // P2); its own answer (the redirect) must carry the public CSP.
+      const publicResponse = await context.request.get(url, {
+        maxRedirects: 0,
+      });
       const csp = publicResponse.headers()["content-security-policy"] ?? "";
       expect(csp, url).toContain("connect-src 'self'");
       expect(csp, url).not.toContain("api.cloudinary.com");

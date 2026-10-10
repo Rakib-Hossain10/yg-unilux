@@ -1,6 +1,7 @@
 // Admin dashboard: live counts per module, each card linking to its module.
 // requireAdmin() comes first (rule 3; the layout doesn't re-run on client
-// nav), then getCounts(). Numbers only: nothing restricted or confidential.
+// nav), then getCounts() and the customer counts (as the admin actor, ADR
+// 0073). Numbers only: nothing restricted or confidential.
 
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -17,8 +18,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { customersListPath } from "@/components/admin/customers/paths";
+import { getCustomerCounts } from "@/lib/admin/customers";
 import { getCounts } from "@/lib/admin/dashboard";
 import { requireAdmin } from "@/lib/permissions";
+
+import { pageActor, readAsAdmin } from "../admin-reads";
 
 // Absolute: the full title as it was when this page shared the layout's
 // segment (it now sits in the (dashboard) route group, see loading.tsx).
@@ -35,6 +40,9 @@ interface Figure {
 
 interface DashboardCard {
   section: AdminSection;
+  /** Overrides the section's label and link (a filtered view of it). */
+  title?: string;
+  href?: string;
   description: string;
   /** The first figure is the headline number; the rest are a breakdown. */
   figures: [Figure, ...Figure[]];
@@ -43,8 +51,12 @@ interface DashboardCard {
 }
 
 export default async function AdminDashboardPage() {
-  await requireAdmin();
-  const counts = await getCounts();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
+  const [counts, customers] = await Promise.all([
+    readAsAdmin(() => getCounts(actor)),
+    readAsAdmin(() => getCustomerCounts(actor)),
+  ]);
 
   const cards: DashboardCard[] = [
     {
@@ -84,6 +96,17 @@ export default async function AdminDashboardPage() {
       figures: [{ label: "Total", value: counts.customers }],
     },
     {
+      section: ADMIN_SECTIONS.customers,
+      title: "Expiring in 30 days",
+      href: customersListPath({ status: "expiring" }),
+      description: "Customers whose access ends soon",
+      figures: [
+        { label: "Expiring", value: customers.expiringSoon },
+        { label: "Invites expired", value: customers.invitesExpired },
+      ],
+      needsAction: true,
+    },
+    {
       section: ADMIN_SECTIONS.accessRequests,
       description: "Waiting for a decision",
       figures: [{ label: "Open", value: counts.openAccessRequests }],
@@ -102,7 +125,7 @@ export default async function AdminDashboardPage() {
       <h1 className="text-2xl font-semibold">Dashboard</h1>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => (
-          <li key={card.section.href}>
+          <li key={card.href ?? card.section.href}>
             <DashboardCardView card={card} />
           </li>
         ))}
@@ -118,6 +141,7 @@ export default async function AdminDashboardPage() {
  */
 function DashboardCardView({ card }: { card: DashboardCard }) {
   const { section, description, figures, needsAction } = card;
+  const href = card.href ?? section.href;
   const [headline, ...breakdown] = figures;
   const Icon = section.icon;
 
@@ -128,10 +152,10 @@ function DashboardCardView({ card }: { card: DashboardCard }) {
           <h2 className="flex items-center gap-2">
             <Icon aria-hidden="true" className="size-4 text-muted-foreground" />
             <Link
-              href={section.href}
+              href={href}
               className="outline-none after:absolute after:inset-0"
             >
-              {section.label}
+              {card.title ?? section.label}
             </Link>
           </h2>
         </CardTitle>

@@ -4,7 +4,6 @@
 
 import "server-only";
 
-import type { AuthContext } from "better-auth";
 import { mongodbAdapter } from "better-auth/adapters/mongodb";
 import {
   APIError,
@@ -22,6 +21,12 @@ import { z } from "zod";
 
 import { AuditLogModel } from "@/models/audit-log";
 
+import {
+  bumpDeviceEpoch,
+  epochOf,
+  recordPasswordSet,
+  revokePasswordLinks,
+} from "./account-writes";
 import { connectDb, getDb, getMongoClient } from "./db";
 import { DEVICE_COOKIE, issueDeviceToken } from "./device-token";
 import {
@@ -182,17 +187,6 @@ function parseEmail(body: unknown): string {
   return parsed.data.email;
 }
 
-/* A user's device epoch; missing or malformed counts as 0. */
-function epochOf(user: unknown): number {
-  const value =
-    typeof user === "object" && user !== null
-      ? (user as { deviceEpoch?: unknown }).deviceEpoch
-      : undefined;
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : 0;
-}
-
 /*
  * Data handed from a before hook to the matching after hook of the same
  * request. Better Auth merges `{ context: {...} }` returned by a before hook
@@ -248,19 +242,29 @@ async function auditRefusal(audit: AuthLimitAudit): Promise<void> {
 }
 
 /*
- * Bumps the user's device epoch, so every known-device token issued before
- * stops verifying (QA L1). A read-then-write: two bumps racing both move the
- * epoch away from its old value, which is all that matters.
+ * ADR 0032: a session made without "Keep me signed in" ends within 24 hours.
+ * Better Auth's /change-password with revokeOtherSessions creates the
+ * replacement session WITHOUT the don't-remember flag (dist/api/routes/
+ * update-user.mjs:176), so it would be stored for 7 days while its cookie
+ * stays session-only. When the signed dont_remember cookie came with the
+ * request and a new session was issued (setSessionCookie calls
+ * setNewSession, dist/cookies/index.mjs:167-179), cap it back to 24 h.
  */
-async function bumpDeviceEpoch(
-  context: AuthContext,
-  userId: string,
-): Promise<number | null> {
-  const user = await context.internalAdapter.findUserById(userId);
-  if (!user) return null;
-  const next = epochOf(user) + 1;
-  await context.internalAdapter.updateUser(userId, { deviceEpoch: next });
-  return next;
+const DONT_REMEMBER_SESSION_MS = 24 * 60 * 60 * 1000;
+
+type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
+
+async function capDontRememberSession(ctx: HookContext): Promise<void> {
+  const fresh = ctx.context.newSession;
+  if (!fresh) return;
+  const dontRemember = await ctx.getSignedCookie(
+    ctx.context.authCookies.dontRememberToken.name,
+    ctx.context.secret,
+  );
+  if (!dontRemember) return;
+  await ctx.context.internalAdapter.updateSession(fresh.session.token, {
+    expiresAt: new Date(Date.now() + DONT_REMEMBER_SESSION_MS),
+  });
 }
 
 const userIdBody = z.object({ userId: z.coerce.string().min(1) });
@@ -431,6 +435,37 @@ export function createAuth(deps: AuthDependencies) {
           type: "number",
           required: false,
           defaultValue: 0,
+          input: false,
+          returned: false,
+        },
+        // Phase 5 (ADR 0068), written only by src/lib/account-writes.ts.
+        // Better Auth's adapter drops undeclared keys on write, so each one
+        // must be declared here. The browser needs none: returned: false.
+        /** The accessExpiresAt value the last 7-day reminder was sent for. */
+        expiryReminderFor: {
+          type: "date",
+          required: false,
+          input: false,
+          returned: false,
+        },
+        /** When the latest invite link was made (null = never invited). */
+        invitedAt: {
+          type: "date",
+          required: false,
+          input: false,
+          returned: false,
+        },
+        /** When that invite link stops working. */
+        inviteExpiresAt: {
+          type: "date",
+          required: false,
+          input: false,
+          returned: false,
+        },
+        /** When the user last chose their own password. */
+        passwordSetAt: {
+          type: "date",
+          required: false,
           input: false,
           returned: false,
         },
@@ -611,16 +646,21 @@ export function createAuth(deps: AuthDependencies) {
             );
             return;
           }
-          // Successful reset (QA M1): it proves control of the mailbox, so
-          // revoke old device tokens, clear every counter of the email and
-          // hand this browser a fresh device token.
+          // Successful reset or invite (QA M1, ADR 0068): it proves control
+          // of the mailbox, so every other reset/invite link of the user
+          // dies, the temporary-password flag is cleared and old device
+          // tokens are revoked (one write), counters are cleared and this
+          // browser gets a fresh device token.
           case "/reset-password": {
             const target = readStash(ctx, "reset");
             if (!target) return;
             // Sessions were already revoked by Better Auth
-            // (revokeSessionsOnPasswordReset). A failed bump is thrown, so
-            // old device tokens can't silently survive the reset.
-            const epoch = await bumpDeviceEpoch(ctx.context, target.userId);
+            // (revokeSessionsOnPasswordReset). Failures are thrown (a 500):
+            // the link is spent, but the user is told it failed and can ask
+            // for a new one, never left believing it worked while the flag
+            // is still set. The links go first, the flag write last.
+            await revokePasswordLinks(ctx.context, target.userId);
+            const epoch = await recordPasswordSet(ctx.context, target.userId);
             if (epoch === null) return;
             try {
               await clearAllForEmail(target.email);
@@ -635,16 +675,24 @@ export function createAuth(deps: AuthDependencies) {
             );
             return;
           }
-          // A user changed their own password (QA L2): revoke every device
-          // token issued before, and give this browser, which just proved
-          // the current password, a fresh one. Better Auth ends the other
-          // sessions only when the request sends `revokeOtherSessions: true`
-          // (dist/api/routes/update-user.mjs:174); the Phase 5
-          // change-password UI MUST send it.
+          // A user changed their own password (QA L2). Better Auth ends the
+          // other sessions only when the request sends
+          // `revokeOtherSessions: true` (dist/api/routes/update-user.mjs:174);
+          // the Phase 5 change-password UI MUST send it. Order (ADR 0068):
+          // 1. cap the new session at 24 h if "keep me signed in" was off;
+          // 2. kill any outstanding reset/invite link of the user;
+          // 3. ONE write: mustChangePassword false + passwordSetAt + epoch
+          //    bump (old device tokens die);
+          // 4. a fresh device token for this browser.
+          // Any failure is thrown (a 500, never swallowed). The password has
+          // changed by then, but the flag is still set, so the user is sent
+          // back to /change-password and retries with the new password.
           case "/change-password": {
             const user = ctx.context.session?.user;
             if (!user) return;
-            const epoch = await bumpDeviceEpoch(ctx.context, user.id);
+            await capDontRememberSession(ctx);
+            await revokePasswordLinks(ctx.context, user.id);
+            const epoch = await recordPasswordSet(ctx.context, user.id);
             if (epoch === null) return;
             const token = issueDeviceToken(user.email, epoch);
             ctx.setCookie(
@@ -720,6 +768,16 @@ export type Auth = ReturnType<typeof createAuth>;
  * module never does: `next build` runs with no secrets.
  */
 const AUTH_CACHE_KEY = "__ygUniluxAuth";
+
+/**
+ * Better Auth's internal context (adapter, internalAdapter, password) for
+ * server code outside a request hook: invite links, the P3 customer
+ * services and the cron. Connects to MongoDB first.
+ */
+export async function getAuthContext(): Promise<Awaited<Auth["$context"]>> {
+  await connectDb();
+  return getAuth().$context;
+}
 
 /** The app's Better Auth instance. Call only at request time. */
 export function getAuth(): Auth {

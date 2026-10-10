@@ -9,6 +9,7 @@ import { createCategory } from "@/lib/admin/categories";
 import { mongoose } from "@/lib/db";
 import { CategoryModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../../test/helpers/memory-db";
 import { testPublicId } from "../../../../test/helpers/public-ids";
 
@@ -40,7 +41,9 @@ const auditFails = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
-  getSessionFromDb: getSession,
+  getSessionFromDb: (
+    await import("../../../../test/helpers/admin-actor")
+  ).sessionsWithTestActors(getSession),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 // redirect() and forbidden() throw in Next; these throw a readable error.
@@ -68,7 +71,8 @@ setupMemoryDb("yg_admin_category_actions_test");
 
 const { ObjectId } = mongoose.Types;
 const ADMIN_ID = new ObjectId().toHexString();
-const SEED_ACTOR = new ObjectId().toHexString();
+const seeder = testActor();
+const SEED_ACTOR = seeder.id;
 
 /* A Better Auth session user with the fields the guard reads. */
 function signedInAs(fields: Record<string, unknown>) {
@@ -125,7 +129,7 @@ beforeEach(async () => {
 });
 
 async function seed(name: string, parent: string | null): Promise<string> {
-  const result = await createCategory(SEED_ACTOR, { name, parent });
+  const result = await createCategory(seeder, { name, parent });
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   return result.data.id;
 }
@@ -443,5 +447,54 @@ describe("as the admin", () => {
       expect(await CategoryModel.findById(subA1).lean()).toBeNull();
       expect(nextCache.refresh).toHaveBeenCalledOnce();
     });
+  });
+});
+
+const CALLS: [string, () => Promise<unknown>][] = [
+  [
+    "create",
+    () => createCategoryAction({ name: "Pendants", slug: "", parent: null }),
+  ],
+  [
+    "update",
+    () =>
+      updateCategoryAction(mainB, { name: "Spots", slug: "", parent: null }),
+  ],
+  ["move", () => moveCategoryAction(mainB, "down")],
+  ["delete", () => deleteCategoryAction(mainB)],
+  [
+    "sign image",
+    () => signCategoryImageUploadAction({ categoryId: mainB, slot: "icon" }),
+  ],
+  [
+    "set image",
+    () =>
+      setCategoryImageAction({
+        categoryId: mainB,
+        slot: "icon",
+        publicId: null,
+      }),
+  ],
+];
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(async () => {
+    signedInAs({});
+    const admin: unknown = await getSession();
+    // The services' own re-check from the database sees a customer (e.g.
+    // demoted between the two reads); requireAdmin() still saw the admin.
+    signedInAs({ role: "customer" });
+    getSession.mockResolvedValueOnce(admin);
+  });
+
+  it.each(CALLS)("%s", async (_name, call) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const audits = await AuditLogModel.countDocuments();
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    // Refused by the service's check, not by requireAdmin().
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/actor refused: not_admin$/),
+    );
+    expect(await AuditLogModel.countDocuments()).toBe(audits);
   });
 });

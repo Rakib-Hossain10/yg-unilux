@@ -8,21 +8,28 @@ import { mongoose } from "@/lib/db";
 import { DEFAULT_COLUMN_VISIBILITY } from "@/lib/schemas/settings";
 import { ProductModel, SiteContentModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { getColumnVisibility } from "@/lib/column-visibility";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 
 import {
   getAdminSettings,
-  getColumnVisibility,
   saveColumnVisibility,
   saveCompanyEmail,
   saveWhatsappNumber,
 } from "./settings";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
+
 setupMemoryDb("yg_admin_settings_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
 
 beforeEach(async () => {
   vi.restoreAllMocks();
@@ -47,7 +54,7 @@ const withColumns = (patch: Record<string, "public" | "restricted">) => ({
 describe("reads", () => {
   it("returns defaults when nothing was saved", async () => {
     expect(await getColumnVisibility()).toEqual(DEFAULT_COLUMN_VISIBILITY);
-    expect(await getAdminSettings()).toEqual({
+    expect(await getAdminSettings(admin)).toEqual({
       columnVisibility: DEFAULT_COLUMN_VISIBILITY,
       whatsappNumber: null,
       companyEmail: null,
@@ -68,7 +75,7 @@ describe("reads", () => {
 
 describe("saveColumnVisibility", () => {
   it("rejects bad input and writes nothing", async () => {
-    const result = await saveColumnVisibility(ADMIN, { lens: "public" });
+    const result = await saveColumnVisibility(admin, { lens: "public" });
     expect(result.ok).toBe(false);
     expect(result.tags).toEqual([]);
     expect(await SiteContentModel.countDocuments()).toBe(0);
@@ -77,16 +84,22 @@ describe("saveColumnVisibility", () => {
 
   it("throws for a non-id actor (visitor or forged)", async () => {
     await expect(
-      saveColumnVisibility("", DEFAULT_COLUMN_VISIBILITY),
+      saveColumnVisibility(
+        { id: "", headers: new Headers() },
+        DEFAULT_COLUMN_VISIBILITY,
+      ),
     ).rejects.toThrow(TypeError);
     await expect(
-      saveColumnVisibility("customer", DEFAULT_COLUMN_VISIBILITY),
+      saveColumnVisibility(
+        { id: "customer", headers: new Headers() },
+        DEFAULT_COLUMN_VISIBILITY,
+      ),
     ).rejects.toThrow(TypeError);
   });
 
   it("saves, returns settings:columns + products and audits keys only", async () => {
     const result = await saveColumnVisibility(
-      ADMIN,
+      admin,
       withColumns({ driver: "public", lens: "restricted" }),
     );
     const data = expectOk(result);
@@ -111,8 +124,8 @@ describe("saveColumnVisibility", () => {
   });
 
   it("is a no-op when nothing changes (after the first save)", async () => {
-    expectOk(await saveColumnVisibility(ADMIN, DEFAULT_COLUMN_VISIBILITY));
-    const again = await saveColumnVisibility(ADMIN, DEFAULT_COLUMN_VISIBILITY);
+    expectOk(await saveColumnVisibility(admin, DEFAULT_COLUMN_VISIBILITY));
+    const again = await saveColumnVisibility(admin, DEFAULT_COLUMN_VISIBILITY);
     expect(again.ok && again.tags).toEqual([]);
     expect(await AuditLogModel.countDocuments()).toBe(1);
   });
@@ -136,7 +149,7 @@ describe("saveColumnVisibility", () => {
     ]);
 
     expectOk(
-      await saveColumnVisibility(ADMIN, withColumns({ cct: "restricted" })),
+      await saveColumnVisibility(admin, withColumns({ cct: "restricted" })),
     );
 
     const [a, b, c] = await Promise.all(
@@ -162,7 +175,7 @@ describe("saveColumnVisibility", () => {
     // driver -> public, lens -> restricted: neither has a filter.
     expectOk(
       await saveColumnVisibility(
-        ADMIN,
+        admin,
         withColumns({ driver: "public", lens: "restricted" }),
       ),
     );
@@ -173,7 +186,7 @@ describe("saveColumnVisibility", () => {
 
   it("re-runs the cleanup on an otherwise unchanged save and returns the tags", async () => {
     expectOk(
-      await saveColumnVisibility(ADMIN, withColumns({ cct: "restricted" })),
+      await saveColumnVisibility(admin, withColumns({ cct: "restricted" })),
     );
     await ProductModel.create({
       name: "A",
@@ -182,7 +195,7 @@ describe("saveColumnVisibility", () => {
       filters: { cctK: [3000], cri: [80] },
     });
     const again = await saveColumnVisibility(
-      ADMIN,
+      admin,
       withColumns({ cct: "restricted" }),
     );
     expect(again.ok && again.tags).toEqual(["settings:columns", "products"]);
@@ -211,7 +224,7 @@ describe("saveColumnVisibility", () => {
       new Error("boom"),
     );
     const failed = await saveColumnVisibility(
-      ADMIN,
+      admin,
       withColumns({ cct: "restricted" }),
     );
     expect(failed.ok).toBe(false);
@@ -223,7 +236,7 @@ describe("saveColumnVisibility", () => {
     expect(entry?.meta).toMatchObject({ cleanupFailed: true });
 
     const retry = await saveColumnVisibility(
-      ADMIN,
+      admin,
       withColumns({ cct: "restricted" }),
     );
     expect(retry.ok).toBe(true);
@@ -241,7 +254,7 @@ describe("saveColumnVisibility", () => {
       new Error("boom"),
     );
     const result = await saveColumnVisibility(
-      ADMIN,
+      admin,
       withColumns({ cct: "restricted" }),
     );
     expect(result.ok).toBe(false);
@@ -253,7 +266,7 @@ describe("saveColumnVisibility", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("down"));
     const result = await saveColumnVisibility(
-      ADMIN,
+      admin,
       withColumns({ driver: "public" }),
     );
     expect(!result.ok && result.errors.formErrors).toEqual([
@@ -265,10 +278,10 @@ describe("saveColumnVisibility", () => {
 
 describe("saveWhatsappNumber", () => {
   it("normalises, stores digits, audits without the number", async () => {
-    const result = await saveWhatsappNumber(ADMIN, "+852 9123-4567");
+    const result = await saveWhatsappNumber(admin, "+852 9123-4567");
     expect(expectOk(result)).toEqual({ whatsappNumber: "85291234567" });
     expect(result.tags).toEqual([]);
-    expect((await getAdminSettings()).whatsappNumber).toBe("85291234567");
+    expect((await getAdminSettings(admin)).whatsappNumber).toBe("85291234567");
 
     const entry = await AuditLogModel.findOne({}).lean();
     expect(entry?.action).toBe("settings.whatsapp.update");
@@ -277,40 +290,42 @@ describe("saveWhatsappNumber", () => {
   });
 
   it("clears with an empty string and is a no-op when unchanged", async () => {
-    expectOk(await saveWhatsappNumber(ADMIN, "85291234567"));
-    expectOk(await saveWhatsappNumber(ADMIN, ""));
-    expect((await getAdminSettings()).whatsappNumber).toBeNull();
-    const again = await saveWhatsappNumber(ADMIN, "");
+    expectOk(await saveWhatsappNumber(admin, "85291234567"));
+    expectOk(await saveWhatsappNumber(admin, ""));
+    expect((await getAdminSettings(admin)).whatsappNumber).toBeNull();
+    const again = await saveWhatsappNumber(admin, "");
     expect(again.ok && again.tags).toEqual([]);
     expect(await AuditLogModel.countDocuments()).toBe(2);
   });
 
   it("clearing with an empty string works on a stored number and when none is stored", async () => {
-    expect(expectOk(await saveWhatsappNumber(ADMIN, ""))).toEqual({
+    expect(expectOk(await saveWhatsappNumber(admin, ""))).toEqual({
       whatsappNumber: null,
     });
     expect(await AuditLogModel.countDocuments()).toBe(0);
-    expectOk(await saveWhatsappNumber(ADMIN, "85291234567"));
-    expectOk(await saveWhatsappNumber(ADMIN, ""));
+    expectOk(await saveWhatsappNumber(admin, "85291234567"));
+    expectOk(await saveWhatsappNumber(admin, ""));
     expect(await SiteContentModel.countDocuments()).toBe(0);
-    expect((await getAdminSettings()).whatsappNumber).toBeNull();
+    expect((await getAdminSettings(admin)).whatsappNumber).toBeNull();
   });
 
   it("rejects junk and bad actors", async () => {
-    expect((await saveWhatsappNumber(ADMIN, "call me")).ok).toBe(false);
-    expect((await saveWhatsappNumber(ADMIN, 123)).ok).toBe(false);
-    await expect(saveWhatsappNumber("x", "85291234567")).rejects.toThrow(
-      TypeError,
-    );
+    expect((await saveWhatsappNumber(admin, "call me")).ok).toBe(false);
+    expect((await saveWhatsappNumber(admin, 123)).ok).toBe(false);
+    await expect(
+      saveWhatsappNumber({ id: "x", headers: new Headers() }, "85291234567"),
+    ).rejects.toThrow(TypeError);
     expect(await SiteContentModel.countDocuments()).toBe(0);
   });
 });
 
 describe("saveCompanyEmail", () => {
   it("lowercases, stores and audits without the address", async () => {
-    const result = await saveCompanyEmail(ADMIN, " Sales@YG-Unilux.com ");
+    const result = await saveCompanyEmail(admin, " Sales@YG-Unilux.com ");
     expect(expectOk(result)).toEqual({ companyEmail: "sales@yg-unilux.com" });
-    expect((await getAdminSettings()).companyEmail).toBe("sales@yg-unilux.com");
+    expect((await getAdminSettings(admin)).companyEmail).toBe(
+      "sales@yg-unilux.com",
+    );
 
     const entry = await AuditLogModel.findOne({}).lean();
     expect(entry?.action).toBe("settings.email.update");
@@ -319,19 +334,21 @@ describe("saveCompanyEmail", () => {
   });
 
   it("clearing with an empty string deletes the stored value", async () => {
-    expectOk(await saveCompanyEmail(ADMIN, "a@b.co"));
-    expectOk(await saveCompanyEmail(ADMIN, ""));
+    expectOk(await saveCompanyEmail(admin, "a@b.co"));
+    expectOk(await saveCompanyEmail(admin, ""));
     expect(await SiteContentModel.countDocuments()).toBe(0);
-    expect((await getAdminSettings()).companyEmail).toBeNull();
+    expect((await getAdminSettings(admin)).companyEmail).toBeNull();
   });
 
   it("rejects an invalid address, clears with empty, no-op on repeat", async () => {
-    expect((await saveCompanyEmail(ADMIN, "nope")).ok).toBe(false);
-    expectOk(await saveCompanyEmail(ADMIN, "a@b.co"));
-    expectOk(await saveCompanyEmail(ADMIN, ""));
-    expect((await getAdminSettings()).companyEmail).toBeNull();
-    expect((await saveCompanyEmail(ADMIN, "")).ok).toBe(true);
+    expect((await saveCompanyEmail(admin, "nope")).ok).toBe(false);
+    expectOk(await saveCompanyEmail(admin, "a@b.co"));
+    expectOk(await saveCompanyEmail(admin, ""));
+    expect((await getAdminSettings(admin)).companyEmail).toBeNull();
+    expect((await saveCompanyEmail(admin, "")).ok).toBe(true);
     expect(await AuditLogModel.countDocuments()).toBe(2);
-    await expect(saveCompanyEmail("", "a@b.co")).rejects.toThrow(TypeError);
+    await expect(
+      saveCompanyEmail({ id: "", headers: new Headers() }, "a@b.co"),
+    ).rejects.toThrow(TypeError);
   });
 });

@@ -51,6 +51,9 @@ vi.mock("@/lib/admin/areas", async (importOriginal) => ({
 
 const { ObjectId } = mongoose.Types;
 const ADMIN_ID = new ObjectId().toHexString();
+
+/* The actor every service gets: the session's id and the request headers. */
+const AS_ADMIN = { id: ADMIN_ID, headers: expect.any(Headers) };
 const PRODUCT_ID = new ObjectId().toHexString();
 const AREA_ID = new ObjectId().toHexString();
 const PUBLIC_ID = `yg/products/${PRODUCT_ID}/0f8fad5b-d9cb-469f-a165-70867728950e`;
@@ -147,7 +150,7 @@ describe("as the admin", () => {
       tags: [],
     });
     const result = await signProductImageUpload(PRODUCT_ID);
-    expect(services.signCloudinaryUpload).toHaveBeenCalledWith(ADMIN_ID, {
+    expect(services.signCloudinaryUpload).toHaveBeenCalledWith(AS_ADMIN, {
       target: "product",
       id: PRODUCT_ID,
     });
@@ -181,7 +184,7 @@ describe("as the admin", () => {
       tags: [],
     });
     await signAreaImageUpload(AREA_ID);
-    expect(services.signCloudinaryUpload).toHaveBeenCalledWith(ADMIN_ID, {
+    expect(services.signCloudinaryUpload).toHaveBeenCalledWith(AS_ADMIN, {
       target: "area",
       id: AREA_ID,
     });
@@ -196,7 +199,7 @@ describe("as the admin", () => {
     expect(await saveProductImagesAction(IMAGES, VERSION)).toEqual({
       ok: true,
     });
-    expect(services.saveProductImages).toHaveBeenCalledWith(ADMIN_ID, IMAGES, {
+    expect(services.saveProductImages).toHaveBeenCalledWith(AS_ADMIN, IMAGES, {
       expectedUpdatedAt: VERSION,
     });
     expect(nextCache.updateTag).toHaveBeenCalledWith("products");
@@ -251,7 +254,7 @@ describe("as the admin", () => {
     });
     const input = { areaId: AREA_ID, publicId: null };
     expect(await setAreaImageAction(input)).toEqual({ ok: true });
-    expect(services.setAreaImage).toHaveBeenCalledWith(ADMIN_ID, input);
+    expect(services.setAreaImage).toHaveBeenCalledWith(AS_ADMIN, input);
     expect(nextCache.updateTag).toHaveBeenCalledWith("areas");
     expect(nextCache.refresh).toHaveBeenCalledOnce();
   });
@@ -265,5 +268,40 @@ describe("as the admin", () => {
     expect(
       await setAreaImageAction({ areaId: AREA_ID, publicId: PUBLIC_ID }),
     ).toEqual({ ok: false, errors, saved: false });
+  });
+});
+
+/* What a service returns when its own actor check refuses (ADR 0073). */
+const DENIED = {
+  ok: false,
+  errors: { formErrors: ["You are not allowed to do this."], fieldErrors: {} },
+  tags: [],
+  denied: "not_admin",
+} as const;
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(() => signedInAs({}));
+
+  it.each([
+    [
+      "sign product image",
+      "signCloudinaryUpload",
+      () => signProductImageUpload(PRODUCT_ID),
+    ],
+    [
+      "sign area image",
+      "signCloudinaryUpload",
+      () => signAreaImageUpload(AREA_ID),
+    ],
+    [
+      "save product images",
+      "saveProductImages",
+      () => saveProductImagesAction({}, VERSION),
+    ],
+    ["set area image", "setAreaImage", () => setAreaImageAction({})],
+  ] as const)("%s", async (_name, service, call) => {
+    services[service].mockResolvedValue(DENIED);
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    expect(services[service]).toHaveBeenCalledTimes(1);
   });
 });

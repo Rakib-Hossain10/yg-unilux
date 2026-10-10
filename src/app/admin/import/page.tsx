@@ -9,8 +9,10 @@ import type { Metadata } from "next";
 import { ImportWizard } from "@/components/admin/import/import-wizard";
 import { categoryOptions } from "@/components/admin/product-category-options";
 import { listCategoryTree } from "@/lib/admin/categories";
-import { getColumnVisibility } from "@/lib/admin/settings";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { requireAdmin } from "@/lib/permissions";
+
+import { pageActor, readAsAdmin } from "../admin-reads";
 
 // Static only (ADR 0036): a title never carries data.
 export const metadata: Metadata = { title: "Import" };
@@ -25,9 +27,10 @@ export const metadata: Metadata = { title: "Import" };
 export const maxDuration = 300;
 
 export default async function AdminImportPage() {
-  await requireAdmin();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
   const [tree, visibility] = await Promise.all([
-    listCategoryTree(),
+    readAsAdmin(() => listCategoryTree(actor)),
     getColumnVisibility(),
   ]);
   const restrictedColumns = Object.entries(visibility)

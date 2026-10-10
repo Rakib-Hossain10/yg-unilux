@@ -4,7 +4,97 @@ Working tracker for the YG UniLUX build. Update it at the end of every session: 
 Decisions live in [decisions/](decisions/README.md). A task that settles a design question gets an ADR there.
 
 ## ▶ Resume here (next session)
-- **Phase 4b: plan APPROVED (2026-10-08, all defaults Q1–Q9), `doc/phase-4b-plan.md`. Branch `phase-4b` (from `main`, 4a merged in PR #15).**
+- **▶ NEXT: Phase 6 planning — Home page & motion.** Phase 5 is MERGED into `main` (PR #17, 2026-10-10). Start on `main`, create branch `phase-6`, draft `doc/phase-6-plan.md` (plan first, user approves, then implement). Read the "Phase 6" section below, CLAUDE.md "Design" (Arelux hero, HBA quote reveal/leadership carousel/closing page, Viabizzuno 7-area horizontal scroll, Delta Light capabilities collage, reduced motion, mobile swipe carousels, real client photos only) and the ADR index. Subagents: `motion-engineer` (owns home + `components/motion`), `site-frontend`, `backend-architect` (leaders/siteContent data if needed), `qa-security-reviewer` + `ui-reviewer` at gates; all Opus. Leaders/site content admin services must take the `AdminActor` first (ADR 0073 amendment; the guard enforces it).
+  - **User must (before launch):** `CRON_SECRET` in `.env.local` + Vercel; company email + WhatsApp number in `/admin/settings`; verify the Resend domain; re-save or reseed dev customers saved before ADR 0076 (their expiry shows one day late); supply logo/favicon, real photos, category icons; Firewall rate limits (search/listing/area paths, `/api/datasheet/*`, `POST /request-access`).
+  - **Open after Phase 5 (non-blocking):** see the Phase 5 history bullets below ("Open after Phase 5").
+- **Phase 5 (history, merged PR #17) (Restricted access): plan APPROVED (2026-10-09, all defaults Q0–Q12), `doc/phase-5-plan.md`. Branch `phase-5` (from `main` after 4b, PR #16).**
+  - **P0 done:**
+    - answers recorded in the plan;
+    - **user addition to Q1:** the admin can regenerate an invite at any time (expired or lost): a fresh 72 h link, earlier links deleted, "Email it" or "Show once to copy" for WhatsApp, statuses "Invite pending"/"Invite expired" with a list filter, an expired link shows a neutral "ask us for a new one" page, and regenerating never changes `accessExpiresAt`;
+    - Better Auth skills installed (`.claude/skills/better-auth-*`, `skills-lock.json`), given to `backend-architect` + `qa-security-reviewer`; ADR 0013 note lists the parts that conflict with our rules.
+  - **P1 done** (2026-10-09, `backend-architect`/Opus, **ADR 0068**). Both spikes passed, so no fallback table.
+    - New: `src/lib/{account-writes,invite,safe-next-path}.ts`, plus tests (`account-flows`, `account-writes` + guard, `invite`, `safe-next-path` with a 20k-case property test).
+    - Hooks clear `mustChangePassword` and set `passwordSetAt`. The 24 h cap is fixed (ADR 0032 `it.fails` → `it`).
+    - New user fields: `invitedAt`, `inviteExpiresAt`, `passwordSetAt`, `expiryReminderFor`.
+    - Six email templates.
+    - e2e Resend sink (`e2e/fixtures/emails.ts`: `waitForEmail`, `linkIn`; account `E2E_MAIL_CUSTOMER`).
+    - Results: full unit 4297 passed (1 expected-fail, 3 skipped), lint/typecheck OK, `e2e/email-sink.spec.ts` 2/2. Code review: all PASS/WARN; the High (undeclared fields silently dropped) was fixed and is tested by a raw-document read-back.
+  - **P2 done** (2026-10-09, `site-frontend`/Opus, ADR 0068 P2 addendum): `/login` destinations + signed-in users sent on + `?reset=1` notice, `/change-password`, `/forgot-password`, `/reset-password` (invite wording, neutral expired view, no-referrer), `/my-downloads` (access line, history 20/page, "Download again"), sign out; `src/lib/{account-destination,download-history,contact-settings}.ts`, `src/components/site/account/*`, `e2e/account-pages.spec.ts`. 4337 unit (1 expected-fail, 3 skipped), full e2e 305, lint/typecheck OK, all code reviews PASS.
+  - **P3 done** (2026-10-09, `backend-architect`/Opus, **ADR 0069 + 0070**): `src/lib/{access-requests,access-expiry}.ts`, `src/lib/admin/{access-requests,customers}.ts`, `src/lib/schemas/{access-request,customer}.ts`, model/audit vocabulary changes, `acquireLock`/`releaseLock` (owner token) in `rate-limit.ts`, `test/helpers/auth-harness.ts` (real Better Auth on memory DB). 4479 unit (1 expected-fail, 3 skipped), lint/typecheck OK. Code-review High (approve retry double-extended / skipped invite) fixed + tested; the remaining WARNs were "no tests" written before the tests landed. Service API for P6/P7/P8 is listed in ADR 0069/0070 Consequences.
+  - **P4 done** (2026-10-10, `backend-architect`/Opus, **ADR 0071**): `presignGet()` (60 s, RFC 5987, signs only `datasheets/<uuid>.xlsx`), `GET /api/datasheet/[productId]`, `src/lib/datasheet-download.ts`, `download-user` limit 60/h (admin exempt), log before redirect (503 fail closed), static guard `test/datasheet-download-guards.test.ts`, R2 fake answers presigned GETs, `E2E_DOWNLOAD_CUSTOMER`, `e2e/datasheet-download.spec.ts` (2). 4581 unit (1 expected-fail, 3 skipped), lint/typecheck OK, no review High. "Download again" now reaches the route.
+  - **P5 done** (2026-10-10, `backend-architect`/Opus, **ADR 0072**): `src/lib/expiry-reminders.ts`, `GET /api/cron/access-expiry` (SHA-256 + `timingSafeEqual` Bearer, 200 / 409 busy / 503, counts-only `no-store` body), `vercel.json` cron 08:00 UTC, `npm run cron:expiry` (dry run by default, `--send` sends), global `cron-lock` + Resend idempotency keys, digest of the customers reminded in the run, counts-only audit. `CRON_SECRET` env rule tightened to 32–505 printable ASCII, no spaces. 4630 unit (1 expected-fail, 3 skipped), lint/typecheck OK, no review High/Medium. Dev-DB dry run: 0 due.
+  - **QA gate A PASS** (2026-10-10, `qa-security-reviewer`/Opus): no live route or page broken. Findings fixed by `backend-architect`/Opus (**ADR 0073**):
+    - M-1: every customers/access-request service checks the actor from the DB session first (`src/lib/admin/actor.ts`; writes return `denied`, reads throw `AdminActorError`), AST guard `actor.guard.test.ts`;
+    - L-1: datasheet route answers prefetch with 204, `HEAD` with 405; L-2: `safeNextPath` refuses dot segments and `//` pathnames; I-1: approve withholds the invite for a blocked customer (`inviteWithheld`);
+    - user decision: invite-pending customers get no expiry reminder (ADR 0072 amendment, `INVITE_SETTLED`).
+    - QA tests: `test/phase5-gate-a-{services,routes,guards}.qa.test.ts`, `e2e/phase5-gate-a.qa.spec.ts`; all 9 `it.fails` flipped. 4713 unit (1 expected-fail, 3 skipped), 23 e2e on the gate-A/download/account specs, lint/typecheck OK, no review High.
+  - **P6 done** (2026-10-10, `site-frontend`/Opus, **ADR 0074**): `/request-access` (`src/app/(site)/request-access/{page,actions}.ts(x)`, `src/components/site/request-access/*`): Q2 fields, `?product=`/`?renew=1`, prefill from the DB session, honeypot + server `startedAt`, works without JS; the ONE public Server Action (allowlisted in `test/admin-write-path.qa.test.ts`, exports only `requestAccessAction`); WhatsApp `wa.me` link (hidden without a number); `getPublishedProductLabel` in `src/lib/catalog/product-ref.ts`; product page "Sign in" (`next=/product/<slug>`) + "Request access", expired → `/request-access?renew=1&product=<id>`. 4741 unit (1 expected-fail, 3 skipped), 62 e2e (request-access 13 + account/download/product specs), lint/typecheck OK, review findings fixed (2 Low left, in ADR 0074).
+  - **P7 done** (2026-10-10, `admin-panel-builder`/Opus, **ADR 0075**): `/admin/access-requests` (`(list)` group with pending/handled tabs + pager + "Add WhatsApp request"; `[id]` detail with account card, approve/reject/delete, `not-found.tsx`, no `loading.tsx`), `src/app/admin/access-requests/actions.ts` (+ mocked and DB action tests), `src/app/admin/admin-reads.ts` (`pageActor`, `readAsAdmin` → reuse in P8), `src/components/admin/access-requests/*`, shadcn `radio-group`, `e2e/admin-access-requests.spec.ts` (9). Copy-once link only in dialog state; L-3 warning; `inviteWithheld`; `AUDIT_FAILED_MESSAGE`; "New invite link" via `regenerateInvite`. Review High (empty reject reason / empty company failed: parsed output re-parsed) + Medium fixed; dialogs now send raw values. Main session added the actions file to QA-owned `test/admin-write-path.qa.test.ts` (gate B to confirm). 4813 unit (1 expected-fail, 3 skipped), 60 e2e (P7 + admin-shell/auth-access/gate-A/request-access specs), lint/typecheck OK.
+  - **P8 done** (2026-10-10, `admin-panel-builder`/Opus, **ADR 0077**): `/admin/customers` (`(list)` group: search, 6 status filters incl. "Invite pending"/"Invite expired", sort, 50/page, "New link…" dialog), `/new` (outcome replaces the form, copy-once link in state), `[id]` (access/invite/password/sign-in/profile cards, linked requests, download history, audit trail; `not-found.tsx`, no `loading.tsx`), dashboard "Expiring in 30 days" card, "Open customer" on the request page; `src/app/admin/action-helpers.ts` shared by P7/P8; `src/app/admin/customers/actions.ts` added to `test/admin-write-path.qa.test.ts`. Custom expiry date starts empty unless a future end exists (no "ends tonight" trap). Tests: `actions.test.ts`, `actions.db.test.ts` (9 actions × 3 refused callers), `e2e/admin-customers.spec.ts`.
+  - **China time done** (2026-10-10, user decision, `backend-architect` + `admin-panel-builder`/Opus, **ADR 0076**, supersedes ADR 0075 §6): stored UTC, shown "10 Oct 2026, 14:30 (China time)"; ONE setting `APP_TIME_ZONE`/`APP_TIME_ZONE_LABEL` in `src/lib/time-zone.ts` (client-safe constants, not env); picked expiry day = end of that China day; reminder (7 d) + "expiring" (30 d) windows and digest key in China days; customer-facing dates (emails, `/my-downloads`) same module; all UTC formatters removed. **Cron stays 08:00 UTC** (user: customers in UAE/Europe); test proves an admin-picked day is reminded on the 08:00Z run exactly 7 China days before. `test/phase2-exit.qa.test.ts` build walk timeout → 60 s (flaked under full-suite load). Results: 4943 unit (1 expected-fail, 3 skipped), 80 e2e (admin-customers, admin-access-requests, account-pages, gate-A, admin-shell, auth-access, datasheet-download, request-access), lint/typecheck OK, no review High/Medium open.
+  - **QA gate B PASS** (2026-10-10, `qa-security-reviewer`/Opus, `3f499b2`): no Critical/High/Medium. Tests `test/phase5-gate-b-{time,actions,request-access}.qa.test.ts`, `e2e/phase5-gate-b.qa.spec.ts`. Fixed by `backend-architect`/Opus (**ADR 0078**): L-1 signed form stamp on `/request-access` (`src/lib/form-stamp.ts`; genuine >24 h → reload error, accepted deviation), I-2 temp-password customer on the datasheet route → `/change-password?next=`. 5054 unit (1 expected-fail, 3 skipped), 32 e2e on the touched specs, lint/typecheck OK.
+  - **P9 done** (2026-10-10, `qa-security-reviewer`/Opus, `44f5c6c`): `e2e/restricted-access.spec.ts` (whole journey request → approve → invite → password → download → expired/renew → cron reminder once; axe on account pages; Lighthouse mobile perf 89–96, a11y 100, SEO 60 = deliberate noindex). Full e2e 362 green. Medium found: Chromium reused the speculative 204 for the real datasheet click → route now answers speculative requests 503 + `Retry-After: 0` (`6fd1423`, ADR 0073 amendment).
+  - **User decisions done** (2026-10-10): actor check in EVERY admin service (products, categories, areas, datasheets, uploads, settings, import, dashboard; guard pins 57 services; public column-visibility reader moved to `src/lib/column-visibility.ts`) (`333a3c3`) and **"End access now"** (`endCustomerAccess`, not a ban; button + confirm on the Access card) (`9309e22`); both in the ADR 0073 amendment. 5358 unit (1 expected-fail, 3 skipped), lint/typecheck OK, full e2e 362 before the button + 24 targeted after.
+  - **Gate C PASS** (2026-10-10): `qa-security-reviewer`/Opus PASS, no Critical/High/Medium (`b02f116`: 503 prefetch matrix, `uploader-names.ts` guard test, race asserts; `.gitleaksignore` lines refreshed); `ui-reviewer`/Opus PASS with polish → fixed by `site-frontend`/Opus (form rhythm `FormActions`, active-viewer state on `/request-access`, expired reset leads with a new link, "Access expired" + "Contact us to renew", datasheet slot one-row from `2xl`, inline text links, China-time column header, Sign out on forced change-password) and `backend-architect`/Opus (field validation before anti-spam: empty form never thanked) (`758bf36`; ADR 0074 + 0078 amendments; CLAUDE.md expired wording updated). 5374 unit (1 expected-fail, 3 skipped), **full e2e 366 green**, lint/typecheck OK.
+  - **Merged:** PR #17 `phase-5` → `main` (2026-10-10, merge commit; CI green: lint/typecheck/unit/build/audit, Playwright, gitleaks).
+  - **Open after Phase 5 (non-blocking):** `/request-access` mobile perf 89–90 (TTFB + bundle, `site-frontend`); Lighthouse BP 96 (one CSP inspector issue); gate B I-3 picker `new Date()` at China midnight; End-access focus after a failed audit write; Firefox/Safari prefetch untested; "destination stream closed early" log noise (benign; optional `onRequestError` filter); stale "Access expired — contact us" comments in `src/lib/datasheet-state.ts:10`, `src/lib/permissions.ts:227`; optional `uploader-names.ts` → `listDatasheets`; invalid form + stale stamp shows reload only on the next send.
+  - **User (dev data):** customers saved before ADR 0076 show expiry one day late (stored as end of UTC day): re-save their access or reseed the dev DB. No migration before launch.
+  - **Later (from P7/P8):** backend export of `MAX_EMAIL_LENGTH`/`MAX_PHONE_LENGTH`/`MAX_REJECT_REASON_LENGTH` (access-request) and `MAX_EMAIL_LENGTH` + block-reason max (customer) for client `maxLength`; optional `unchanged` flag on `updateCustomerProfile` (UI says "Profile saved." for no change); dashboard card wording "Open"/"Waiting for a decision". After any `npx shadcn add`, check imports + `package.json` (it pulled the npm package `cn` once).
+  - **User/client must confirm (from P6):** the country list leaves out mainland China (HK, Macao, Taiwan listed).
+  - **Later (from P6):** Phase 7 links the consent text to the privacy notice (`TODO(Phase 7)`); tidy stale "arrives in P6" comments + `prefetch={false}` in `reset-expired.tsx`/`my-downloads`; Low: unit parity test for `requestAccessUrl` vs the route's `renewalPath`, unit test for `getPublishedProductRef`.
+  - **Must-dos for P7/P8 (from gate A):**
+    - call services with `{ id: viewer.user.id, headers: await headers() }` after `requireAdmin()`; map `denied` (writes) / `AdminActorError` (reads) to `forbidden()`; reads now take `actor` first;
+    - L-3: for `source: "form"` requests, default invite delivery to email and warn before "show once to copy" (form contact details are unverified and latest-wins);
+    - show `inviteWithheld` on approve for a blocked customer.
+  - **Open after gate A:** decide before the Phase 5 exit whether products/categories/datasheets services get the same actor check; gate C manual check: Chrome address-bar prerender of `/api/datasheet/<id>` + Enter still downloads (else answer prerender with 503 + `Retry-After`); stale review Medium on `safe-next-path.ts` (tests since added); no `users` index on `accessExpiresAt` (fine at this size).
+  - **Open from P4 (for gate A):** confirm the allowlist change in QA-owned `test/admin-uploads.qa.test.ts`; check real R2 honours `response-content-disposition` with `filename*` once credentials exist; optional: refuse `Sec-Purpose: prefetch`. P6: `/request-access?renew=1&product=<id>` is the route's renew target. P9: a real browser download test needs a context-level route or an R2-host proxy (`page.route` can't see the redirect). Launch list: Firewall rate limit on `/api/datasheet/*`.
+  - **Open from P3:**
+    - P6: render hidden `website` + server `startedAt`; pass `viewer` from the DB session; map `errors.fieldErrors`; country values must fit the plain charset.
+    - P7/P8: `requireAdmin()` then `{id: viewer.user.id, headers: await headers()}`; show `invite.url`/`password` once, never in URL/logs; show `AUDIT_FAILED_MESSAGE` when `auditFailed`; offer "New invite link" when the invite state isn't sent/copy.
+    - Gate A: review the accepted latest-wins overwrite of unlinked form rows; per-network window is 5/15 min (not 5/h, ADR 0022).
+  - **User must (new):** run `npm run db:indexes` on the dev DB (new `accessRequests` indexes; fails if two pending requests share an email — clean those up first).
+  - **Open from P2:**
+    - P6: `/request-access` (+ `?renew=1`) 404s until P6; product "Sign in to download" must pass `next=/product/<slug>` (`datasheet-button.tsx`); "Access expired" still points at `/contact`; reuse `getWhatsappNumber()`.
+    - Gate A: trace the "[WebServer] destination stream closed early" log during admin sign-in/out e2e; optional `Referrer-Policy: no-referrer` header for `/reset-password`.
+    - Gate C (ui-reviewer): gap between "Keep me signed in" and the button on `/login`.
+  - **P2 contract (history, from P1, ADR 0068 Consequences):**
+    - invite link `/reset-password?token=<t>&invite=1`;
+    - forgot-password posts `/api/auth/request-password-reset` `{email, redirectTo:"/reset-password"}`; the email link 302s to `/reset-password?token=` (or `?error=INVALID_TOKEN`);
+    - the page POSTs `{token,newPassword}` to `/api/auth/reset-password`: 200 → `/login?reset=1` (all sessions are revoked); 400 `INVALID_TOKEN` (expired, used or unknown, identical) → neutral "This link has expired. Ask us for a new one" with WhatsApp + `/request-access`; `PASSWORD_TOO_SHORT` (min 12); 429 generic;
+    - change-password POSTs `{currentPassword,newPassword,revokeOtherSessions:true}` to `/api/auth/change-password` (full page load);
+    - guards `requireSignedIn(path)`; destinations through `safeNextPath`; `loginPathFor`;
+    - e2e uses `E2E_MAIL_CUSTOMER` or new dedicated accounts for email flows.
+    - `/my-downloads` needs a small reader for the user's `downloadLogs` (P2 may add it in `src/lib/`, or ask `backend-architect`).
+  - **Open for P3 (from P1):**
+    - "set temporary password" should also set `mustChangePassword: true` and delete invite links;
+    - "invite expired" filter via `$expr` (`passwordSetAt` vs `invitedAt`);
+    - regenerate rate limit + disabled while pending;
+    - request-form Zod keeps name/company/country to a short plain character set;
+    - audit vocabulary.
+  - **Tasks:**
+    - P1 account backend, P2 account pages, P3 services (requests + customers), P4 `/api/datasheet/[productId]`, P5 expiry cron; **QA gate A after P5**;
+    - P6 request-access UI, P7 admin queue, P8 admin customers; **QA gate B after P8**;
+    - P9 exit e2e; **gate C** (`qa-security-reviewer` then `ui-reviewer` on the public account pages).
+    - ADRs 0068–0072.
+  - **Subagents:** `backend-architect`, `site-frontend`, `admin-panel-builder`, `qa-security-reviewer`, `ui-reviewer`, `code-reviewer` (hook). No new subagent; `motion-engineer`/`import-engineer` unused. All Opus.
+  - **Must-dos folded into the plan:**
+    - ADR 0032 24 h cap gap (`remember-me.qa.test.ts` `it.fails` → `it`);
+    - ADR 0064 §14/§19 (`/change-password`, temp-password redirect, download link, expired-link target);
+    - task-5 L3 (`/api/auth/*` posts, `revokeOtherSessions: true`);
+    - ADR 0027 full page loads;
+    - gate C I-2 RFC 5987 file names;
+    - **nothing clears `mustChangePassword` today** (P1 fixes it).
+  - **User must:**
+    - `CRON_SECRET` in `.env.local`;
+    - company email + WhatsApp number in `/admin/settings`;
+    - verify the Resend domain before launch.
+  - **Still open from 4b:**
+    - Firewall rate limits (launch list);
+    - M-4 facet counts decision;
+    - 4:3 crop check with real photos;
+    - logo/favicon, real photos, category icons;
+    - family-name search on Atlas after a real import.
+- **Phase 4b (history): plan APPROVED (2026-10-08, all defaults Q1–Q9), `doc/phase-4b-plan.md`. Branch `phase-4b` (from `main`, 4a merged in PR #15).**
   - **L0 done** (roster line in ADR 0013 + CLAUDE.md).
   - **L1 done** (`c09ae39`, ADR 0065): `src/lib/catalog/{listing-params,category-path,listing-scope,listing,facets,areas}.ts`; 3669 unit green. Wiring for L4/L5: `getCatalogVisibility()` once per request → `parseListingParams(searchParams, {publicFacets: publicSpecFacets(v), track: path.isMagneticTrack, cat: isAreaPage})` → `listProducts(scope, params, v)` + `getFacets(scope, v)` → 404 when `page > pageCount`; chips/canonical from `result.params`. `listPublicCategories` lacks `description`/`coverImage` (add with L3/L4, bump `CATALOG_CACHE_VERSION`); `listCategoryPaths()` has no `updatedAt` (sitemap lastmod). L2 can reuse `listing-scope.ts` and `toListingCardView`.
   - **L2 done** (`6ed3966`, ADR 0066): `src/lib/catalog/{search,search-index}.ts`, `scripts/search-index.ts` (`npm run db:search-index`), `GET /api/catalog/search`; 3732 unit green. API for L6: `{query, products:[card + variantCount + matchedModelNo], categories:[{id,name,slug,path,slugPath}]}`; link `/product/<slug>?model=<matchedModelNo>`, categories `/products/<slugPath.join("/")>`; input `maxLength=64`; `/search` page may call `searchCatalog()` directly. Atlas with no index returns empty (not the fallback). QA gate A: add `search.ts` to `CACHED_MODULES` in `test/catalog-gate-a-guards.qa.test.ts`; decide whether empty categories show in search.
@@ -424,14 +514,26 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Playwright: restricted-leak check, filters, search by variant model no.
 - **Exit:** leak test passes; Lighthouse ≥ 90 on listing + product page
 
-## Phase 5 — Restricted access
-- [ ] Request Access form + WhatsApp link
-- [ ] Admin queue: approve with expiry / reject; Resend emails
-- [ ] Customers module (create, extend, reset, disable, history, filters)
-- [ ] Customer login, forced password change, email reset (admin too), `/my-downloads`
-- [ ] `/api/datasheet/[productId]` → R2 presigned 60 s + downloadLogs, `private, no-store`
-- [ ] Cron expiry reminders (`CRON_SECRET`, `vercel.json`)
-- [ ] Tests: access matrix + Playwright gated download
+## Phase 5 — Restricted access ✅ (merged 2026-10-10, PR #17)
+**Plan: [phase-5-plan.md](phase-5-plan.md) (P0–P9, QA gates A after P5, B after P8, C at exit; ADRs 0068–0072). Approved 2026-10-09.**
+- [x] Plan drafted, `/find-skills` run (2026-10-09)
+- [x] P0: plan approved (defaults + invite-regenerate addition), branch `phase-5`, Better Auth skills installed (ADR 0013 note)
+- [x] P1 account backend (ADR 0068)
+- [x] P2 account pages
+- [x] P3 services: access requests + customers (ADR 0069, 0070)
+- [x] P4 `/api/datasheet/[productId]` (ADR 0071)
+- [x] P5 expiry cron (ADR 0072) → QA gate A
+- [x] P6 request-access UI (ADR 0074), P7 admin queue (ADR 0075), P8 admin customers (ADR 0077), China-time dates (ADR 0076)
+- [x] QA gate B (PASS; fixes ADR 0078)
+- [x] P9 exit e2e (+ prerender 503 fix, actor check everywhere, End access now)
+- [x] Gate C (security PASS, UI PASS with polish → fixed)
+- [x] Request Access form + WhatsApp link
+- [x] Admin queue: approve with expiry / reject; Resend emails
+- [x] Customers module (create, extend, reset, disable, history, filters)
+- [x] Customer login, forced password change, email reset (admin too), `/my-downloads`
+- [x] `/api/datasheet/[productId]` → R2 presigned 60 s + downloadLogs, `private, no-store`
+- [x] Cron expiry reminders (`CRON_SECRET`, `vercel.json`)
+- [x] Tests: access matrix + Playwright gated download
 
 ## Phase 6 — Home page & motion
 - [ ] Hero · Quote · 7-area horizontal scroll · Capabilities collage · Leadership · Closing menu
@@ -491,6 +593,10 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-06 — T11a done on Opus (ADR 0045, note on 0027): Cloudinary sign/verify, `saveProductImages`, `setAreaImage`, admin-only CSP; gate A L-2 and gate B L-C closed. User reminded about the R2 CORS rule. 1605 unit green, build OK. Next: T11b.
 - 2026-10-06 — QA gate B PASS (T7–T10b) on Sonnet 5.5 at the user's request: no Critical, High or Medium findings; Lows L-A (model-no. case across products) to L-E recorded. 52 QA tests added. 1476 unit + 84 e2e green. Next: T11a.
 - 2026-10-06 — T10b done on Opus (ADR 0044). The auto-review caught a regex with literal line breaks (Critical); it was fixed. Input `name`s are dropped so a pre-hydration submit can't put spec text in the URL. 200 variants stay responsive. 1429 unit + 80 e2e green. Next: QA gate B.
+- 2026-10-10: QA gate B PASS (`qa-security-reviewer`/Opus; 81 new tests). L-1 forgeable `startedAt` → HMAC-signed form stamp, I-2 temp-password datasheet redirect, fixed by `backend-architect`/Opus (ADR 0078). 5054 unit + 32 e2e green. Next: P9 exit e2e → gate C.
+- 2026-10-10: P9 exit e2e PASS (`qa-security-reviewer`/Opus); datasheet prerender bug fixed (503 + Retry-After 0). User decided: actor check in every admin service + "End access now" (both `backend-architect`/`admin-panel-builder`/Opus, ADR 0073 amendment). 5358 unit, full e2e 362 green. Next: gate C.
+- 2026-10-10: Gate C PASS (security + UI). UI polish and "field validation before anti-spam" fixed (`site-frontend`, `backend-architect`/Opus; ADR 0074/0078 amendments; CLAUDE.md expired wording + China time). 5374 unit + full e2e 366 green. Next: PR `phase-5` → `main`, CI, ask before merge.
+- 2026-10-10: PR #17 CI green; user approved; `phase-5` merged into `main`. Next: Phase 6 planning.
 - 2026-10-06 — T10a done on Opus (ADR 0043). The auto-review found two Highs, both fixed: every save after the first did nothing (the in-flight flag stayed set through the redirect), and a stale tab could overwrite newer data. The second fix: status now changes only through publish/unpublish, and saves are checked against `updatedAt`. Six Medium fixes followed. 1364 unit + 74 e2e green. Next: T10b.
 - 2026-10-06 — T9 done on Opus (ADR 0042): products list, new draft, shared move guard, e2e for products. Next: T10.
 - 2026-10-06 — T8 done (ADR 0041): product service with publish gate, trackSize rule, modelNo field errors. Next: T9.
@@ -551,4 +657,15 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-08: Atlas dev search index confirmed READY; model no. exact/prefix and name search verified on the dev cluster; family search untested (no family data in dev). Next: L5 area pages.
 - 2026-10-08: L5 area pages done (`site-frontend`/Opus; ADR 0065 L5 addendum); listing-header grayscale class bug from the code review fixed + tested; 4078 unit + 226 e2e green. Next: L6 mega-menu + search UI + sitemap.
 - 2026-10-09: L6 mega-menu + search UI + sitemap done (`site-frontend`/Opus; ADR 0065 L6 addendum); code-review findings (scrim close, touch first-tap, Esc, e2e) fixed; 4106 unit + 237 e2e green. Next: QA gate B.
+- 2026-10-09: Phase 4b merged (PR #16). Phase 5 planned: `doc/phase-5-plan.md` (P0–P9, Q0–Q12 with defaults). `/find-skills`: official `better-auth-best-practices` + `better-auth-security-best-practices` recommended (Q0), nothing for filter/search/menu UI. Existing subagents reused, none new. Waiting for the user's review; no code written.
+- 2026-10-09: Phase 5 plan approved (all defaults; user added invite regeneration for expired/lost 72 h links, now explicit in Q1/P1/P3/P8). P0 done on `phase-5`: Better Auth skills installed and reviewed (Markdown only; conflicts with our rules listed in ADR 0013). Next: P1.
+- 2026-10-09: P1 account backend done (ADR 0068): 72 h invite = Better Auth reset token (spike passed, one live link per user), one user-field writer, `mustChangePassword` finally cleared by change/reset, ADR 0032 gap closed, `safeNextPath`, six email templates, e2e Resend sink. Auto-review caught undeclared user fields being silently dropped by the adapter; fixed and tested. 4297 unit green. Next: P2 account pages.
+- 2026-10-09: P2 account pages done (`site-frontend`/Opus; ADR 0068 P2 addendum): login destinations, change/forgot/reset password, my-downloads, sign out. Found a P1 regression in `admin-shell.spec.ts` (customer count) and fixed it via `E2E_SEEDED_CUSTOMERS`. 4337 unit + 305 e2e green, all reviews PASS. Next: P3 services.
+- 2026-10-09: P3 services done (`backend-architect`/Opus; ADR 0069 access requests, ADR 0070 customers). Review High on approve retries (double extension, skipped invite) fixed: claim kept once the account is written. 4479 unit green. Next: P4 datasheet download route.
+- 2026-10-10: P4 datasheet download done (`backend-architect`/Opus; ADR 0071): route with the Q9 answers, 60 s presign of datasheet keys only, 60/h per-user limit, log before redirect (fail closed). 4581 unit + 2 e2e green, no review High. Next: P5 expiry cron, then QA gate A.
+- 2026-10-10: P5 expiry cron done (`backend-architect`/Opus; ADR 0072): timing-safe Bearer route, 7-day window idempotent via `expiryReminderFor`, global lock + Resend keys, admin digest, counts-only audit, `vercel.json` 08:00 UTC, dry-run CLI. Review Medium (a failed batch read lost the digest and audit) fixed as `aborted`. 4630 unit green. Next: QA gate A.
+- 2026-10-10: QA gate A PASS (`qa-security-reviewer`/Opus) with M-1 (admin services trusted the actor), L-1 (prefetch/HEAD on datasheet route), L-2 (`safeNextPath` dot segments), I-1; all fixed by `backend-architect`/Opus (ADR 0073). User decided invite-pending customers get no expiry reminder (ADR 0072 amendment). Two API connection drops mid-run; both agents resumed. 4713 unit + 23 e2e green. Next: P6 request-access UI.
+- 2026-10-10: P6 request-access UI done (`site-frontend`/Opus; ADR 0074): `/request-access` with no-JS Server Action (one allowlisted public action), session prefill, WhatsApp link, product-page sign-in/request/renew links. Review Mediums (select lost value, e2e fill timing) fixed. 4741 unit + 62 e2e green. Next: P7 admin queue.
+- 2026-10-10: P7 admin access-request queue done (`admin-panel-builder`/Opus; ADR 0075): pending/handled tabs, detail, approve (expiry picker, existing-customer extend, copy-once link, L-3 warning), reject, WhatsApp entry, delete. Review High (raw vs parsed form values) fixed; shadcn pulled a stray `cn` npm package, removed. 4813 unit + 60 e2e green. Next: P8 admin customers.
+- 2026-10-10: P8 admin customers done (`admin-panel-builder`/Opus; ADR 0077). User decided admin dates show in China time with one setting, expiry days end at the end of the China day, cron stays 08:00 UTC for UAE/Europe customers (`backend-architect`/Opus; ADR 0076, supersedes 0075 §6). Both agents hit a session limit mid-run and were resumed. Picker "ends tonight" default trap removed; QA build-walk timeout raised. 4943 unit + 80 e2e green. Next: QA gate B.
 - 2026-10-09: QA gate B on L4–L6 failed on 3 findings (L-1 comment, M-1 draft category link, L-2 menu close), all fixed; gate B tests added. 4119 unit + 254 e2e green. Next: L7.

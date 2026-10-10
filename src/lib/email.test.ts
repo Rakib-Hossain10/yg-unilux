@@ -324,6 +324,31 @@ describe("sendPasswordResetEmail", () => {
     expect(resendMock.send).not.toHaveBeenCalled();
   });
 
+  it("accepts http://localhost in production only when AUTH_URL is that same origin (local next start / e2e)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("AUTH_SECRET", "email-test-auth-secret-0123456789abcdefgh");
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    const { sendPasswordResetEmail, EmailSendError } = await loadEmail();
+    const url = `http://localhost:3000/api/auth/reset-password/${TOKEN}`;
+    await sendPasswordResetEmail({ to: TO, name: "Ana", url });
+    expect(sentPayload().text as string).toContain(url);
+
+    // Another port, or a site on https, still refuses it.
+    for (const [site, link] of [
+      ["http://localhost:3000", "http://localhost:4000/reset"],
+      ["https://www.example.com", "http://localhost:3000/reset"],
+    ] as const) {
+      vi.stubEnv("AUTH_URL", site);
+      const error = await sendPasswordResetEmail({
+        to: TO,
+        name: "Ana",
+        url: link,
+      }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(EmailSendError);
+    }
+    expect(resendMock.send).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["development", "test"])(
     "accepts http://localhost when NODE_ENV is %s",
     async (nodeEnv) => {
@@ -352,5 +377,350 @@ describe("reset link lifetime", () => {
   it("is one hour, matching the 'expires in 1 hour' copy", async () => {
     const { PASSWORD_RESET_TOKEN_TTL_SECONDS } = await loadEmail();
     expect(PASSWORD_RESET_TOKEN_TTL_SECONDS).toBe(3600);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 5 account emails
+// ---------------------------------------------------------------------------
+
+const SITE = "https://www.example.com";
+const INVITE_URL = `${SITE}/reset-password?token=${TOKEN}&invite=1`;
+const EVIL = `<script>alert("x")</script>&'`;
+const EVIL_ESCAPED =
+  "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;&#39;";
+
+function stubSite(): void {
+  vi.stubEnv("AUTH_URL", SITE);
+  vi.stubEnv("AUTH_SECRET", "email-test-auth-secret-0123456789abcdefgh");
+}
+
+/* Subject, text and HTML of the one sent email. */
+function sent() {
+  const payload = sentPayload();
+  return {
+    subject: payload.subject as string,
+    text: payload.text as string,
+    html: payload.html as string,
+  };
+}
+
+describe("sendInviteEmail", () => {
+  beforeEach(stubSite);
+
+  it("says 'Set your password', states 72 hours and the China-time expiry, links the invite", async () => {
+    const { sendInviteEmail } = await loadEmail();
+    await sendInviteEmail({
+      to: TO,
+      name: "Ana Lee",
+      url: INVITE_URL,
+      expiresAt: new Date("2026-10-12T14:05:00Z"),
+    });
+    const { subject, text, html } = sent();
+    expect(subject).toBe("Set your YG UniLUX password");
+    expect(text).toContain("Hello Ana Lee,");
+    expect(text).toContain(INVITE_URL);
+    expect(text).toContain(
+      "expires in 72 hours, at 12 Oct 2026, 22:05 (China time).",
+    );
+    expect(html).toContain(`href="${INVITE_URL.replaceAll("&", "&amp;")}"`);
+    expect(html).toContain("Set your password");
+    expect(html).not.toMatch(/<img|<script|<link/i);
+  });
+
+  it("escapes the name", async () => {
+    const { sendInviteEmail } = await loadEmail();
+    await sendInviteEmail({
+      to: TO,
+      name: EVIL,
+      url: INVITE_URL,
+      expiresAt: new Date(),
+    });
+    const { html } = sent();
+    expect(html).not.toContain("<script>");
+    expect(html).toContain(EVIL_ESCAPED);
+  });
+
+  it.each([
+    "https://evil.example/reset-password?token=x",
+    "http://www.example.com/reset-password?token=x",
+    "javascript:alert(1)",
+    "/reset-password?token=x",
+  ])("refuses a link that is not our own https origin: %s", async (url) => {
+    const { sendInviteEmail, EmailSendError } = await loadEmail();
+    const error = (await sendInviteEmail({
+      to: TO,
+      name: "Ana",
+      url,
+      expiresAt: new Date(),
+    }).catch((e: unknown) => e)) as InstanceType<typeof EmailSendError>;
+    expect(error).toBeInstanceOf(EmailSendError);
+    expect(error.reason).toBe("invalid_link");
+    expect(error.message).not.toContain(url);
+    expect(resendMock.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses an invalid date without sending", async () => {
+    const { sendInviteEmail, EmailSendError } = await loadEmail();
+    const error = await sendInviteEmail({
+      to: TO,
+      name: "Ana",
+      url: INVITE_URL,
+      expiresAt: new Date("nope"),
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EmailSendError);
+    expect(resendMock.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendExpiryReminderEmail", () => {
+  beforeEach(stubSite);
+
+  it("names the last day in China time and links the renewal form, with the idempotency key", async () => {
+    const { sendExpiryReminderEmail } = await loadEmail();
+    await sendExpiryReminderEmail({
+      to: TO,
+      name: "Ana",
+      accessExpiresAt: new Date("2026-10-16T15:59:59.999Z"),
+      idempotencyKey: "expiry-reminder/u1/2026-10-16",
+    });
+    const { subject, text, html } = sent();
+    expect(subject).toBe("Your YG UniLUX datasheet access ends soon");
+    expect(text).toContain("until the end of 16 Oct 2026 (China time)");
+    expect(text).toContain(`${SITE}/request-access?renew=1`);
+    expect(html).toContain(`href="${SITE}/request-access?renew=1"`);
+    expect(resendMock.send.mock.calls[0]![1]).toEqual({
+      idempotencyKey: "expiry-reminder/u1/2026-10-16",
+    });
+  });
+
+  it("refuses an http (non-localhost) AUTH_URL link in production", async () => {
+    vi.stubEnv("AUTH_URL", "http://www.example.com");
+    const { sendExpiryReminderEmail, EmailSendError } = await loadEmail();
+    const error = await sendExpiryReminderEmail({
+      to: TO,
+      name: "Ana",
+      accessExpiresAt: new Date(),
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EmailSendError);
+    expect(resendMock.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendAccessExtendedEmail", () => {
+  beforeEach(stubSite);
+
+  it("states the new end date", async () => {
+    const { sendAccessExtendedEmail } = await loadEmail();
+    await sendAccessExtendedEmail({
+      to: TO,
+      name: "Ana",
+      accessExpiresAt: new Date("2027-04-30T15:59:59.999Z"),
+    });
+    const { text } = sent();
+    expect(text).toContain(
+      "now valid until the end of 30 Apr 2027 (China time)",
+    );
+    expect(text).toContain(`${SITE}/my-downloads`);
+  });
+
+  it("states 'no end date' for null", async () => {
+    const { sendAccessExtendedEmail } = await loadEmail();
+    await sendAccessExtendedEmail({
+      to: TO,
+      name: "Ana",
+      accessExpiresAt: null,
+    });
+    expect(sent().text).toContain("no longer has an end date");
+  });
+});
+
+describe("sendAccessRequestAlertEmail", () => {
+  beforeEach(stubSite);
+
+  it("holds name, company, country and the queue link; no personal data in the subject", async () => {
+    const { sendAccessRequestAlertEmail } = await loadEmail();
+    await sendAccessRequestAlertEmail({
+      to: "company@example.com",
+      name: "Ana Lee",
+      company: "Acme Lighting",
+      country: "Hong Kong",
+      kind: "new",
+    });
+    const { subject, text, html } = sent();
+    expect(subject).toBe("New datasheet access request");
+    expect(subject).not.toContain("Ana");
+    expect(text).toContain("Name: Ana Lee");
+    expect(text).toContain("Company: Acme Lighting");
+    expect(text).toContain("Country: Hong Kong");
+    expect(html).toContain(`href="${SITE}/admin/access-requests"`);
+  });
+
+  it("never includes a message, email or phone, even if a caller passes them", async () => {
+    const { sendAccessRequestAlertEmail } = await loadEmail();
+    await sendAccessRequestAlertEmail({
+      to: "company@example.com",
+      name: "Ana",
+      kind: "renewal",
+      ...({
+        message: "SECRET-MESSAGE",
+        email: "requester@example.com",
+        phone: "+85212345678",
+      } as object),
+    });
+    const { subject, text, html } = sent();
+    expect(subject).toBe("New datasheet access renewal request");
+    for (const secret of ["SECRET-MESSAGE", "requester@", "12345678"]) {
+      expect(text).not.toContain(secret);
+      expect(html).not.toContain(secret);
+    }
+    expect(text).toContain("Company: -");
+  });
+
+  it("defangs URL-looking requester text so mail clients don't linkify it", async () => {
+    const { sendAccessRequestAlertEmail } = await loadEmail();
+    await sendAccessRequestAlertEmail({
+      to: "company@example.com",
+      name: "Verify at https://yg-login.example/x",
+      company: "www.evil.example or admin@evil.example",
+      country: "Hong Kong",
+      kind: "new",
+    });
+    const { text, html } = sent();
+    for (const body of [text, html]) {
+      expect(body).not.toContain("https://yg-login");
+      expect(body).not.toContain("www.evil");
+      expect(body).not.toContain("admin@evil");
+      expect(body).not.toMatch(/evil\.example/);
+    }
+    expect(text).toContain("Name: Verify at https[:]//yg-login[.]example/x");
+    expect(text).toContain("Country: Hong Kong");
+    // Only our own queue link remains a real link.
+    expect(html.match(/href="/g)).toHaveLength(2);
+  });
+
+  it("leaves ordinary company names readable", async () => {
+    const { sendAccessRequestAlertEmail } = await loadEmail();
+    await sendAccessRequestAlertEmail({
+      to: "company@example.com",
+      name: "Ana Lee",
+      company: "Acme Co. Ltd.",
+      kind: "new",
+    });
+    expect(sent().text).toContain("Company: Acme Co. Ltd.");
+  });
+
+  it("escapes every requester value and folds line breaks", async () => {
+    const { sendAccessRequestAlertEmail } = await loadEmail();
+    await sendAccessRequestAlertEmail({
+      to: "company@example.com",
+      name: `${EVIL}\nInjected: line`,
+      company: EVIL,
+      country: EVIL,
+      kind: "new",
+    });
+    const { text, html } = sent();
+    expect(html).not.toContain("<script>");
+    expect(html.split(EVIL_ESCAPED).length - 1).toBe(3);
+    expect(text).not.toMatch(/\nInjected: line/);
+  });
+});
+
+describe("sendAccessDeclinedEmail", () => {
+  beforeEach(stubSite);
+
+  it("defangs a URL-looking name in the greeting", async () => {
+    const { sendAccessDeclinedEmail } = await loadEmail();
+    await sendAccessDeclinedEmail({
+      to: TO,
+      name: "Security alert: verify at https://yg-login.example",
+    });
+    const { text, html } = sent();
+    expect(text).toContain(
+      "Hello Security alert: verify at https[:]//yg-login[.]example,",
+    );
+    expect(html).not.toContain("https://yg-login");
+    expect(html).not.toMatch(/href=/);
+  });
+
+  it("is polite, escapes the name and carries no reason", async () => {
+    const { sendAccessDeclinedEmail } = await loadEmail();
+    await sendAccessDeclinedEmail({ to: TO, name: EVIL });
+    const { subject, text, html } = sent();
+    expect(subject).toBe("Your YG UniLUX datasheet access request");
+    expect(text).toContain("Thank you for your interest");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain(EVIL_ESCAPED);
+  });
+});
+
+describe("sendExpiryDigestEmail", () => {
+  beforeEach(stubSite);
+
+  it("lists name, company and the China-time date per customer", async () => {
+    const { sendExpiryDigestEmail } = await loadEmail();
+    await sendExpiryDigestEmail({
+      to: "company@example.com",
+      customers: [
+        {
+          name: "Ana Lee",
+          company: "Acme",
+          accessExpiresAt: new Date("2026-10-14T15:59:59.999Z"),
+        },
+        {
+          name: EVIL,
+          company: null,
+          accessExpiresAt: new Date("2026-10-15T15:59:59.999Z"),
+        },
+      ],
+    });
+    const { subject, text, html } = sent();
+    expect(subject).toBe("2 customers' datasheet access ends within 7 days");
+    expect(text).toContain("(dates in China time):");
+    expect(text).toContain("- Ana Lee (Acme): 14 Oct 2026");
+    expect(html).toContain(`${EVIL_ESCAPED}: 15 Oct 2026`);
+    expect(html).not.toContain("<script>");
+    expect(html).toContain(`href="${SITE}/admin/customers"`);
+  });
+
+  it("refuses an empty list", async () => {
+    const { sendExpiryDigestEmail, EmailSendError } = await loadEmail();
+    const error = await sendExpiryDigestEmail({
+      to: "company@example.com",
+      customers: [],
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EmailSendError);
+    expect(resendMock.send).not.toHaveBeenCalled();
+  });
+
+  it("caps the listed rows and counts the rest", async () => {
+    const { sendExpiryDigestEmail, EXPIRY_DIGEST_MAX_ROWS } = await loadEmail();
+    const customers = Array.from(
+      { length: EXPIRY_DIGEST_MAX_ROWS + 5 },
+      (_, i) => ({
+        name: `C${i}`,
+        accessExpiresAt: new Date("2026-10-14T15:59:59.999Z"),
+      }),
+    );
+    await sendExpiryDigestEmail({ to: "company@example.com", customers });
+    const { text } = sent();
+    expect(text).toContain("And 5 more.");
+    expect(text).not.toContain(`C${EXPIRY_DIGEST_MAX_ROWS}:`);
+  });
+});
+
+describe("email dates", () => {
+  beforeEach(stubSite);
+
+  it("are the China-time day, not the UTC or server day", async () => {
+    const { sendExpiryReminderEmail } = await loadEmail();
+    await sendExpiryReminderEmail({
+      to: TO,
+      name: "Ana",
+      // 16:30Z on 16 Oct is 00:30 on 17 Oct in China.
+      accessExpiresAt: new Date("2026-10-16T16:30:00.000Z"),
+      idempotencyKey: "expiry-reminder/u1/tz",
+    });
+    expect(sent().text).toContain("until the end of 17 Oct 2026 (China time)");
   });
 });

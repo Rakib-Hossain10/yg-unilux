@@ -7,6 +7,8 @@ skills:
   - next-cache-components
   - mongodb-connection
   - security-and-hardening
+  - better-auth-best-practices
+  - better-auth-security-best-practices
   - tdd
 ---
 

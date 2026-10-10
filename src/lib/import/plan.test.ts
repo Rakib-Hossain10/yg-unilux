@@ -23,6 +23,7 @@ import {
 } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { testActor } from "../../../test/helpers/admin-actor";
 import { buildFixture } from "../../../test/fixtures/import/build";
 import {
   fillTemplate,
@@ -43,6 +44,12 @@ import {
 } from "./plan";
 import type { ImportProduct, PlanEntry, PlanTarget } from "./types";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
+
 vi.mock("@/lib/storage", () => ({
   getImportBytes: vi.fn(),
   deleteImportUpload: vi.fn(),
@@ -50,6 +57,7 @@ vi.mock("@/lib/storage", () => ({
 }));
 
 setupMemoryDb("yg_import_plan_test");
+const admin = testActor();
 
 const { ObjectId } = mongoose.Types;
 const KEY = "imports/00000000-0000-4000-8000-000000000001.xlsx";
@@ -117,7 +125,7 @@ function useFile(bytes: Uint8Array, etag: string | undefined = ETAG): void {
 async function preview(
   input: unknown = { key: KEY, defaultCategoryId: defaultCategory },
 ): Promise<Extract<ImportPreview, { kind: "plan" }>> {
-  const result = await previewImport(input);
+  const result = await previewImport(admin, input);
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   expect(result.tags).toEqual([]);
   // the picture bytes stay on the server
@@ -186,7 +194,7 @@ async function saveAsCommitWould(
 
 describe("previewImport: input checks", () => {
   it("refuses a key that is not a staged import key", async () => {
-    const result = await previewImport({
+    const result = await previewImport(admin, {
       key: "datasheets/x.xlsx",
       defaultCategoryId: defaultCategory,
     });
@@ -195,7 +203,7 @@ describe("previewImport: input checks", () => {
   });
 
   it("refuses unknown fields (strict input)", async () => {
-    const result = await previewImport({
+    const result = await previewImport(admin, {
       key: KEY,
       defaultCategoryId: defaultCategory,
       extra: 1,
@@ -204,7 +212,7 @@ describe("previewImport: input checks", () => {
   });
 
   it("refuses a default category that does not exist", async () => {
-    const result = await previewImport({
+    const result = await previewImport(admin, {
       key: KEY,
       defaultCategoryId: new ObjectId().toHexString(),
     });
@@ -220,7 +228,7 @@ describe("previewImport: input checks", () => {
       ok: false,
       reason: "not_found",
     });
-    const result = await previewImport({
+    const result = await previewImport(admin, {
       key: KEY,
       defaultCategoryId: defaultCategory,
     });
@@ -231,7 +239,7 @@ describe("previewImport: input checks", () => {
 
   it("returns the fatal warnings for a file that is not an .xlsx", async () => {
     useFile(new TextEncoder().encode("not a workbook at all"));
-    const result = await previewImport({
+    const result = await previewImport(admin, {
       key: KEY,
       defaultCategoryId: defaultCategory,
     });

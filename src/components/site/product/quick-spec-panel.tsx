@@ -136,6 +136,7 @@ export function QuickSpecPanel({
       <div className="mt-6">
         <DatasheetSlot
           productId={product.id}
+          productSlug={product.slug}
           hasDatasheet={product.hasDatasheet}
         />
       </div>

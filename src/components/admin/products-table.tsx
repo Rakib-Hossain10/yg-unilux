@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/table";
 import type { ProductStatus } from "@/models/product-constants";
 
+import { formatDate } from "@/lib/time-zone";
+
 import {
   productEditPath,
   productsListPath,
@@ -36,17 +38,6 @@ export interface ProductRow {
   status: ProductStatus;
   updatedAt: string;
 }
-
-/*
- * Dates as "6 Oct 2026" in UTC: the same text on the server and in any
- * browser, so nothing shifts between renders. Created once per module.
- */
-const DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
 
 export function ProductsTable({ rows }: { rows: ProductRow[] }) {
   return (
@@ -123,7 +114,7 @@ export function ProductsTable({ rows }: { rows: ProductRow[] }) {
                 </TableCell>
                 <TableCell className="pr-4 text-muted-foreground">
                   <time dateTime={row.updatedAt}>
-                    {DATE_FORMAT.format(new Date(row.updatedAt))}
+                    {formatDate(row.updatedAt)}
                   </time>
                 </TableCell>
               </TableRow>

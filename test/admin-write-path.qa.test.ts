@@ -41,6 +41,8 @@ function code(file: string): string {
 
 const files = sourceFiles();
 const ACTIONS_FILE = /^src\/app\/admin\/(?:.+\/)?actions\.ts$/;
+/* Public Server Actions, each reviewed (see the test below). */
+const PUBLIC_ACTION_FILES = ["src/app/(site)/request-access/actions.ts"];
 
 describe("Server Actions exist only in admin actions.ts files", () => {
   /*
@@ -51,15 +53,36 @@ describe("Server Actions exist only in admin actions.ts files", () => {
   it("finds no 'use server' anywhere else under src/", () => {
     const offenders = files.filter(
       (file) =>
-        !ACTIONS_FILE.test(file) && /["']use server["']/.test(code(file)),
+        !ACTIONS_FILE.test(file) &&
+        !PUBLIC_ACTION_FILES.includes(file) &&
+        /["']use server["']/.test(code(file)),
     );
     expect(offenders).toEqual([]);
   });
 
+  /*
+   * Phase 5 P6: the ONE public Server Action, the /request-access form (it
+   * must work without JavaScript). It takes no actor or id from the client:
+   * the viewer comes from the database session inside the service call.
+   * Pinned to exactly one exported function; anything more fails here.
+   */
+  it("the public request-access action file exports only requestAccessAction", () => {
+    for (const file of PUBLIC_ACTION_FILES) {
+      const source = code(file);
+      expect(source).toMatch(/^\s*["']use server["'];/);
+      const exports = [...source.matchAll(/^export\s+(.+)$/gm)].map(
+        (match) => match[1],
+      );
+      expect(exports).toEqual(["async function requestAccessAction("]);
+    }
+  });
+
   it("still sees the known actions files", () => {
     expect(files.filter((file) => ACTIONS_FILE.test(file))).toEqual([
+      "src/app/admin/access-requests/actions.ts",
       "src/app/admin/areas/actions.ts",
       "src/app/admin/categories/actions.ts",
+      "src/app/admin/customers/actions.ts",
       "src/app/admin/datasheets/actions.ts",
       "src/app/admin/import/actions.ts",
       "src/app/admin/products/actions.ts",

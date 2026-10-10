@@ -6,7 +6,7 @@
 // returned tags → redirect last.
 
 import { refresh } from "next/cache";
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 
 import type {
   ActionData,
@@ -32,6 +32,8 @@ import type { ServiceResult } from "@/lib/admin/write-result";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
 
+import { pageActor } from "../admin-reads";
+
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
  * browser can send anything. The service re-parses it with a strict Zod
@@ -49,6 +51,8 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
 function failure(
   result: ServiceResult<unknown> & { ok: false },
 ): ActionFailure {
+  // A refused actor is a 403, never a form message (ADR 0073).
+  if (result.denied) forbidden();
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
@@ -61,7 +65,7 @@ export async function createDraftAction(
   values: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await createDraft(viewer.user.id, values);
+  const result = await createDraft(await pageActor(viewer), values);
   // Both branches: on an audit failure the draft is already saved.
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
@@ -81,7 +85,7 @@ export async function updateProductAction(
   expectedUpdatedAt: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await updateProduct(viewer.user.id, id, values, {
+  const result = await updateProduct(await pageActor(viewer), id, values, {
     expectedUpdatedAt,
   });
   revalidateCatalogInAction(result.tags);
@@ -128,7 +132,7 @@ export async function publishProductAction(
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
   return statusResult(
-    await publishProduct(viewer.user.id, id, { expectedUpdatedAt }),
+    await publishProduct(await pageActor(viewer), id, { expectedUpdatedAt }),
   );
 }
 
@@ -139,7 +143,7 @@ export async function unpublishProductAction(
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
   return statusResult(
-    await unpublishProduct(viewer.user.id, id, { expectedUpdatedAt }),
+    await unpublishProduct(await pageActor(viewer), id, { expectedUpdatedAt }),
   );
 }
 
@@ -151,7 +155,7 @@ export async function unpublishProductAction(
  */
 export async function deleteProductAction(id: unknown): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await deleteProduct(viewer.user.id, id);
+  const result = await deleteProduct(await pageActor(viewer), id);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
   redirect(withNotice(PRODUCTS_PATH, "deleted"));
@@ -167,7 +171,7 @@ export async function signProductImageUpload(
   productId: unknown,
 ): Promise<ActionData<SignedImageUpload>> {
   const viewer = await requireAdmin();
-  const result = await signCloudinaryUpload(viewer.user.id, {
+  const result = await signCloudinaryUpload(await pageActor(viewer), {
     target: "product",
     id: productId,
   });
@@ -188,7 +192,7 @@ export async function saveProductImagesAction(
   expectedUpdatedAt: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await saveProductImages(viewer.user.id, input, {
+  const result = await saveProductImages(await pageActor(viewer), input, {
     expectedUpdatedAt,
   });
   revalidateCatalogInAction(result.tags);

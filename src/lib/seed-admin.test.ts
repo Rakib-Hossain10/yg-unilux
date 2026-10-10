@@ -222,6 +222,8 @@ describe("seedAdmin reset", () => {
       role: "admin",
     });
     expect(after?.deviceEpoch).toBe((before?.deviceEpoch ?? 0) + 1);
+    // Phase 5: the CLI-chosen password counts as set by the admin.
+    expect(after?.passwordSetAt).toBeInstanceOf(Date);
     expect(
       await getDb()
         .collection("sessions")

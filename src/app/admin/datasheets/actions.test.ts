@@ -56,6 +56,9 @@ vi.mock("@/lib/admin/datasheets", () => services);
 
 const { ObjectId } = mongoose.Types;
 const ADMIN_ID = new ObjectId().toHexString();
+
+/* The actor every service gets: the session's id and the request headers. */
+const AS_ADMIN = { id: ADMIN_ID, headers: expect.any(Headers) };
 const SHEET_ID = new ObjectId().toHexString();
 const INCOMING = "incoming/0f8fad5b-d9cb-469f-a165-70867728950e.xlsx";
 
@@ -161,7 +164,7 @@ describe("as the admin", () => {
       data: ticket,
     });
     expect(services.presignDatasheetUpload).toHaveBeenCalledWith(
-      ADMIN_ID,
+      AS_ADMIN,
       PRESIGN,
     );
     expect(nextCache.refresh).not.toHaveBeenCalled();
@@ -192,7 +195,7 @@ describe("as the admin", () => {
     });
     expect(await finalizeDatasheetAction(FINALIZE_NEW)).toEqual({ ok: true });
     expect(services.finalizeDatasheet).toHaveBeenCalledWith(
-      ADMIN_ID,
+      AS_ADMIN,
       FINALIZE_NEW,
     );
     expect(nextCache.updateTag).toHaveBeenCalledWith("datasheets");
@@ -238,7 +241,7 @@ describe("as the admin", () => {
     });
     const input = { id: SHEET_ID, fileName: "new.xlsx" };
     expect(await renameDatasheetAction(input)).toEqual({ ok: true });
-    expect(services.renameDatasheet).toHaveBeenCalledWith(ADMIN_ID, input);
+    expect(services.renameDatasheet).toHaveBeenCalledWith(AS_ADMIN, input);
     expect(nextCache.updateTag).toHaveBeenCalledWith("datasheets");
     expect(nextCache.refresh).toHaveBeenCalledOnce();
   });
@@ -263,7 +266,7 @@ describe("as the admin", () => {
     services.deleteDatasheet.mockResolvedValue({ ok: false, errors, tags: [] });
     const result = await deleteDatasheetAction(SHEET_ID);
     expect(result).toEqual({ ok: false, errors, saved: false });
-    expect(services.deleteDatasheet).toHaveBeenCalledWith(ADMIN_ID, SHEET_ID);
+    expect(services.deleteDatasheet).toHaveBeenCalledWith(AS_ADMIN, SHEET_ID);
     expect(nextCache.updateTag).not.toHaveBeenCalled();
     expect(nextCache.refresh).not.toHaveBeenCalled();
   });
@@ -286,8 +289,35 @@ describe("as the admin", () => {
       tags: [],
     });
     await deleteDatasheetAction({ $ne: null });
-    expect(services.deleteDatasheet).toHaveBeenCalledWith(ADMIN_ID, {
+    expect(services.deleteDatasheet).toHaveBeenCalledWith(AS_ADMIN, {
       $ne: null,
     });
+  });
+});
+
+/* What a service returns when its own actor check refuses (ADR 0073). */
+const DENIED = {
+  ok: false,
+  errors: { formErrors: ["You are not allowed to do this."], fieldErrors: {} },
+  tags: [],
+  denied: "not_admin",
+} as const;
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(() => signedInAs({}));
+
+  it.each([
+    [
+      "presign",
+      "presignDatasheetUpload",
+      () => presignDatasheetUploadAction({}),
+    ],
+    ["finalize", "finalizeDatasheet", () => finalizeDatasheetAction({})],
+    ["rename", "renameDatasheet", () => renameDatasheetAction({})],
+    ["delete", "deleteDatasheet", () => deleteDatasheetAction("x")],
+  ] as const)("%s", async (_name, service, call) => {
+    services[service].mockResolvedValue(DENIED);
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    expect(services[service]).toHaveBeenCalledTimes(1);
   });
 });

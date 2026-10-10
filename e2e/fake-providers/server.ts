@@ -1,5 +1,6 @@
-// In-memory stand-in for Cloudflare R2 (S3 API) and Cloudinary (upload + Admin
-// API) for the Playwright run. Started by e2e/test-server.ts on 127.0.0.1; the
+// In-memory stand-in for Cloudflare R2 (S3 API), Cloudinary (upload + Admin
+// API) and Resend (send email: a sink specs read links from) for the
+// Playwright run. Started by e2e/test-server.ts on 127.0.0.1; the
 // app's server reaches it through e2e/fake-providers/preload.mjs, and the
 // browser's own calls are forwarded here by e2e/fixtures/providers.ts. Holds
 // bytes in memory only; nothing real is contacted and nothing is persisted.
@@ -24,7 +25,19 @@ interface StoredImage {
   createdAt: Date;
 }
 
+/** An email the app "sent" through Resend, as specs read it back. */
+export interface SentEmail {
+  id: string;
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+  sentAt: string;
+}
+
 const objects = new Map<string, StoredObject>();
+const emails: SentEmail[] = [];
 const images = new Map<string, StoredImage>();
 /** Object keys whose DELETE must fail (to test "storage unreachable"). */
 const failingDeletes = new Set<string>();
@@ -88,6 +101,42 @@ function detectFormat(bytes: Buffer): string {
 }
 
 /* ---- S3 (R2): path-style /<bucket>/<key> ---- */
+
+/* "20261010T093000Z" (X-Amz-Date) as epoch ms; NaN when malformed. */
+function amzDate(value: string): number {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
+  if (!m) return Number.NaN;
+  const [, y, mo, d, h, mi, se] = m.map(Number) as number[];
+  return Date.UTC(y!, mo! - 1, d!, h!, mi!, se!);
+}
+
+/*
+ * A presigned GET (the datasheet download, ADR 0071), like R2 answers it:
+ * refused once X-Amz-Date + X-Amz-Expires has passed, and the signed
+ * response-content-type / response-content-disposition overrides become the
+ * response headers. The signature itself is not checked (fake credentials).
+ * A plain SDK GET (no X-Amz-Expires) gets no extra headers.
+ */
+function presignedGetHeaders(url: URL): Record<string, string> | "expired" {
+  const expires = url.searchParams.get("X-Amz-Expires");
+  if (expires === null) return {};
+  const signedAt = amzDate(url.searchParams.get("X-Amz-Date") ?? "");
+  const seconds = Number(expires);
+  if (
+    !Number.isFinite(signedAt) ||
+    !Number.isInteger(seconds) ||
+    Date.now() > signedAt + seconds * 1000 ||
+    !url.searchParams.get("X-Amz-Signature")
+  ) {
+    return "expired";
+  }
+  const headers: Record<string, string> = {};
+  const type = url.searchParams.get("response-content-type");
+  const disposition = url.searchParams.get("response-content-disposition");
+  if (type) headers["content-type"] = type;
+  if (disposition) headers["content-disposition"] = disposition;
+  return headers;
+}
 
 async function handleS3(
   request: IncomingMessage,
@@ -154,6 +203,9 @@ async function handleS3(
     });
   }
   if (method === "GET") {
+    // Like R2: an expired presigned link is refused before anything else.
+    const presigned = presignedGetHeaders(url);
+    if (presigned === "expired") return s3Error(response, 403, "AccessDenied");
     if (!found) return s3Error(response, 404, "NoSuchKey");
     if (failsMatch(request.headers["if-match"], found)) {
       return s3Error(response, 412, "PreconditionFailed");
@@ -170,12 +222,14 @@ async function handleS3(
         "content-length": part.length,
         "content-range": `bytes ${start}-${end}/${found.bytes.length}`,
         etag: etagOf(found.bytes),
+        ...presigned,
       });
     }
     return send(response, 200, found.bytes, {
       "content-type": found.contentType,
       "content-length": found.bytes.length,
       etag: etagOf(found.bytes),
+      ...presigned,
     });
   }
   if (method === "DELETE") {
@@ -278,6 +332,58 @@ async function handleCloudinary(
   return json(response, 404, { error: { message: "not handled by the fake" } });
 }
 
+/* ---- Resend: POST /emails (the only call the app makes) ---- */
+
+const asText = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+
+async function handleResend(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+): Promise<void> {
+  if (request.method !== "POST" || url.pathname !== "/emails") {
+    return json(response, 404, {
+      name: "not_found",
+      message: "not handled by the fake",
+      statusCode: 404,
+    });
+  }
+  // Like Resend: a key is required (the app sends `Bearer <RESEND_API_KEY>`).
+  if (!/^Bearer \S+/.test(String(request.headers.authorization ?? ""))) {
+    return json(response, 401, {
+      name: "missing_api_key",
+      message: "Missing API key",
+      statusCode: 401,
+    });
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse((await readBody(request)).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return json(response, 422, {
+      name: "validation_error",
+      message: "Invalid JSON",
+      statusCode: 422,
+    });
+  }
+  const to = (Array.isArray(body.to) ? body.to : [body.to]).map(asText);
+  const email: SentEmail = {
+    id: `e2e-email-${emails.length + 1}`,
+    from: asText(body.from),
+    to,
+    subject: asText(body.subject),
+    text: asText(body.text),
+    html: asText(body.html),
+    sentAt: new Date().toISOString(),
+  };
+  emails.push(email);
+  return json(response, 200, { id: email.id });
+}
+
 /* ---- Control endpoints for specs (never reached by the app) ---- */
 
 async function handleControl(
@@ -287,6 +393,20 @@ async function handleControl(
 ): Promise<void> {
   const what = url.pathname.replace("/__e2e/", "");
   const key = url.searchParams.get("key") ?? "";
+  if (what === "emails") {
+    // GET: the emails sent to ?to= (all when absent), oldest first.
+    // DELETE: forget every email (a spec starting clean).
+    if (request.method === "DELETE") {
+      emails.length = 0;
+      return json(response, 200, { ok: true });
+    }
+    const to = (url.searchParams.get("to") ?? "").toLowerCase();
+    return json(response, 200, {
+      emails: to
+        ? emails.filter((e) => e.to.some((t) => t.toLowerCase() === to))
+        : emails,
+    });
+  }
   if (what === "fail-delete") {
     failingDeletes.add(key);
     return json(response, 200, { ok: true });
@@ -333,6 +453,9 @@ export function startFakeProviders(port: number): Promise<Server> {
         }
         if (/r2\.cloudflarestorage\.com$/.test(host)) {
           return await handleS3(request, response, url);
+        }
+        if (host === "api.resend.com") {
+          return await handleResend(request, response, url);
         }
         return send(response, 404);
       } catch {

@@ -5,3 +5,16 @@ src/lib/cloudinary.test.ts:generic-api-key:13
 src/lib/admin/uploads.test.ts:generic-api-key:34
 # False positive: fixed fake Cloudinary secret in the gate C QA tests.
 test/admin-uploads.qa.test.ts:generic-api-key:100
+# False positive: fixed fake CRON_SECRET used by the P5 cron route tests.
+src/app/api/cron/access-expiry/route.test.ts:generic-api-key:41
+# False positive: fixed fake CRON_SECRET used by the Phase 5 gate A QA route tests.
+test/phase5-gate-a-routes.qa.test.ts:generic-api-key:238
+# False positive: fixed fake temporary password in the P8 customers action test.
+src/app/admin/customers/actions.test.ts:generic-api-key:291
+src/app/admin/customers/actions.test.ts:generic-api-key:297
+# Current line numbers (fixtures moved; the older entries above still cover history).
+src/lib/cloudinary.test.ts:generic-api-key:20
+src/lib/admin/uploads.test.ts:generic-api-key:42
+test/admin-uploads.qa.test.ts:generic-api-key:118
+src/app/admin/customers/actions.test.ts:generic-api-key:295
+src/app/admin/customers/actions.test.ts:generic-api-key:301

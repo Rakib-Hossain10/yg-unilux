@@ -8,6 +8,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { mongoose } from "@/lib/db";
 import { AreaModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
@@ -25,6 +26,12 @@ import {
 import { IMAGE_REJECTED } from "./uploads";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
+
 const cloudinaryMock = vi.hoisted(() => ({
   inspectImage: vi.fn(),
   destroyImage: vi.fn(),
@@ -34,7 +41,8 @@ vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 setupMemoryDb("yg_admin_areas_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
+const ADMIN = admin.id;
 
 beforeAll(async () => {
   // Indexes are built by `npm run db:indexes`, never on startup; build the
@@ -67,7 +75,7 @@ function expectOk<T>(result: ServiceResult<T>): T {
 }
 
 async function create(name: string, slug = "") {
-  return expectOk(await createArea(ADMIN, { name, slug })).id;
+  return expectOk(await createArea(admin, { name, slug })).id;
 }
 
 /* A b/w image id in this area's own folder. */
@@ -83,7 +91,7 @@ async function storeBw(areaId: string, n = 0): Promise<string> {
 }
 
 async function names(): Promise<string[]> {
-  return (await listAreas()).map((area) => area.name);
+  return (await listAreas(admin)).map((area) => area.name);
 }
 
 async function auditActions(): Promise<string[]> {
@@ -93,7 +101,7 @@ async function auditActions(): Promise<string[]> {
 
 describe("createArea", () => {
   it("creates an area with a slug from the name, audits it and returns the areas tag", async () => {
-    const result = await createArea(ADMIN, { name: "Retail", bwImage: "" });
+    const result = await createArea(admin, { name: "Retail", bwImage: "" });
 
     expect(result).toEqual({
       ok: true,
@@ -123,13 +131,13 @@ describe("createArea", () => {
     await create("Retail");
 
     expect(await names()).toEqual(["Retail", "Office", "Retail"]);
-    const slugs = (await listAreas()).map((area) => area.slug);
+    const slugs = (await listAreas(admin)).map((area) => area.slug);
     expect(slugs).toEqual(["retail", "office", "retail-2"]);
   });
 
   it("refuses a typed slug that is taken, writing and auditing nothing more", async () => {
     await create("Retail");
-    const result = await createArea(ADMIN, { name: "Shops", slug: "retail" });
+    const result = await createArea(admin, { name: "Shops", slug: "retail" });
 
     expect(result).toEqual({
       ok: false,
@@ -147,7 +155,7 @@ describe("createArea", () => {
     await create("Retail");
     vi.spyOn(AreaModel, "exists").mockResolvedValue(null);
 
-    const result = await createArea(ADMIN, { name: "Shops", slug: "retail" });
+    const result = await createArea(admin, { name: "Shops", slug: "retail" });
     expect(!result.ok && result.errors.fieldErrors.slug).toEqual([
       expect.stringMatching(/already uses/),
     ]);
@@ -155,7 +163,7 @@ describe("createArea", () => {
   });
 
   it("asks for a slug when the name has none to make one from", async () => {
-    const result = await createArea(ADMIN, { name: "零售" });
+    const result = await createArea(admin, { name: "零售" });
     expect(!result.ok && result.errors.fieldErrors.slug).toEqual([
       expect.stringMatching(/Enter a slug/),
     ]);
@@ -163,7 +171,7 @@ describe("createArea", () => {
   });
 
   it("returns Zod field errors for bad input and writes nothing", async () => {
-    const result = await createArea(ADMIN, { name: "", order: 5 });
+    const result = await createArea(admin, { name: "", order: 5 });
     expect(result.ok).toBe(false);
     expect(result.tags).toEqual([]);
     expect(!result.ok && result.errors.fieldErrors.name).toBeDefined();
@@ -172,9 +180,9 @@ describe("createArea", () => {
   });
 
   it("throws before writing when the actor id is not an ObjectId", async () => {
-    await expect(createArea("admin", { name: "Retail" })).rejects.toThrow(
-      TypeError,
-    );
+    await expect(
+      createArea({ id: "admin", headers: new Headers() }, { name: "Retail" }),
+    ).rejects.toThrow(TypeError);
     expect(await AreaModel.countDocuments()).toBe(0);
   });
 
@@ -184,7 +192,7 @@ describe("createArea", () => {
       new Error("E11000 secret value Retail"),
     );
 
-    const result = await createArea(ADMIN, { name: "Retail" });
+    const result = await createArea(admin, { name: "Retail" });
 
     expect(result).toEqual({
       ok: false,
@@ -200,21 +208,23 @@ describe("getAreaForEdit and listAreas", () => {
   it("returns the form values, or null for a bad or unknown id", async () => {
     const id = await create("Retail");
     const publicId = await storeBw(id);
-    expect(await getAreaForEdit(id)).toEqual({
+    expect(await getAreaForEdit(admin, id)).toEqual({
       id,
       name: "Retail",
       slug: "retail",
       bwImage: publicId,
     });
-    expect(await getAreaForEdit(new ObjectId().toHexString())).toBeNull();
-    expect(await getAreaForEdit("nope")).toBeNull();
-    expect(await getAreaForEdit({ $ne: null })).toBeNull();
+    expect(
+      await getAreaForEdit(admin, new ObjectId().toHexString()),
+    ).toBeNull();
+    expect(await getAreaForEdit(admin, "nope")).toBeNull();
+    expect(await getAreaForEdit(admin, { $ne: null })).toBeNull();
   });
 
   it("lists areas in display order with a null bwImage when unset", async () => {
     await create("Retail");
     await create("Office");
-    expect(await listAreas()).toEqual([
+    expect(await listAreas(admin)).toEqual([
       expect.objectContaining({ name: "Retail", bwImage: null, order: 0 }),
       expect.objectContaining({ name: "Office", bwImage: null, order: 1 }),
     ]);
@@ -225,7 +235,7 @@ describe("updateArea", () => {
   it("saves changed fields, audits their names and returns areas + products tags", async () => {
     const id = await create("Retail");
     const publicId = await storeBw(id);
-    const result = await updateArea(ADMIN, id, {
+    const result = await updateArea(admin, id, {
       name: "Retail Spaces",
       slug: "",
       bwImage: publicId,
@@ -248,7 +258,7 @@ describe("updateArea", () => {
   it("removes bwImage when the form sends it blank", async () => {
     const id = await create("Retail");
     await storeBw(id);
-    expectOk(await updateArea(ADMIN, id, { name: "Retail", bwImage: "" }));
+    expectOk(await updateArea(admin, id, { name: "Retail", bwImage: "" }));
     const row = await AreaModel.findById(id).lean();
     expect(row).not.toHaveProperty("bwImage");
     const entry = await AuditLogModel.findOne({ action: "area.update" }).lean();
@@ -259,7 +269,7 @@ describe("updateArea", () => {
     const id = await create("Retail");
     const stored = await storeBw(id, 0);
     for (const bwImage of [bw(id, 1), testPublicId(0)]) {
-      const result = await updateArea(ADMIN, id, { name: "Shops", bwImage });
+      const result = await updateArea(admin, id, { name: "Shops", bwImage });
       expect(result).toEqual({
         ok: false,
         errors: {
@@ -278,7 +288,7 @@ describe("updateArea", () => {
 
   it("changes nothing, audits nothing and returns no tags when nothing differs", async () => {
     const id = await create("Retail");
-    const result = await updateArea(ADMIN, id, { name: "Retail" });
+    const result = await updateArea(admin, id, { name: "Retail" });
     expect(result).toEqual({ ok: true, data: { id }, tags: [] });
     expect(await auditActions()).toEqual(["area.create"]);
   });
@@ -287,7 +297,7 @@ describe("updateArea", () => {
     await create("Retail");
     const office = await create("Office");
 
-    const taken = await updateArea(ADMIN, office, {
+    const taken = await updateArea(admin, office, {
       name: "Office",
       slug: "retail",
     });
@@ -300,7 +310,7 @@ describe("updateArea", () => {
       tags: [],
     });
 
-    const own = await updateArea(ADMIN, office, {
+    const own = await updateArea(admin, office, {
       name: "Offices",
       slug: "office",
     });
@@ -312,7 +322,7 @@ describe("updateArea", () => {
     const office = await create("Office");
     vi.spyOn(AreaModel, "exists").mockResolvedValue(null);
 
-    const result = await updateArea(ADMIN, office, {
+    const result = await updateArea(admin, office, {
       name: "Office",
       slug: "retail",
     });
@@ -322,13 +332,13 @@ describe("updateArea", () => {
 
   it("returns not found for bad or unknown ids and Zod errors for bad input", async () => {
     for (const id of [new ObjectId().toHexString(), "nope", { $ne: null }]) {
-      const result = await updateArea(ADMIN, id, { name: "X" });
+      const result = await updateArea(admin, id, { name: "X" });
       expect(!result.ok && result.errors.formErrors).toEqual([
         expect.stringMatching(/no longer exists/),
       ]);
     }
     const id = await create("Retail");
-    const bad = await updateArea(ADMIN, id, { name: "" });
+    const bad = await updateArea(admin, id, { name: "" });
     expect(!bad.ok && bad.errors.fieldErrors.name).toBeDefined();
     expect(bad.tags).toEqual([]);
   });
@@ -336,7 +346,7 @@ describe("updateArea", () => {
 
 describe("area b/w image", () => {
   it("refuses a bwImage on create (the upload folder needs the area id)", async () => {
-    const result = await createArea(ADMIN, {
+    const result = await createArea(admin, {
       name: "Retail",
       bwImage: testPublicId(0),
     });
@@ -353,7 +363,7 @@ describe("area b/w image", () => {
 
   it("refuses a bwImage that is not in our id shape (gate A L-2)", async () => {
     const id = await create("Retail");
-    const result = await updateArea(ADMIN, id, {
+    const result = await updateArea(admin, id, {
       name: "Retail",
       bwImage: "areas/retail-bw",
     });
@@ -366,7 +376,7 @@ describe("area b/w image", () => {
   it("setAreaImage saves a verified upload, audits it and returns the areas tag", async () => {
     const id = await create("Retail");
     const publicId = bw(id);
-    const result = await setAreaImage(ADMIN, { areaId: id, publicId });
+    const result = await setAreaImage(admin, { areaId: id, publicId });
     expect(result).toEqual({
       ok: true,
       data: { id, bwImage: publicId },
@@ -384,7 +394,7 @@ describe("area b/w image", () => {
     await storeBw(id);
     for (const publicId of [null, ""]) {
       await AreaModel.updateOne({ _id: id }, { $set: { bwImage: bw(id) } });
-      expectOk(await setAreaImage(ADMIN, { areaId: id, publicId }));
+      expectOk(await setAreaImage(admin, { areaId: id, publicId }));
       expect(await AreaModel.findById(id).lean()).not.toHaveProperty("bwImage");
     }
     expect(cloudinaryMock.inspectImage).not.toHaveBeenCalled();
@@ -393,7 +403,7 @@ describe("area b/w image", () => {
   it("setAreaImage with the stored id changes nothing", async () => {
     const id = await create("Retail");
     const publicId = await storeBw(id);
-    expect(await setAreaImage(ADMIN, { areaId: id, publicId })).toEqual({
+    expect(await setAreaImage(admin, { areaId: id, publicId })).toEqual({
       ok: true,
       data: { id, bwImage: publicId },
       tags: [],
@@ -412,7 +422,7 @@ describe("area b/w image", () => {
       const before = await storeBw(id, 0);
       cloudinaryMock.inspectImage.mockResolvedValue({ ok: false, reason });
       const publicId = bw(id, 1);
-      const result = await setAreaImage(ADMIN, { areaId: id, publicId });
+      const result = await setAreaImage(admin, { areaId: id, publicId });
       expect(result).toEqual({
         ok: false,
         errors: {
@@ -433,7 +443,7 @@ describe("area b/w image", () => {
       ok: false,
       reason: "unavailable",
     });
-    const result = await setAreaImage(ADMIN, { areaId: id, publicId: bw(id) });
+    const result = await setAreaImage(admin, { areaId: id, publicId: bw(id) });
     expect(result.ok).toBe(false);
     expect(cloudinaryMock.destroyImage).not.toHaveBeenCalled();
     expect(await AreaModel.findById(id).lean()).not.toHaveProperty("bwImage");
@@ -443,7 +453,7 @@ describe("area b/w image", () => {
     const id = await create("Retail");
     const other = await create("Office");
     for (const publicId of [bw(other), testPublicId(0, id, "product")]) {
-      const result = await setAreaImage(ADMIN, { areaId: id, publicId });
+      const result = await setAreaImage(admin, { areaId: id, publicId });
       expect(result).toEqual({
         ok: false,
         errors: {
@@ -459,17 +469,17 @@ describe("area b/w image", () => {
 
   it("setAreaImage refuses an unknown area and bad input", async () => {
     const missing = new ObjectId().toHexString();
-    const result = await setAreaImage(ADMIN, {
+    const result = await setAreaImage(admin, {
       areaId: missing,
       publicId: bw(missing),
     });
     expect(result.ok).toBe(false);
     expect(
-      (await setAreaImage(ADMIN, { areaId: "x", publicId: null })).ok,
+      (await setAreaImage(admin, { areaId: "x", publicId: null })).ok,
     ).toBe(false);
     expect(
       (
-        await setAreaImage(ADMIN, {
+        await setAreaImage(admin, {
           areaId: missing,
           publicId: null,
           order: 1,
@@ -486,7 +496,7 @@ describe("moveArea", () => {
     const office = await create("Office");
     await create("Hotel");
 
-    const result = await moveArea(ADMIN, { id: office, direction: "up" });
+    const result = await moveArea(admin, { id: office, direction: "up" });
     expect(result).toEqual({
       ok: true,
       data: { moved: true },
@@ -495,7 +505,7 @@ describe("moveArea", () => {
     expect(await names()).toEqual(["Office", "Retail", "Hotel"]);
     expect(await auditActions()).toContain("area.reorder");
 
-    await moveArea(ADMIN, { id: office, direction: "down" });
+    await moveArea(admin, { id: office, direction: "down" });
     expect(await names()).toEqual(["Retail", "Office", "Hotel"]);
   });
 
@@ -504,13 +514,13 @@ describe("moveArea", () => {
     const hotel = await create("Hotel");
     const before = (await auditActions()).length;
 
-    expect(await moveArea(ADMIN, { id: retail, direction: "up" })).toEqual({
+    expect(await moveArea(admin, { id: retail, direction: "up" })).toEqual({
       ok: true,
       data: { moved: false },
       tags: [],
     });
     expect(
-      (await moveArea(ADMIN, { id: hotel, direction: "down" })).tags,
+      (await moveArea(admin, { id: hotel, direction: "down" })).tags,
     ).toEqual([]);
     expect(await names()).toEqual(["Retail", "Hotel"]);
     expect((await auditActions()).length).toBe(before);
@@ -523,22 +533,22 @@ describe("moveArea", () => {
       { name: "C", slug: "c", order: 9 },
     ]);
     const c = (await AreaModel.findOne({ slug: "c" }).lean())?._id;
-    await moveArea(ADMIN, { id: c?.toHexString(), direction: "up" });
+    await moveArea(admin, { id: c?.toHexString(), direction: "up" });
 
     expect(await names()).toEqual(["A", "C", "B"]);
-    const orders = (await listAreas()).map((area) => area.order);
+    const orders = (await listAreas(admin)).map((area) => area.order);
     expect(orders).toEqual([0, 1, 2]);
   });
 
   it("returns not found for an unknown area and Zod errors for bad input", async () => {
-    const missing = await moveArea(ADMIN, {
+    const missing = await moveArea(admin, {
       id: new ObjectId().toHexString(),
       direction: "up",
     });
     expect(!missing.ok && missing.errors.formErrors).toEqual([
       expect.stringMatching(/no longer exists/),
     ]);
-    const bad = await moveArea(ADMIN, { id: "x", direction: "sideways" });
+    const bad = await moveArea(admin, { id: "x", direction: "sideways" });
     expect(bad.ok).toBe(false);
     expect(bad.tags).toEqual([]);
   });
@@ -547,7 +557,7 @@ describe("moveArea", () => {
 describe("deleteArea", () => {
   it("deletes an unused area, audits it and returns the areas tag", async () => {
     const id = await create("Retail");
-    const result = await deleteArea(ADMIN, id);
+    const result = await deleteArea(admin, id);
 
     expect(result).toEqual({ ok: true, data: { id }, tags: ["areas"] });
     expect(await AreaModel.countDocuments()).toBe(0);
@@ -567,7 +577,7 @@ describe("deleteArea", () => {
       });
     }
 
-    const result = await deleteArea(ADMIN, id);
+    const result = await deleteArea(admin, id);
     expect(result).toEqual({
       ok: false,
       errors: {
@@ -588,12 +598,12 @@ describe("deleteArea", () => {
       mainCategory: new ObjectId(),
       areas: [new ObjectId()],
     });
-    expect((await deleteArea(ADMIN, id)).ok).toBe(true);
+    expect((await deleteArea(admin, id)).ok).toBe(true);
   });
 
   it("returns not found for bad or unknown ids", async () => {
     for (const id of [new ObjectId().toHexString(), "x", 7]) {
-      const result = await deleteArea(ADMIN, id);
+      const result = await deleteArea(admin, id);
       expect(!result.ok && result.errors.formErrors).toEqual([
         expect.stringMatching(/no longer exists/),
       ]);

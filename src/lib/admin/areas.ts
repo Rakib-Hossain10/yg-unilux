@@ -20,9 +20,9 @@ import { uniqueSlug, UniqueSlugError } from "@/lib/slug";
 import { AreaModel, ProductModel } from "@/models";
 import type { Area } from "@/models/area";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import { verifyUploadedImage } from "./uploads";
 import {
-  assertActorId,
   auditAndFinish,
   fieldError,
   formError,
@@ -83,7 +83,8 @@ const DISPLAY_ORDER = { order: 1, _id: 1 } as const;
 // ---------------------------------------------------------------------------
 
 /** All areas in display order (a handful of rows, one query). */
-export async function listAreas(): Promise<AreaListItem[]> {
+export async function listAreas(actor: AdminActor): Promise<AreaListItem[]> {
+  await assertAdminActor(actor);
   await connectDb();
   const rows = await AreaModel.find({}, PROJECTION)
     .sort(DISPLAY_ORDER)
@@ -98,7 +99,11 @@ export async function listAreas(): Promise<AreaListItem[]> {
 }
 
 /** One area for the edit form, or null if the id is bad or unknown. */
-export async function getAreaForEdit(id: unknown): Promise<AreaForEdit | null> {
+export async function getAreaForEdit(
+  actor: AdminActor,
+  id: unknown,
+): Promise<AreaForEdit | null> {
+  await assertAdminActor(actor);
   const parsedId = areaIdSchema.safeParse(id);
   if (!parsedId.success) return null;
 
@@ -176,10 +181,11 @@ async function resolveSlug(
  * ("-2", "-3" ... if taken); a typed slug must be free.
  */
 export async function createArea(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "areas");
+  if (refused) return refused;
   await connectDb();
 
   const parsed = areaInputSchema.safeParse(input);
@@ -209,7 +215,7 @@ export async function createArea(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "area.create",
       target: { type: "area", id: id.toHexString() },
     },
@@ -223,11 +229,12 @@ export async function createArea(
  * changed, nothing is written, audited or revalidated.
  */
 export async function updateArea(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
   input: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "areas");
+  if (refused) return refused;
   await connectDb();
 
   const parsedId = areaIdSchema.safeParse(id);
@@ -288,7 +295,7 @@ export async function updateArea(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "area.update",
       target: { type: "area", id: parsedId.data },
       meta: { fields },
@@ -312,10 +319,11 @@ export const setAreaImageSchema = z.strictObject({
  * saveProductImages: the T17 orphan report lists it).
  */
 export async function setAreaImage(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ id: string; bwImage: string | null }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "areas");
+  if (refused) return refused;
   const parsed = setAreaImageSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { areaId, publicId } = parsed.data;
@@ -350,7 +358,7 @@ export async function setAreaImage(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "area.update",
       target: { type: "area", id: areaId },
       meta: { fields: ["bwImage"], cleared: publicId === null },
@@ -367,10 +375,11 @@ export async function setAreaImage(
  * last one down changes nothing.
  */
 export async function moveArea(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ moved: boolean }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "areas");
+  if (refused) return refused;
   await connectDb();
 
   const parsed = moveAreaSchema.safeParse(input);
@@ -406,7 +415,7 @@ export async function moveArea(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "area.reorder",
       target: { type: "area", id: parsed.data.id },
       meta: {
@@ -424,10 +433,11 @@ export async function moveArea(
  * many products, so they know what to change first.
  */
 export async function deleteArea(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "areas");
+  if (refused) return refused;
   await connectDb();
 
   const parsedId = areaIdSchema.safeParse(id);
@@ -450,7 +460,7 @@ export async function deleteArea(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "area.delete",
       target: { type: "area", id: parsedId.data },
     },

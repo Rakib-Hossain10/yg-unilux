@@ -149,38 +149,62 @@ describe("keep me signed in: off (same for admin and customer)", () => {
   });
 
   /*
-   * GAP (QA finding L1): Better Auth's /change-password with
-   * revokeOtherSessions: true calls createSession(userId) without the
-   * dont-remember flag (dist/api/routes/update-user.mjs:176), so the new
-   * session is stored for 7 days while the cookie stays session-only and
-   * is never refreshed. ADR 0032's "24 h hard cap" does not hold after a
-   * password change. `it.fails` turns red once the cap is enforced; then
-   * make it a plain `it`.
+   * Was a known gap (QA finding L1, ADR 0032): Better Auth's
+   * /change-password with revokeOtherSessions: true calls
+   * createSession(userId) without the dont-remember flag
+   * (dist/api/routes/update-user.mjs:176), so the new session was stored for
+   * 7 days. Closed in Phase 5 P1: the after-hook caps it at 24 h.
    */
-  it.fails(
-    "keeps the 24-hour cap after a change-password with revokeOtherSessions",
-    async () => {
-      const user = {
-        email: "rm-change@example.com",
-        password: "rm-change-password-1",
-      };
-      await auth.api.createUser({ body: { ...user, name: "RM Change" } });
-      const cookie = cookieHeader(await signIn(user, false));
-      const response = await call(
-        "/change-password",
-        {
-          currentPassword: user.password,
-          newPassword: "rm-change-password-2",
-          revokeOtherSessions: true,
-        },
-        cookie,
-      );
-      expect(response.status).toBe(200);
-      const left =
-        (await storedExpiry(tokenOf(cookieHeader(response)))) - Date.now();
-      expect(left).toBeLessThanOrEqual(DAY);
-    },
-  );
+  it("keeps the 24-hour cap after a change-password with revokeOtherSessions", async () => {
+    const user = {
+      email: "rm-change@example.com",
+      password: "rm-change-password-1",
+    };
+    await auth.api.createUser({ body: { ...user, name: "RM Change" } });
+    const cookie = cookieHeader(await signIn(user, false));
+    const response = await call(
+      "/change-password",
+      {
+        currentPassword: user.password,
+        newPassword: "rm-change-password-2",
+        revokeOtherSessions: true,
+      },
+      cookie,
+    );
+    expect(response.status).toBe(200);
+    const newCookie = cookieHeader(response);
+    const left = (await storedExpiry(tokenOf(newCookie))) - Date.now();
+    expect(left).toBeGreaterThan(23 * HOUR);
+    expect(left).toBeLessThanOrEqual(DAY);
+    // The cookie stays session-only (no Max-Age), as before.
+    const line = response.headers
+      .getSetCookie()
+      .find((l) => l.startsWith("yg.session_token="));
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/max-age/i);
+  });
+
+  it("control: a remembered session stays 7 days after a change-password", async () => {
+    const user = {
+      email: "rm-change-remember@example.com",
+      password: "rm-change-remember-1",
+    };
+    await auth.api.createUser({ body: { ...user, name: "RM Remember" } });
+    const cookie = cookieHeader(await signIn(user, true));
+    const response = await call(
+      "/change-password",
+      {
+        currentPassword: user.password,
+        newPassword: "rm-change-remember-2",
+        revokeOtherSessions: true,
+      },
+      cookie,
+    );
+    expect(response.status).toBe(200);
+    const left =
+      (await storedExpiry(tokenOf(cookieHeader(response)))) - Date.now();
+    expect(left).toBeGreaterThan(6 * DAY);
+  });
 });
 
 describe("no session token in any /api/auth JSON body (real handler)", () => {

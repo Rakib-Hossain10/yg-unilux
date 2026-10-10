@@ -23,12 +23,17 @@ import {
 import { listCategoryTree } from "@/lib/admin/categories";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../../admin-reads";
+
 export const metadata: Metadata = { title: "New product" };
 
 export default async function NewProductPage() {
-  await requireAdmin();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
   // Only ids and labels cross to the browser.
-  const categories = categoryOptions(await listCategoryTree());
+  const categories = categoryOptions(
+    await readAsAdmin(() => listCategoryTree(actor)),
+  );
 
   return (
     <div className="flex flex-col gap-6">

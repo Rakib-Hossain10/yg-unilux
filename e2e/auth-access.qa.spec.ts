@@ -43,7 +43,8 @@ test("a customer's RSC request for /admin carries no admin content", async ({
   page,
 }) => {
   await signIn(page, E2E_CUSTOMER.email, E2E_CUSTOMER.password);
-  await expect(page).toHaveURL(/\/$/);
+  // Temporary password: /login sends it to /change-password (plan Q7).
+  await expect(page).toHaveURL(/\/change-password$/);
   // What the client router fetches on a soft navigation to /admin, sent
   // with the browser's cookies (redirects to the right ?_rsc= followed).
   const response = await page.request.get("/admin", {

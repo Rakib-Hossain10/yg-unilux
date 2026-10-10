@@ -2,7 +2,7 @@
 // every dashboard number matches a known seed, an empty database gives all
 // zeros, and only counts come back (never document content).
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { XLSX_MIME_TYPE } from "@/lib/constants";
 import { getDb, mongoose } from "@/lib/db";
@@ -16,11 +16,19 @@ import {
 } from "@/models";
 import type { ProductStatus } from "@/models/product";
 import type { CaseStatus } from "@/models/whistleblower-case";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 
 import { getCounts, type DashboardCounts } from "./dashboard";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
+
 setupMemoryDb("yg_dashboard_test");
+const admin = testActor();
 
 const { ObjectId } = mongoose.Types;
 
@@ -159,7 +167,7 @@ function leafValues(value: unknown): unknown[] {
 
 describe("getCounts", () => {
   it("returns all zeros for an empty database", async () => {
-    expect(await getCounts()).toEqual(ZERO_COUNTS);
+    expect(await getCounts(admin)).toEqual(ZERO_COUNTS);
   });
 
   it("counts every dashboard figure from a known seed", async () => {
@@ -184,7 +192,7 @@ describe("getCounts", () => {
     await seedAccessRequests();
     await seedWhistleblowerCases();
 
-    expect(await getCounts()).toEqual({
+    expect(await getCounts(admin)).toEqual({
       products: { total: 5, published: 3, draft: 2 },
       categories: { main: 2, sub: 3 },
       areas: 2,
@@ -211,12 +219,12 @@ describe("getCounts", () => {
         })),
       );
 
-    expect((await getCounts()).customers).toBe(0);
+    expect((await getCounts(admin)).customers).toBe(0);
   });
 
   it("returns only numbers, never document content", async () => {
     await seedWhistleblowerCases();
-    const counts = await getCounts();
+    const counts = await getCounts(admin);
 
     expect(leafValues(counts).every(Number.isInteger)).toBe(true);
     expect(JSON.stringify(counts)).not.toContain("secret-report");

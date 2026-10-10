@@ -263,7 +263,10 @@ export default async function ProductPage({
               }
             >
               {/* Restricted rows for allowed viewers, filled on the client. */}
-              <RestrictedSpecsSlot />
+              <RestrictedSpecsSlot
+                productId={product.id}
+                productSlug={product.slug}
+              />
             </SpecTable>
 
             <ModelsTable variants={product.variants} productTitle={title} />

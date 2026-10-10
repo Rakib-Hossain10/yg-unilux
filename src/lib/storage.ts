@@ -27,6 +27,7 @@ import {
   XLSX_MIME_TYPE,
 } from "./constants";
 import { env } from "./env";
+import { DATASHEET_KEY_PATTERN } from "./schemas/datasheet";
 import { IMPORT_KEY_PATTERN } from "./schemas/import";
 
 /** A presigned PUT is valid for 5 minutes (Phase 2 plan, ADR 0045). */
@@ -158,6 +159,85 @@ export async function presignImportUpload(options: {
     IMPORT_UPLOAD_TTL_SECONDS,
   );
   return { ...put, key };
+}
+
+// ---------------------------------------------------------------------------
+// Datasheet download (ADR 0071)
+// ---------------------------------------------------------------------------
+
+/** A presigned datasheet GET is valid for 60 seconds (rule 2, ADR 0009). */
+export const PRESIGNED_GET_TTL_SECONDS = 60;
+
+/* Used when nothing printable is left of the stored name. */
+const FALLBACK_FILE_NAME = "datasheet.xlsx";
+
+/*
+ * RFC 5987 attr-char is ALPHA / DIGIT / "!#$&+-.^_`|~". encodeURIComponent
+ * leaves only "'()*" outside that set unencoded (plus "!" and "~", which are
+ * allowed), so those four are encoded by hand.
+ */
+function rfc5987Encode(value: string): string {
+  return encodeURIComponent(value).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+/**
+ * A `Content-Disposition: attachment` value for a stored file name (RFC 6266
+ * + RFC 5987): an ASCII `filename="…"` fallback and the exact UTF-8 name in
+ * `filename*`. Control characters (CR/LF included) are dropped and path
+ * separators become "_" in both; in the fallback every non-ASCII code point
+ * and `"` also become "_". The result is printable ASCII only, so it can't
+ * split or inject a header whatever the admin named the file.
+ */
+export function attachmentDisposition(fileName: string): string {
+  const cleaned =
+    fileName
+      .toWellFormed()
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+      .replace(/[/\\]/g, "_")
+      .trim() || FALLBACK_FILE_NAME;
+  const ascii = Array.from(cleaned, (c) =>
+    c === '"' || c < " " || c > "~" ? "_" : c,
+  ).join("");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${rfc5987Encode(cleaned)}`;
+}
+
+export interface PresignedGet {
+  url: string;
+  expiresIn: number;
+}
+
+/**
+ * A presigned GET for one datasheet, valid PRESIGNED_GET_TTL_SECONDS. R2
+ * answers it as an .xlsx attachment named `fileName` (the response overrides
+ * are part of the signature). ONLY /api/datasheet/[productId] may call this,
+ * after the access check (a static test enforces it). The caller must write
+ * the download log before it returns the URL, and refuse if the log fails.
+ * The returned URL is a credential: never log it. Only a stored datasheet
+ * key (`datasheets/<uuid v4>.xlsx`) is signed; anything else (an import,
+ * an incoming upload, a whistleblower file) throws TypeError first.
+ */
+export async function presignGet(options: {
+  key: string;
+  fileName: string;
+}): Promise<PresignedGet> {
+  if (!DATASHEET_KEY_PATTERN.test(options.key)) {
+    throw new TypeError("presignGet signs only stored datasheet keys");
+  }
+  const { s3, bucket } = client();
+  const url = await getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: options.key,
+      ResponseContentType: XLSX_MIME_TYPE,
+      ResponseContentDisposition: attachmentDisposition(options.fileName),
+    }),
+    { expiresIn: PRESIGNED_GET_TTL_SECONDS },
+  );
+  return { url, expiresIn: PRESIGNED_GET_TTL_SECONDS };
 }
 
 /**

@@ -6,7 +6,7 @@
 // revalidate the returned tags on every branch → redirect last (ADR 0035).
 
 import { refresh } from "next/cache";
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 
 import type {
   ActionData,
@@ -28,6 +28,8 @@ import type { ServiceResult } from "@/lib/admin/write-result";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
 
+import { pageActor } from "../admin-reads";
+
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
  * browser can send anything. The services re-parse it with the same strict
@@ -45,13 +47,15 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
 function failure(
   result: ServiceResult<unknown> & { ok: false },
 ): ActionFailure {
+  // A refused actor is a 403, never a form message (ADR 0073).
+  if (result.denied) forbidden();
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
 /** Creates an area, then goes back to the list with a "created" notice. */
 export async function createAreaAction(values: unknown): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await createArea(viewer.user.id, values);
+  const result = await createArea(await pageActor(viewer), values);
   // Both branches: on an audit failure the area is already saved.
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
@@ -64,7 +68,7 @@ export async function updateAreaAction(
   values: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await updateArea(viewer.user.id, id, values);
+  const result = await updateArea(await pageActor(viewer), id, values);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
   // An edit that changed nothing returns no tags: say so instead of "saved".
@@ -83,7 +87,7 @@ export async function moveAreaAction(
   direction: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await moveArea(viewer.user.id, { id, direction });
+  const result = await moveArea(await pageActor(viewer), { id, direction });
   revalidateCatalogInAction(result.tags);
   // Tags mean something was written, even when the audit step then failed.
   if (result.tags.length > 0) refresh();
@@ -97,7 +101,7 @@ export async function moveAreaAction(
  */
 export async function deleteAreaAction(id: unknown): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await deleteArea(viewer.user.id, id);
+  const result = await deleteArea(await pageActor(viewer), id);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) {
     // Deleted but not audited: the list must drop the row anyway.
@@ -115,7 +119,7 @@ export async function signAreaImageUpload(
   areaId: unknown,
 ): Promise<ActionData<SignedImageUpload>> {
   const viewer = await requireAdmin();
-  const result = await signCloudinaryUpload(viewer.user.id, {
+  const result = await signCloudinaryUpload(await pageActor(viewer), {
     target: "area",
     id: areaId,
   });
@@ -133,7 +137,7 @@ export async function setAreaImageAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await setAreaImage(viewer.user.id, input);
+  const result = await setAreaImage(await pageActor(viewer), input);
   revalidateCatalogInAction(result.tags);
   if (result.tags.length > 0) refresh();
   if (!result.ok) return failure(result);

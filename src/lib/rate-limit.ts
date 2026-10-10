@@ -4,7 +4,7 @@
 
 import "server-only";
 
-import { createHmac, hkdfSync } from "node:crypto";
+import { createHmac, hkdfSync, randomUUID } from "node:crypto";
 
 import { MongoServerError } from "mongodb";
 
@@ -41,6 +41,13 @@ export interface SlowdownRule {
  * - "email-ip-reset":  per-(email + network) password-reset-request hard limit;
  * - "user-pw-change":  per-user /change-password hard limit (by user id);
  * - "ba-limit":        Better Auth's own per-network limiter (HMAC'd keys).
+ * - "access-request-net":   public access-request form, per network (ADR 0069);
+ * - "access-request-email": public access-request form, per email (ADR 0069);
+ * - "invite-user":     admin invite (re)generation, per customer (ADR 0070);
+ * - "invite-lock":     the in-flight lock of one customer's invite (ADR 0070);
+ * - "download-user":   datasheet downloads per user, 60 per hour (ADR 0071);
+ * - "cron-lock":       one run at a time of a cron job (expiry reminders,
+ *                      ADR 0072), keyed by the SHA-256 of the job's name.
  * Phase 8 adds "wb-case" (keyed by case number, never by IP).
  */
 export type KeyNamespace =
@@ -50,7 +57,13 @@ export type KeyNamespace =
   | "email-reset"
   | "email-ip-reset"
   | "user-pw-change"
-  | "ba-limit";
+  | "ba-limit"
+  | "access-request-net"
+  | "access-request-email"
+  | "invite-user"
+  | "invite-lock"
+  | "download-user"
+  | "cron-lock";
 
 /** Namespaces keyed by the email alone, which emailKey() builds. */
 export type EmailNamespace = "email-reset" | "email-login";
@@ -525,5 +538,72 @@ export async function clearAllForEmail(email: string): Promise<void> {
     LoginAttemptModel.deleteMany({
       $or: [{ key: { $in: exact } }, { key: { $regex: pairPrefix } }],
     }).exec(),
+  );
+}
+
+/**
+ * Takes a short lock under `key` (e.g. "one invite at a time for this
+ * customer"). Returns an owner token when this caller now holds it, null
+ * while someone else does. One update pipeline on the key's document (the
+ * same atomic pattern as consume()): when no lock is held, or the held one
+ * has ended by the DB clock ($$NOW), this caller's token and a new end are
+ * written; otherwise nothing changes. The caller holds the lock exactly when
+ * the returned document carries its token. A crashed holder's lock ends by
+ * itself after `seconds`. Release with releaseLock(key, owner) in a
+ * `finally`: only the owner's lock is removed, so a caller whose lock ran
+ * out never frees someone else's.
+ */
+export async function acquireLock(
+  key: RateLimitKey,
+  seconds: number,
+): Promise<string | null> {
+  assertKey(key);
+  if (!isPositiveInt(seconds)) throw new TypeError("Invalid lock duration");
+  const owner = randomUUID();
+  const pipeline = [
+    {
+      $set: {
+        _free: {
+          $or: [
+            { $eq: [{ $type: "$expiresAt" }, "missing"] },
+            { $lte: ["$expiresAt", "$$NOW"] },
+          ],
+        },
+      },
+    },
+    {
+      $set: {
+        count: 1,
+        owner: { $cond: ["$_free", owner, "$owner"] },
+        expiresAt: {
+          $cond: ["$_free", { $add: ["$$NOW", seconds * 1000] }, "$expiresAt"],
+        },
+      },
+    },
+    { $unset: ["_free"] },
+  ];
+  const doc = await withDb("acquireLock", () =>
+    retryDuplicateOnce(() =>
+      LoginAttemptModel.findOneAndUpdate({ key }, pipeline, {
+        upsert: true,
+        returnDocument: "after",
+        updatePipeline: true,
+        projection: { _id: 0, owner: 1 },
+      })
+        .lean()
+        .exec(),
+    ),
+  );
+  return doc?.owner === owner ? owner : null;
+}
+
+/** Releases a lock taken with acquireLock(), only while `owner` holds it. */
+export async function releaseLock(
+  key: RateLimitKey,
+  owner: string,
+): Promise<void> {
+  assertKey(key);
+  await withDb("releaseLock", () =>
+    LoginAttemptModel.deleteOne({ key, owner }).exec(),
   );
 }

@@ -18,13 +18,19 @@ import {
   presignDatasheetInputSchema,
   renameDatasheetInputSchema,
 } from "@/lib/schemas/datasheet";
-import * as storage from "@/lib/storage";
+import {
+  copyObject,
+  deleteObject,
+  getObjectBytes,
+  headObject,
+  presignPut,
+} from "@/lib/storage";
 import { checkXlsx, XLSX_REJECTED } from "@/lib/xlsx-signature";
 import { DatasheetModel, ProductModel } from "@/models";
 import type { Datasheet } from "@/models/datasheet";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import {
-  assertActorId,
   auditAndFinish,
   formError,
   invalidInput,
@@ -76,7 +82,10 @@ type ListRow = Pick<
  * storage key is not returned: the UI never needs it. Two queries: the
  * documents, then one grouped count over the `datasheetId` index.
  */
-export async function listDatasheets(): Promise<DatasheetListItem[]> {
+export async function listDatasheets(
+  actor: AdminActor,
+): Promise<DatasheetListItem[]> {
+  await assertAdminActor(actor);
   await connectDb();
   const rows = await DatasheetModel.find(
     {},
@@ -127,15 +136,16 @@ export interface DatasheetUploadTicket {
  * is not trusted.
  */
 export async function presignDatasheetUpload(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<DatasheetUploadTicket>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "datasheets");
+  if (refused) return refused;
   const parsed = presignDatasheetInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
 
   const incomingKey = `incoming/${randomUUID()}.xlsx`;
-  const put = await storage.presignPut({
+  const put = await presignPut({
     key: incomingKey,
     contentType: XLSX_MIME_TYPE,
     contentLength: parsed.data.size,
@@ -159,7 +169,7 @@ export async function presignDatasheetUpload(
 /* Best-effort cleanup: never throws, logs only the error's class name. */
 async function deleteQuietly(key: string, what: string): Promise<void> {
   try {
-    await storage.deleteObject(key);
+    await deleteObject(key);
   } catch (error) {
     const kind = error instanceof Error ? error.name : typeof error;
     console.error(`[datasheets] could not delete ${what}: ${kind}`);
@@ -186,10 +196,11 @@ export interface SavedDatasheet {
  * write failed is deleted too, so it does not become an orphan.
  */
 export async function finalizeDatasheet(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<SavedDatasheet>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "datasheets");
+  if (refused) return refused;
   const parsed = finalizeDatasheetInputSchema.safeParse(input);
   if (!parsed.success) {
     // A bad request can still name a real incoming object: don't leave it.
@@ -216,7 +227,7 @@ export async function finalizeDatasheet(
       if (!existing) return formError(DATASHEET_NOT_FOUND);
     }
 
-    const head = await storage.headObject(incomingKey);
+    const head = await headObject(incomingKey);
     if (head === null) return formError(UPLOAD_NOT_FOUND);
     if (head.size > MAX_DATASHEET_BYTES) return formError(SIZE_MISMATCH);
     // The presigned PUT stays usable for 5 minutes, so the incoming object
@@ -228,11 +239,9 @@ export async function finalizeDatasheet(
     const etag = head.etag;
     if (!etag) return formError(UPLOAD_FAILED);
 
-    const bytes = await storage.getObjectBytes(
-      incomingKey,
-      MAX_DATASHEET_BYTES,
-      { ifMatch: etag },
-    );
+    const bytes = await getObjectBytes(incomingKey, MAX_DATASHEET_BYTES, {
+      ifMatch: etag,
+    });
     if (bytes === null) return formError(UPLOAD_NOT_FOUND);
     const check = await checkXlsx(bytes);
     if (!check.ok) return formError(XLSX_REJECTED[check.reason]);
@@ -240,12 +249,12 @@ export async function finalizeDatasheet(
     const size = bytes.length;
     const storageKey =
       existing?.storageKey ?? `datasheets/${randomUUID()}.xlsx`;
-    await storage.copyObject(incomingKey, storageKey, { ifMatch: etag });
+    await copyObject(incomingKey, storageKey, { ifMatch: etag });
 
     if (existing) {
       const result = await DatasheetModel.updateOne(
         { _id: existing._id },
-        { $set: { fileName, size, uploadedBy: new ObjectId(actorId) } },
+        { $set: { fileName, size, uploadedBy: new ObjectId(actor.id) } },
         { runValidators: true },
       );
       if (result.matchedCount === 0) {
@@ -255,7 +264,7 @@ export async function finalizeDatasheet(
       }
       return await auditAndFinish(
         {
-          actorId,
+          actorId: actor.id,
           action: "datasheet.replace",
           target: { type: "datasheet", id: existing._id.toHexString() },
           meta: { size },
@@ -272,7 +281,7 @@ export async function finalizeDatasheet(
         fileName,
         size,
         mimeType: XLSX_MIME_TYPE,
-        uploadedBy: new ObjectId(actorId),
+        uploadedBy: new ObjectId(actor.id),
       });
       id = created._id.toHexString();
     } catch (error) {
@@ -281,7 +290,7 @@ export async function finalizeDatasheet(
     }
     return await auditAndFinish(
       {
-        actorId,
+        actorId: actor.id,
         action: "datasheet.upload",
         target: { type: "datasheet", id },
         meta: { size },
@@ -305,10 +314,11 @@ export async function finalizeDatasheet(
 
 /** Changes the file name shown (and used for downloads). The file is untouched. */
 export async function renameDatasheet(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ id: string; fileName: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "datasheets");
+  if (refused) return refused;
   const parsed = renameDatasheetInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { id, fileName } = parsed.data;
@@ -329,7 +339,7 @@ export async function renameDatasheet(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "datasheet.rename",
       target: { type: "datasheet", id },
     },
@@ -347,10 +357,11 @@ export async function renameDatasheet(
  * in-use check and the delete is a few milliseconds.
  */
 export async function deleteDatasheet(
-  actorId: string,
+  actor: AdminActor,
   id: unknown,
 ): Promise<ServiceResult<{ id: string }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "datasheets");
+  if (refused) return refused;
   const parsedId = datasheetIdSchema.safeParse(id);
   if (!parsedId.success) return formError(DATASHEET_NOT_FOUND);
   const selfId = new ObjectId(parsedId.data);
@@ -366,7 +377,7 @@ export async function deleteDatasheet(
   if (inUse > 0) return formError(inUseMessage(inUse));
 
   try {
-    await storage.deleteObject(doc.storageKey);
+    await deleteObject(doc.storageKey);
   } catch (error) {
     const kind = error instanceof Error ? error.name : typeof error;
     console.error(`[datasheets] could not delete the stored file: ${kind}`);
@@ -378,7 +389,7 @@ export async function deleteDatasheet(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "datasheet.delete",
       target: { type: "datasheet", id: parsedId.data },
     },

@@ -19,7 +19,7 @@ import {
   saveCompanyEmailAction,
   saveWhatsappNumberAction,
 } from "@/app/admin/settings/actions";
-import { getColumnVisibility } from "@/lib/admin/settings";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { getProductForEdit, updateProduct } from "@/lib/admin/products";
 import { mongoose } from "@/lib/db";
 import {
@@ -34,6 +34,7 @@ import { CategoryModel, ProductModel, SiteContentModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 import { SPEC_KEYS } from "@/models/spec-columns";
 
+import { testActor } from "./helpers/admin-actor";
 import {
   ADMIN_USER_ID,
   REFUSED_CALLERS,
@@ -50,7 +51,9 @@ const nextCache = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
-  getSessionFromDb: getSession,
+  getSessionFromDb: (
+    await import("./helpers/admin-actor")
+  ).sessionsWithTestActors(getSession),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/navigation", () => ({
@@ -64,6 +67,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("next/cache", () => nextCache);
 
 setupMemoryDb("yg_admin_settings_qa_test");
+const seedAdmin = testActor({ id: ADMIN_USER_ID });
 
 const { ObjectId } = mongoose.Types;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -510,9 +514,9 @@ describe("products edited with restricted filters (withoutRestrictedFilters)", (
   });
 
   async function edit(filters: Record<string, unknown>) {
-    const loaded = await getProductForEdit(productId);
+    const loaded = await getProductForEdit(seedAdmin, productId);
     if (!loaded) throw new Error("fixture");
-    return updateProduct(ADMIN_USER_ID, productId, {
+    return updateProduct(seedAdmin, productId, {
       ...loaded.values,
       filters,
     });
@@ -563,7 +567,7 @@ describe("products edited with restricted filters (withoutRestrictedFilters)", (
   });
 
   it("restricting a column, then saving a stale edit form, cannot bring the numbers back", async () => {
-    const loaded = await getProductForEdit(productId); // form opened while public
+    const loaded = await getProductForEdit(seedAdmin, productId); // form opened while public
     await SiteContentModel.create({
       key: SETTINGS_KEYS.columnVisibility,
       value: withColumns({ cct: "restricted" }),
@@ -572,11 +576,7 @@ describe("products edited with restricted filters (withoutRestrictedFilters)", (
       { _id: productId },
       { $unset: { "filters.cctK": "" } },
     );
-    const result = await updateProduct(
-      ADMIN_USER_ID,
-      productId,
-      loaded?.values,
-    );
+    const result = await updateProduct(seedAdmin, productId, loaded?.values);
     // The stale form is refused or saved without cctK; either way it is not stored.
     void result;
     expect(
@@ -587,7 +587,7 @@ describe("products edited with restricted filters (withoutRestrictedFilters)", (
   it("KNOWN LIMITATION: a save that read the setting just before it flipped can write restricted numbers; saving the setting again repairs it", async () => {
     // Visibility is read (public), then the admin restricts cct and the cleanup
     // finishes, then the product write lands. Single admin makes this very unlikely.
-    const loaded = await getProductForEdit(productId);
+    const loaded = await getProductForEdit(seedAdmin, productId);
     if (!loaded) throw new Error("fixture");
     const original = SiteContentModel.findOne.bind(SiteContentModel);
     let flipped = false;
@@ -615,7 +615,7 @@ describe("products edited with restricted filters (withoutRestrictedFilters)", (
       }) as never;
       return query;
     }) as never);
-    await updateProduct(ADMIN_USER_ID, productId, {
+    await updateProduct(seedAdmin, productId, {
       ...loaded.values,
       filters: { cctK: [3000] },
     });
@@ -684,7 +684,7 @@ describe("audit meta holds neither the number nor the address", () => {
       },
     ]);
     const { getAdminSettings } = await import("@/lib/admin/settings");
-    const settings = await getAdminSettings();
+    const settings = await getAdminSettings(seedAdmin);
     expect(settings.whatsappNumber).toBeNull();
     expect(settings.companyEmail).toBeNull();
     // And a save over the damaged value works (treated as different from the input).
@@ -726,7 +726,8 @@ describe("static rules", () => {
   it("the actions take the actor id only from the session, never from the input", () => {
     const source = read("src/app/admin/settings/actions.ts");
     expect(source).not.toMatch(/input\.(actorId|userId|id)\b/);
-    expect(source.match(/viewer\.user\.id/g)).toHaveLength(3);
+    // The actor is `{ id: viewer.user.id, headers }` from the session (ADR 0073).
+    expect(source.match(/await pageActor\(viewer\)/g)).toHaveLength(3);
   });
 
   it("no geo-block setting exists: not in the settings keys, the page, the forms or the service (ADR 0003)", () => {

@@ -15,6 +15,7 @@ import {
 import { ProductModel } from "@/models";
 import type { Product, ProductImage } from "@/models/product";
 
+import { refuseUnlessAdmin, type AdminActor } from "./actor";
 import {
   expectedVersion,
   PRODUCT_CHANGED,
@@ -24,7 +25,6 @@ import {
 } from "./products";
 import { IMAGE_REJECTED, verifyUploadedImage } from "./uploads";
 import {
-  assertActorId,
   auditAndFinish,
   formError,
   invalidInput,
@@ -116,11 +116,12 @@ function normalised(images: ProductImage[]): ProductImage[] {
  * can't be undone. The T17 orphan report lists them.
  */
 export async function saveProductImages(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
   options: ProductWriteOptions = {},
 ): Promise<ServiceResult<SavedProductImages>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "product-images");
+  if (refused) return refused;
   const expected = expectedVersion(options);
   if (expected === "bad") return formError(PRODUCT_CHANGED);
   const parsed = productImagesInputSchema.safeParse(input);
@@ -217,7 +218,7 @@ export async function saveProductImages(
 
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "product.images.update",
       target: { type: "product", id: productId },
       meta: {

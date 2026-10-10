@@ -22,6 +22,8 @@ import {
 import { listAreas } from "@/lib/admin/areas";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../admin-reads";
+
 // Static only (ADR 0036): a title never carries data.
 export const metadata: Metadata = { title: "Areas" };
 
@@ -35,8 +37,12 @@ const NOTICES = {
 export default async function AdminAreasPage({
   searchParams,
 }: PageProps<"/admin/areas">) {
-  await requireAdmin();
-  const [areas, query] = await Promise.all([listAreas(), searchParams]);
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
+  const [areas, query] = await Promise.all([
+    readAsAdmin(() => listAreas(actor)),
+    searchParams,
+  ]);
   const notice = readNotice(query[NOTICE_PARAM]);
 
   return (

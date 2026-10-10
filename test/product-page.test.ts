@@ -248,7 +248,8 @@ describe("product page: default visibility", () => {
     expect(panel).toContain(`data-field="lumenOutput"`);
     expect(panel).toContain(tok("lumenOutput", "V1"));
     expect(panel).toContain('data-slot="datasheet"');
-    expect(panel).toContain("Sign in to download");
+    // Tags dropped (the link may hold inline markup).
+    expect(panel.replace(/<[^>]+>/g, "")).toContain("Sign in to download");
   });
 
   it("renders the spec table from placement 'table', grouped, empty hidden", async () => {

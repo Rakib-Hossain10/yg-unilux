@@ -30,6 +30,11 @@ const storedUser = {
   accessExpiresAt: new Date("2027-04-01T00:00:00Z"),
   company: "Acme Lighting",
   country: "Hong Kong",
+  deviceEpoch: 2,
+  expiryReminderFor: new Date("2027-04-01T00:00:00Z"),
+  invitedAt: new Date("2026-10-01T00:00:00Z"),
+  inviteExpiresAt: new Date("2026-10-04T00:00:00Z"),
+  passwordSetAt: new Date("2026-10-02T00:00:00Z"),
 };
 
 /* The users collection read through the raw driver, bypassing Mongoose. */

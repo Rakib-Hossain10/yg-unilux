@@ -6,7 +6,11 @@ import type { Types } from "mongoose";
 
 import { mongoose } from "@/lib/db";
 
-import { AUDIT_ACTIONS, type AuditAction } from "./audit-actions";
+import {
+  ACTORLESS_AUDIT_PREFIXES,
+  AUDIT_ACTIONS,
+  type AuditAction,
+} from "./audit-actions";
 import { defineModel } from "./shared";
 
 const { Schema } = mongoose;
@@ -60,11 +64,14 @@ const auditLogSchema = new Schema<AuditLog>(
     actor: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      // Required for every admin write; "auth.*" security events have no actor.
+      // Required for every admin write; "auth.*" security events and
+      // "cron.*" runs have no actor.
       required: [
         function (this: { action?: unknown }) {
+          const action = this.action;
           return !(
-            typeof this.action === "string" && this.action.startsWith("auth.")
+            typeof action === "string" &&
+            ACTORLESS_AUDIT_PREFIXES.some((prefix) => action.startsWith(prefix))
           );
         },
         "actor is required",

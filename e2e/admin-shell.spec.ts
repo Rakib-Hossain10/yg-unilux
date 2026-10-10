@@ -13,6 +13,7 @@ import {
   expect,
 } from "@playwright/test";
 
+import { E2E_SEEDED_CUSTOMERS } from "./fixtures/accounts";
 import { loadState } from "./fixtures/auth-state";
 
 const axeSource = readFileSync(
@@ -69,11 +70,14 @@ test("the dashboard shows counts and links every card to its module", async ({
     );
   }
 
-  // The test server seeds exactly one customer (and the admin, not counted).
+  // The customers e2e/test-server.ts seeds (the admin is not counted): the
+  // shared customer, the email specs' one and the three P2 account-page ones.
   const customers = main.getByRole("listitem").filter({
     has: page.getByRole("heading", { level: 2, name: "Customers" }),
   });
-  await expect(customers.getByRole("definition").first()).toHaveText("1");
+  await expect(customers.getByRole("definition").first()).toHaveText(
+    String(E2E_SEEDED_CUSTOMERS.length),
+  );
 });
 
 test("the sidebar marks the dashboard as the current page", async ({
