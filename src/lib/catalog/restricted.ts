@@ -4,7 +4,7 @@
 
 import "server-only";
 
-import { getColumnVisibility } from "@/lib/admin/settings";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { connectDb } from "@/lib/db";
 import { canSeeRestricted, getViewer } from "@/lib/permissions";
 import { ProductModel } from "@/models";

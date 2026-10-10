@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isOwnPublicId } from "@/lib/cloudinary-ids";
 import { mongoose } from "@/lib/db";
 import { AreaModel, CategoryModel, ProductModel } from "@/models";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
@@ -18,6 +19,12 @@ import {
   signCloudinaryUpload,
   verifyUploadedImage,
 } from "./uploads";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
 
 const cloudinaryMock = vi.hoisted(() => ({
   inspectImage: vi.fn(),
@@ -31,7 +38,7 @@ vi.mock("@/lib/cloudinary", async (importOriginal) => ({
 setupMemoryDb("yg_admin_uploads_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
 const SECRET = "Abc_secret-123";
 
 let product: string;
@@ -82,7 +89,7 @@ describe("signCloudinaryUpload", () => {
     ["category" as const, () => category],
   ])("signs a new id in the %s's own folder", async (target, owner) => {
     vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_999);
-    const result = await signCloudinaryUpload(ADMIN, {
+    const result = await signCloudinaryUpload(admin, {
       target,
       id: owner(),
     });
@@ -110,7 +117,7 @@ describe("signCloudinaryUpload", () => {
   it("picks a fresh id for every upload", async () => {
     const ids = new Set<string>();
     for (let n = 0; n < 3; n += 1) {
-      const result = await signCloudinaryUpload(ADMIN, {
+      const result = await signCloudinaryUpload(admin, {
         target: "product",
         id: product,
       });
@@ -121,7 +128,7 @@ describe("signCloudinaryUpload", () => {
 
   it("refuses an unknown owner, a wrong target and bad input", async () => {
     const missing = new ObjectId().toHexString();
-    const gone = await signCloudinaryUpload(ADMIN, {
+    const gone = await signCloudinaryUpload(admin, {
       target: "product",
       id: missing,
     });
@@ -131,12 +138,12 @@ describe("signCloudinaryUpload", () => {
     // An area id is not a product, and a category id is not an area (or
     // the other way round): each target is looked up in its own collection.
     expect(
-      (await signCloudinaryUpload(ADMIN, { target: "product", id: area })).ok,
+      (await signCloudinaryUpload(admin, { target: "product", id: area })).ok,
     ).toBe(false);
     expect(
-      (await signCloudinaryUpload(ADMIN, { target: "area", id: category })).ok,
+      (await signCloudinaryUpload(admin, { target: "area", id: category })).ok,
     ).toBe(false);
-    const noCategory = await signCloudinaryUpload(ADMIN, {
+    const noCategory = await signCloudinaryUpload(admin, {
       target: "category",
       id: area,
     });
@@ -150,13 +157,16 @@ describe("signCloudinaryUpload", () => {
       { target: "product", id: product, folder: "evil" },
       null,
     ]) {
-      expect((await signCloudinaryUpload(ADMIN, input)).ok).toBe(false);
+      expect((await signCloudinaryUpload(admin, input)).ok).toBe(false);
     }
   });
 
   it("needs the signed-in admin's id", async () => {
     await expect(
-      signCloudinaryUpload("nope", { target: "product", id: product }),
+      signCloudinaryUpload(
+        { id: "nope", headers: new Headers() },
+        { target: "product", id: product },
+      ),
     ).rejects.toThrow(TypeError);
   });
 });

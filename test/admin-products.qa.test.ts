@@ -21,13 +21,19 @@ import {
   unpublishProduct,
   updateProduct,
 } from "@/lib/admin/products";
+import { testActor } from "./helpers/admin-actor";
 import { setupMemoryDb } from "./helpers/memory-db";
 import { testPublicId } from "./helpers/public-ids";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("./helpers/admin-actor")).fakeSessionFromDb,
+}));
 
 setupMemoryDb("yg_admin_products_qa_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
 
 let spot: string;
 let productId: string;
@@ -65,7 +71,7 @@ beforeEach(async () => {
 });
 
 async function loadedValues(changes: Record<string, unknown> = {}) {
-  const loaded = await getProductForEdit(productId);
+  const loaded = await getProductForEdit(admin, productId);
   if (!loaded) throw new Error("fixture missing");
   return {
     values: { ...loaded.values, ...changes } as Record<string, unknown>,
@@ -103,7 +109,7 @@ describe("race between the read and the write (ADR 0043)", () => {
         { $set: { name: "Theirs", updatedAt: new Date(Date.now() + 5000) } },
       ),
     );
-    const result = await updateProduct(ADMIN, productId, values, {
+    const result = await updateProduct(admin, productId, values, {
       expectedUpdatedAt: version,
     });
     expect(result).toMatchObject({ ok: false, tags: [] });
@@ -120,7 +126,7 @@ describe("race between the read and the write (ADR 0043)", () => {
         { $set: { updatedAt: new Date(Date.now() + 5000) } },
       ),
     );
-    const result = await publishProduct(ADMIN, productId, {
+    const result = await publishProduct(admin, productId, {
       expectedUpdatedAt: version,
     });
     expect(result.ok).toBe(false);
@@ -137,7 +143,7 @@ describe("race between the read and the write (ADR 0043)", () => {
         { $set: { updatedAt: new Date(Date.now() + 5000) } },
       ),
     );
-    const result = await unpublishProduct(ADMIN, productId, {
+    const result = await unpublishProduct(admin, productId, {
       expectedUpdatedAt: version,
     });
     expect(result.ok).toBe(false);
@@ -146,7 +152,7 @@ describe("race between the read and the write (ADR 0043)", () => {
 
   it("an explicit undefined expectedUpdatedAt is refused, not treated as 'no check'", async () => {
     const { values } = await loadedValues({ name: "Sneaky" });
-    const result = await updateProduct(ADMIN, productId, values, {
+    const result = await updateProduct(admin, productId, values, {
       expectedUpdatedAt: undefined,
     });
     expect(result.ok).toBe(false);
@@ -155,7 +161,7 @@ describe("race between the read and the write (ADR 0043)", () => {
 
   it("a save that only unsets a field still bumps updatedAt", async () => {
     const first = await loadedValues({ description: "" });
-    const saved = await updateProduct(ADMIN, productId, first.values, {
+    const saved = await updateProduct(admin, productId, first.values, {
       expectedUpdatedAt: first.version,
     });
     expect(saved.ok).toBe(true);
@@ -164,7 +170,7 @@ describe("race between the read and the write (ADR 0043)", () => {
     // The old version must now be stale, or a stale tab could overwrite.
     expect(doc?.updatedAt.toISOString()).not.toBe(first.version);
     const again = await updateProduct(
-      ADMIN,
+      admin,
       productId,
       { ...first.values, name: "Late" },
       { expectedUpdatedAt: first.version },
@@ -195,7 +201,7 @@ describe("public file links (rendered on public pages)", () => {
     const { values } = await loadedValues({
       publicFiles: [{ label: "IES", url }],
     });
-    const result = await updateProduct(ADMIN, productId, values);
+    const result = await updateProduct(admin, productId, values);
     expect(result.ok).toBe(false);
     expect((await ProductModel.findById(productId))?.publicFiles).toHaveLength(
       0,
@@ -206,7 +212,7 @@ describe("public file links (rendered on public pages)", () => {
     const { values } = await loadedValues({
       publicFiles: [{ label: "IES", url: "https://example.com/a.ies?x=1" }],
     });
-    expect((await updateProduct(ADMIN, productId, values)).ok).toBe(true);
+    expect((await updateProduct(admin, productId, values)).ok).toBe(true);
   });
 });
 
@@ -234,7 +240,7 @@ describe("mass assignment through the save payload", () => {
       writable: true,
     });
     const before = JSON.stringify(await ProductModel.findById(productId));
-    const result = await updateProduct(ADMIN, productId, payload);
+    const result = await updateProduct(admin, productId, payload);
     expect(result.ok).toBe(false);
     expect(JSON.stringify(await ProductModel.findById(productId))).toBe(before);
   });
@@ -249,13 +255,13 @@ describe("mass assignment through the save payload", () => {
       { filters: { cctK: [3000], evil: [1] } },
     ]) {
       const { values } = await loadedValues(changes);
-      expect((await updateProduct(ADMIN, productId, values)).ok).toBe(false);
+      expect((await updateProduct(admin, productId, values)).ok).toBe(false);
     }
   });
 
   it("a status in the payload never changes the stored status", async () => {
     const { values } = await loadedValues({ status: "published", name: "N2" });
-    await updateProduct(ADMIN, productId, values);
+    await updateProduct(admin, productId, values);
     expect((await ProductModel.findById(productId))?.status).toBe("draft");
   });
 });
@@ -272,14 +278,14 @@ describe("list input", () => {
     { page: "-3" },
     { page: "1e309" },
   ])("%j falls back to defaults and returns the product", async (input) => {
-    const page = await listProducts(input);
+    const page = await listProducts(admin, input);
     expect(page.total).toBe(1);
   });
 
   it("a search is literal: regex metacharacters match nothing extra", async () => {
-    expect((await listProducts({ q: ".*" })).total).toBe(0);
-    expect((await listProducts({ q: "(a+)+$" })).total).toBe(0);
-    expect((await listProducts({ q: "fixture" })).total).toBe(1);
+    expect((await listProducts(admin, { q: ".*" })).total).toBe(0);
+    expect((await listProducts(admin, { q: "(a+)+$" })).total).toBe(0);
+    expect((await listProducts(admin, { q: "fixture" })).total).toBe(1);
   });
 });
 
@@ -290,7 +296,7 @@ describe("audit entries hold ids and counts, never values", () => {
       specs: { driver: ["RESTRICTED-DRIVER-VALUE"] },
       extraSpecs: [{ group: "", label: "L", value: "EXTRA-VALUE" }],
     });
-    expect((await updateProduct(ADMIN, productId, values)).ok).toBe(true);
+    expect((await updateProduct(admin, productId, values)).ok).toBe(true);
     const entries = await AuditLogModel.find({}).lean();
     expect(entries).toHaveLength(1);
     expect(entries[0]?.action).toBe("product.update");
@@ -313,7 +319,7 @@ describe("empty optional values round trip", () => {
     });
     expect(
       (
-        await updateProduct(ADMIN, productId, values, {
+        await updateProduct(admin, productId, values, {
           expectedUpdatedAt: version,
         })
       ).ok,
@@ -323,11 +329,11 @@ describe("empty optional values round trip", () => {
     // The stored extra spec carries no usable group (null or absent).
     expect(doc?.extraSpecs[0]?.group ?? null).toBeNull();
 
-    const reloaded = await getProductForEdit(productId);
+    const reloaded = await getProductForEdit(admin, productId);
     expect(reloaded?.values.extraSpecs?.[0]?.group).toBe("");
     expect(reloaded?.values.variants?.[0]?.label).toBe("");
     // Saving the reloaded form again is a no-op (no write, no audit).
-    const again = await updateProduct(ADMIN, productId, reloaded!.values, {
+    const again = await updateProduct(admin, productId, reloaded!.values, {
       expectedUpdatedAt: reloaded!.updatedAt,
     });
     expect(again).toMatchObject({ ok: true, tags: [] });
@@ -351,7 +357,7 @@ describe("duplicate model numbers across products", () => {
     const { values } = await loadedValues({
       variants: [{ modelNo: "ZZ-9", label: "", imagePublicId: "" }],
     });
-    const result = await updateProduct(ADMIN, productId, values);
+    const result = await updateProduct(admin, productId, values);
     expect(result).toMatchObject({
       ok: false,
       errors: { fieldErrors: { "variants.0.modelNo": expect.any(Array) } },
@@ -365,7 +371,7 @@ describe("duplicate model numbers across products", () => {
     const { values } = await loadedValues({
       variants: [{ modelNo: "zz-9", label: "", imagePublicId: "" }],
     });
-    expect(await updateProduct(ADMIN, productId, values)).toMatchObject({
+    expect(await updateProduct(admin, productId, values)).toMatchObject({
       ok: false,
       errors: { fieldErrors: { "variants.0.modelNo": expect.any(Array) } },
     });

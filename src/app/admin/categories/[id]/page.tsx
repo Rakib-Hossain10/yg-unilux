@@ -14,6 +14,8 @@ import { CATEGORIES_PATH } from "@/components/admin/category-paths";
 import { getCategoryForEdit, listCategoryTree } from "@/lib/admin/categories";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../../admin-reads";
+
 import { adminCloudName } from "../../cloudinary-cloud-name";
 
 // Static only (ADR 0036): never the category's name.
@@ -22,12 +24,13 @@ export const metadata: Metadata = { title: "Edit category" };
 export default async function EditCategoryPage({
   params,
 }: PageProps<"/admin/categories/[id]">) {
-  await requireAdmin();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
   const { id } = await params;
   // The service validates the id; a bad one is simply "not found".
   const [category, tree] = await Promise.all([
-    getCategoryForEdit(id),
-    listCategoryTree(),
+    readAsAdmin(() => getCategoryForEdit(actor, id)),
+    readAsAdmin(() => listCategoryTree(actor)),
   ]);
   if (!category) notFound();
 

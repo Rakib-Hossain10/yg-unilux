@@ -10,6 +10,7 @@ import { MAX_DATASHEET_BYTES, XLSX_MIME_TYPE } from "@/lib/constants";
 import { mongoose } from "@/lib/db";
 import { CategoryModel, DatasheetModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 
 import {
@@ -23,6 +24,12 @@ import {
   UPLOAD_NOT_FOUND,
 } from "./datasheets";
 import { AUDIT_FAILED_MESSAGE, type ServiceResult } from "./write-result";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
 
 /* A Map-backed bucket. Keys not present behave like missing objects. */
 /*
@@ -87,7 +94,8 @@ vi.mock("@/lib/storage", () => ({
 setupMemoryDb("yg_admin_datasheets_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
+const ADMIN = admin.id;
 const UUID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const UUID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const INCOMING_A = `incoming/${UUID_A}.xlsx`;
@@ -134,13 +142,13 @@ beforeEach(async () => {
 async function newDatasheet(key = INCOMING_A, fileName = "Arc.xlsx") {
   bucket.objects.set(key, await workbook());
   return expectOk(
-    await finalizeDatasheet(ADMIN, { mode: "new", incomingKey: key, fileName }),
+    await finalizeDatasheet(admin, { mode: "new", incomingKey: key, fileName }),
   );
 }
 
 describe("presignDatasheetUpload", () => {
   it("returns a presigned PUT to a server-chosen incoming key, no tags", async () => {
-    const result = await presignDatasheetUpload(ADMIN, {
+    const result = await presignDatasheetUpload(admin, {
       fileName: "Arc.xlsx",
       size: 5000,
     });
@@ -160,13 +168,16 @@ describe("presignDatasheetUpload", () => {
       { fileName: "a.xlsx", size: MAX_DATASHEET_BYTES + 1 },
       { fileName: "a.xlsx", size: 10, key: "x" },
     ]) {
-      expect((await presignDatasheetUpload(ADMIN, input)).ok).toBe(false);
+      expect((await presignDatasheetUpload(admin, input)).ok).toBe(false);
     }
   });
 
   it("rejects a non-ObjectId actor before doing anything", async () => {
     await expect(
-      presignDatasheetUpload("nope", { fileName: "a.xlsx", size: 1 }),
+      presignDatasheetUpload(
+        { id: "nope", headers: new Headers() },
+        { fileName: "a.xlsx", size: 1 },
+      ),
     ).rejects.toThrow(TypeError);
   });
 });
@@ -174,7 +185,7 @@ describe("presignDatasheetUpload", () => {
 describe("finalizeDatasheet (new)", () => {
   it("copies to datasheets/, writes the document, audits, deletes incoming", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: " Arc.xlsx ",
@@ -205,7 +216,7 @@ describe("finalizeDatasheet (new)", () => {
     ["empty", () => new Uint8Array(0)],
   ])("rejects %s, writes nothing and deletes incoming", async (_n, make) => {
     bucket.objects.set(INCOMING_A, make());
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -220,7 +231,7 @@ describe("finalizeDatasheet (new)", () => {
   it("rejects a truncated workbook and deletes incoming", async () => {
     const whole = await workbook();
     bucket.objects.set(INCOMING_A, whole.subarray(0, whole.length - 40));
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -234,7 +245,7 @@ describe("finalizeDatasheet (new)", () => {
     big.set([0x50, 0x4b, 0x03, 0x04]);
     bucket.objects.set(INCOMING_A, big);
     const storage = await import("@/lib/storage");
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -245,7 +256,7 @@ describe("finalizeDatasheet (new)", () => {
   });
 
   it("reports a missing upload", async () => {
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -257,7 +268,7 @@ describe("finalizeDatasheet (new)", () => {
     bucket.objects.set(INCOMING_A, await workbook());
     bucket.noEtag = true;
     const storage = await import("@/lib/storage");
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -273,7 +284,7 @@ describe("finalizeDatasheet (new)", () => {
     bucket.objects.set(INCOMING_A, bytes);
     const storage = await import("@/lib/storage");
     const saved = expectOk(
-      await finalizeDatasheet(ADMIN, {
+      await finalizeDatasheet(admin, {
         mode: "new",
         incomingKey: INCOMING_A,
         fileName: "a.xlsx",
@@ -296,7 +307,7 @@ describe("finalizeDatasheet (new)", () => {
   it("refuses a key outside incoming/ and never touches a stored datasheet", async () => {
     const stored = `datasheets/${UUID_A}.xlsx`;
     bucket.objects.set(stored, await workbook());
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: stored,
       fileName: "a.xlsx",
@@ -308,7 +319,7 @@ describe("finalizeDatasheet (new)", () => {
 
   it("deletes incoming when the request is otherwise invalid", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "notes.txt",
@@ -320,7 +331,7 @@ describe("finalizeDatasheet (new)", () => {
   it("deletes incoming and the new copy when the copy or the write fails", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
     bucket.failCopy = true;
-    const copyFail = await finalizeDatasheet(ADMIN, {
+    const copyFail = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -331,7 +342,7 @@ describe("finalizeDatasheet (new)", () => {
     bucket.failCopy = false;
     bucket.objects.set(INCOMING_B, await workbook());
     vi.spyOn(DatasheetModel, "create").mockRejectedValueOnce(new Error("db"));
-    const dbFail = await finalizeDatasheet(ADMIN, {
+    const dbFail = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_B,
       fileName: "a.xlsx",
@@ -344,7 +355,7 @@ describe("finalizeDatasheet (new)", () => {
   it("still succeeds when deleting incoming fails, and logs without detail", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
     bucket.failDelete.add(INCOMING_A);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -356,7 +367,7 @@ describe("finalizeDatasheet (new)", () => {
   it("keeps the datasheet when only the audit write fails", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
     vi.spyOn(AuditLogModel, "create").mockRejectedValueOnce(new Error("boom"));
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -374,7 +385,7 @@ describe("finalizeDatasheet (replace)", () => {
 
     const bytes = await workbook("Second");
     bucket.objects.set(INCOMING_B, bytes);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: first.id,
       incomingKey: INCOMING_B,
@@ -402,7 +413,7 @@ describe("finalizeDatasheet (replace)", () => {
     const original = bucket.objects.get(stored);
 
     bucket.objects.set(INCOMING_B, new TextEncoder().encode("x".repeat(100)));
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: first.id,
       incomingKey: INCOMING_B,
@@ -418,7 +429,7 @@ describe("finalizeDatasheet (replace)", () => {
 
   it("refuses an unknown datasheet and still deletes incoming", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: new ObjectId().toHexString(),
       incomingKey: INCOMING_A,
@@ -435,7 +446,7 @@ describe("finalizeDatasheet (replace)", () => {
     vi.spyOn(DatasheetModel, "updateOne").mockResolvedValueOnce({
       matchedCount: 0,
     } as never);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: first.id,
       incomingKey: INCOMING_B,
@@ -450,7 +461,7 @@ describe("finalizeDatasheet (replace)", () => {
 describe("renameDatasheet", () => {
   it("renames, audits and returns the tag; the file is untouched", async () => {
     const saved = await newDatasheet();
-    const result = await renameDatasheet(ADMIN, {
+    const result = await renameDatasheet(admin, {
       id: saved.id,
       fileName: "Arc family.xlsx",
     });
@@ -465,7 +476,7 @@ describe("renameDatasheet", () => {
   it("is a no-op for the same name, and fails for unknown ids / bad names", async () => {
     const saved = await newDatasheet();
     expect(
-      await renameDatasheet(ADMIN, { id: saved.id, fileName: "Arc.xlsx" }),
+      await renameDatasheet(admin, { id: saved.id, fileName: "Arc.xlsx" }),
     ).toEqual({
       ok: true,
       data: { id: saved.id, fileName: "Arc.xlsx" },
@@ -473,14 +484,14 @@ describe("renameDatasheet", () => {
     });
     expect(
       formErrorsOf(
-        await renameDatasheet(ADMIN, {
+        await renameDatasheet(admin, {
           id: new ObjectId().toHexString(),
           fileName: "b.xlsx",
         }),
       ),
     ).toEqual([DATASHEET_NOT_FOUND]);
     expect(
-      (await renameDatasheet(ADMIN, { id: saved.id, fileName: "b.txt" })).ok,
+      (await renameDatasheet(admin, { id: saved.id, fileName: "b.txt" })).ok,
     ).toBe(false);
     expect(await actions()).toEqual(["datasheet.upload"]);
   });
@@ -488,7 +499,7 @@ describe("renameDatasheet", () => {
 
 describe("listDatasheets", () => {
   it("returns an empty list, then rows with in-use counts and no storage key", async () => {
-    expect(await listDatasheets()).toEqual([]);
+    expect(await listDatasheets(admin)).toEqual([]);
 
     const a = await newDatasheet(INCOMING_A, "A.xlsx");
     const b = await newDatasheet(INCOMING_B, "B.xlsx");
@@ -508,7 +519,7 @@ describe("listDatasheets", () => {
       });
     }
 
-    const rows = await listDatasheets();
+    const rows = await listDatasheets(admin);
     expect(rows.map((r) => [r.fileName, r.inUse])).toEqual(
       expect.arrayContaining([
         ["A.xlsx", 3],
@@ -533,7 +544,7 @@ describe("deleteDatasheet", () => {
       bucket.objects.delete(key);
     });
 
-    const result = await deleteDatasheet(ADMIN, saved.id);
+    const result = await deleteDatasheet(admin, saved.id);
     expect(result).toEqual({
       ok: true,
       data: { id: saved.id },
@@ -569,7 +580,7 @@ describe("deleteDatasheet", () => {
       },
     ]);
 
-    const result = await deleteDatasheet(ADMIN, saved.id);
+    const result = await deleteDatasheet(admin, saved.id);
     expect(formErrorsOf(result)[0]).toContain("2 products use");
     expect(result.tags).toEqual([]);
     expect(bucket.objects.has(stored)).toBe(true);
@@ -578,24 +589,24 @@ describe("deleteDatasheet", () => {
 
     // Once detached it can go.
     await ProductModel.updateMany({}, { $set: { datasheetId: null } });
-    expect((await deleteDatasheet(ADMIN, saved.id)).ok).toBe(true);
+    expect((await deleteDatasheet(admin, saved.id)).ok).toBe(true);
   });
 
   it("keeps the document when the R2 delete fails, so it can be retried", async () => {
     const saved = await newDatasheet();
     const stored = (await DatasheetModel.findById(saved.id).lean())!.storageKey;
     bucket.failDelete.add(stored);
-    const result = await deleteDatasheet(ADMIN, saved.id);
+    const result = await deleteDatasheet(admin, saved.id);
     expect(formErrorsOf(result)).toEqual([UPLOAD_FAILED]);
     expect(await DatasheetModel.countDocuments()).toBe(1);
 
     bucket.failDelete.clear();
-    expect((await deleteDatasheet(ADMIN, saved.id)).ok).toBe(true);
+    expect((await deleteDatasheet(admin, saved.id)).ok).toBe(true);
   });
 
   it("handles bad and unknown ids", async () => {
     for (const id of ["x", { $ne: null }, new ObjectId().toHexString()]) {
-      expect(formErrorsOf(await deleteDatasheet(ADMIN, id))).toEqual([
+      expect(formErrorsOf(await deleteDatasheet(admin, id))).toEqual([
         DATASHEET_NOT_FOUND,
       ]);
     }

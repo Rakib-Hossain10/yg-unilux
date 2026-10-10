@@ -12,6 +12,8 @@ import { BackLink } from "@/components/admin/back-link";
 import { getAreaForEdit } from "@/lib/admin/areas";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../../admin-reads";
+
 import { adminCloudName } from "../../cloudinary-cloud-name";
 
 // Static only (ADR 0036): never the area's name.
@@ -20,10 +22,11 @@ export const metadata: Metadata = { title: "Edit area" };
 export default async function EditAreaPage({
   params,
 }: PageProps<"/admin/areas/[id]">) {
-  await requireAdmin();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
   const { id } = await params;
   // The service validates the id; a bad one is simply "not found".
-  const area = await getAreaForEdit(id);
+  const area = await readAsAdmin(() => getAreaForEdit(actor, id));
   if (!area) notFound();
 
   return (

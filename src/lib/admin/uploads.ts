@@ -27,12 +27,8 @@ import { connectDb, mongoose } from "@/lib/db";
 import { objectIdSchema } from "@/lib/schemas/common";
 import { AreaModel, CategoryModel, ProductModel } from "@/models";
 
-import {
-  assertActorId,
-  formError,
-  invalidInput,
-  type ServiceResult,
-} from "./write-result";
+import { refuseUnlessAdmin, type AdminActor } from "./actor";
+import { formError, invalidInput, type ServiceResult } from "./write-result";
 
 const { ObjectId } = mongoose.Types;
 
@@ -82,11 +78,12 @@ export interface UploadFormatOptions {
  * `publicId` to the save action, which verifies it.
  */
 export async function signCloudinaryUpload(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
   options: UploadFormatOptions = {},
 ): Promise<ServiceResult<SignedUpload>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "uploads");
+  if (refused) return refused;
   const parsed = signUploadSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { target, id } = parsed.data;

@@ -54,7 +54,7 @@ export default async function AdminDashboardPage() {
   const viewer = await requireAdmin();
   const actor = await pageActor(viewer);
   const [counts, customers] = await Promise.all([
-    getCounts(),
+    readAsAdmin(() => getCounts(actor)),
     readAsAdmin(() => getCustomerCounts(actor)),
   ]);
 

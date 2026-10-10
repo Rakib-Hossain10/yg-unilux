@@ -28,6 +28,8 @@ import {
 } from "@/lib/admin/categories";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../admin-reads";
+
 // Static only (ADR 0036): a title never carries data.
 export const metadata: Metadata = { title: "Categories" };
 
@@ -54,8 +56,12 @@ function toItem(node: CategoryTreeNode): CategoryTreeItem {
 export default async function AdminCategoriesPage({
   searchParams,
 }: PageProps<"/admin/categories">) {
-  await requireAdmin();
-  const [tree, query] = await Promise.all([listCategoryTree(), searchParams]);
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
+  const [tree, query] = await Promise.all([
+    readAsAdmin(() => listCategoryTree(actor)),
+    searchParams,
+  ]);
   const notice = readNotice(query[NOTICE_PARAM]);
   const subcategoryCount = tree.reduce(
     (sum, node) => sum + node.children.length,

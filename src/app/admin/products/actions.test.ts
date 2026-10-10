@@ -8,6 +8,7 @@ import { AUDIT_FAILED_MESSAGE } from "@/lib/admin/write-result";
 import { mongoose } from "@/lib/db";
 import { AreaModel, CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../../test/helpers/memory-db";
 import { testPublicId } from "../../../../test/helpers/public-ids";
 
@@ -22,6 +23,8 @@ import {
   createDraftAction,
   deleteProductAction,
   publishProductAction,
+  saveProductImagesAction,
+  signProductImageUpload,
   unpublishProductAction,
   updateProductAction,
 } from "./actions";
@@ -37,7 +40,9 @@ const auditFails = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
-  getSessionFromDb: getSession,
+  getSessionFromDb: (
+    await import("../../../../test/helpers/admin-actor")
+  ).sessionsWithTestActors(getSession),
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 // redirect() and forbidden() throw in Next; these throw a readable error.
@@ -65,6 +70,8 @@ setupMemoryDb("yg_admin_product_actions_test");
 
 const { ObjectId } = mongoose.Types;
 const ADMIN_ID = new ObjectId().toHexString();
+// Reads the stored product back through the admin service.
+const reader = testActor();
 
 /* A Better Auth session user with the fields the guard reads. */
 function signedInAs(fields: Record<string, unknown>) {
@@ -140,7 +147,7 @@ async function unpublish() {
 
 /* The edit form's values for the stored product, with some fields changed. */
 async function editValues(changes: Record<string, unknown> = {}) {
-  const loaded = await getProductForEdit(productId);
+  const loaded = await getProductForEdit(reader, productId);
   if (!loaded) throw new Error("fixture product missing");
   return { ...loaded.values, ...changes };
 }
@@ -430,7 +437,7 @@ describe("edit actions as the admin", () => {
   async function formPayload(
     edit: (state: ProductEditValues) => void,
   ): Promise<unknown> {
-    const loaded = await getProductForEdit(productId);
+    const loaded = await getProductForEdit(reader, productId);
     if (!loaded) throw new Error("fixture product missing");
     const state = toFormState(loaded.values);
     edit(state);
@@ -780,5 +787,50 @@ describe("stale edit page", () => {
     const row = await ProductModel.findById(productId).lean();
     expect(row?.name).toBe("Renamed");
     expect(row?.status).toBe("published");
+  });
+});
+
+const CALLS: [string, () => Promise<unknown>][] = [
+  [
+    "create",
+    () => createDraftAction({ name: "Arc", mainCategory: spotLights }),
+  ],
+  ["update", () => updateProductAction(new ObjectId().toHexString(), {}, null)],
+  ["publish", () => publishProductAction(new ObjectId().toHexString(), null)],
+  [
+    "unpublish",
+    () => unpublishProductAction(new ObjectId().toHexString(), null),
+  ],
+  ["delete", () => deleteProductAction(new ObjectId().toHexString())],
+  ["sign image", () => signProductImageUpload(new ObjectId().toHexString())],
+  [
+    "save images",
+    () =>
+      saveProductImagesAction(
+        { productId: new ObjectId().toHexString(), images: [] },
+        null,
+      ),
+  ],
+];
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(async () => {
+    signedInAs({});
+    const admin: unknown = await getSession();
+    // The services' own re-check from the database sees a customer (e.g.
+    // demoted between the two reads); requireAdmin() still saw the admin.
+    signedInAs({ role: "customer" });
+    getSession.mockResolvedValueOnce(admin);
+  });
+
+  it.each(CALLS)("%s", async (_name, call) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const audits = await AuditLogModel.countDocuments();
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    // Refused by the service's check, not by requireAdmin().
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/actor refused: not_admin$/),
+    );
+    expect(await AuditLogModel.countDocuments()).toBe(audits);
   });
 });

@@ -31,6 +31,8 @@ import { Input } from "@/components/ui/input";
 import { listDatasheets } from "@/lib/admin/datasheets";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../admin-reads";
+
 import { uploaderLabels } from "./uploader-names";
 
 // Static only (ADR 0036): a title never carries data.
@@ -46,9 +48,10 @@ function single(value: string | string[] | undefined): string {
 export default async function AdminDatasheetsPage({
   searchParams,
 }: PageProps<"/admin/datasheets">) {
-  await requireAdmin();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
   const [datasheets, query] = await Promise.all([
-    listDatasheets(),
+    readAsAdmin(() => listDatasheets(actor)),
     searchParams,
   ]);
   const q = single(query.q).trim().slice(0, MAX_QUERY_LENGTH);

@@ -5,7 +5,7 @@
 // → revalidate the returned tags on every branch → redirect last (ADR 0035).
 
 import { refresh } from "next/cache";
-import { redirect } from "next/navigation";
+import { forbidden, redirect } from "next/navigation";
 
 import type {
   ActionData,
@@ -27,6 +27,8 @@ import type { ServiceResult } from "@/lib/admin/write-result";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
 
+import { pageActor } from "../admin-reads";
+
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
  * browser can send anything. The services re-parse it with the same strict
@@ -44,6 +46,8 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
 function failure(
   result: ServiceResult<unknown> & { ok: false },
 ): ActionFailure {
+  // A refused actor is a 403, never a form message (ADR 0073).
+  if (result.denied) forbidden();
   return { ok: false, errors: result.errors, saved: result.tags.length > 0 };
 }
 
@@ -52,7 +56,7 @@ export async function createCategoryAction(
   values: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await createCategory(viewer.user.id, values);
+  const result = await createCategory(await pageActor(viewer), values);
   // Both branches: on an audit failure the category is already saved.
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
@@ -65,7 +69,7 @@ export async function updateCategoryAction(
   values: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await updateCategory(viewer.user.id, id, values);
+  const result = await updateCategory(await pageActor(viewer), id, values);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
   // An edit that changed nothing returns no tags: say so instead of "saved".
@@ -87,7 +91,7 @@ export async function moveCategoryAction(
   direction: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await moveCategory(viewer.user.id, { id, direction });
+  const result = await moveCategory(await pageActor(viewer), { id, direction });
   revalidateCatalogInAction(result.tags);
   // Tags mean something was written, even when the audit step then failed.
   if (result.tags.length > 0) refresh();
@@ -101,7 +105,7 @@ export async function moveCategoryAction(
  */
 export async function deleteCategoryAction(id: unknown): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await deleteCategory(viewer.user.id, id);
+  const result = await deleteCategory(await pageActor(viewer), id);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) {
     // Deleted but not audited: the tree must drop the row anyway.
@@ -120,7 +124,7 @@ export async function signCategoryImageUploadAction(
   input: unknown,
 ): Promise<ActionData<SignedImageUpload>> {
   const viewer = await requireAdmin();
-  const result = await signCategoryImageUpload(viewer.user.id, input);
+  const result = await signCategoryImageUpload(await pageActor(viewer), input);
   revalidateCatalogInAction(result.tags);
   if (!result.ok) return failure(result);
   return { ok: true, data: result.data };
@@ -135,7 +139,7 @@ export async function setCategoryImageAction(
   input: unknown,
 ): Promise<ActionResult> {
   const viewer = await requireAdmin();
-  const result = await setCategoryImage(viewer.user.id, input);
+  const result = await setCategoryImage(await pageActor(viewer), input);
   revalidateCatalogInAction(result.tags);
   if (result.tags.length > 0) refresh();
   if (!result.ok) return failure(result);

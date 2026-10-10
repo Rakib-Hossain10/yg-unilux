@@ -85,6 +85,13 @@ export const setCustomerAccessSchema = z.object({
 });
 export type SetCustomerAccessInput = z.input<typeof setCustomerAccessSchema>;
 
+/**
+ * "End access now": access ends at this instant (downloads lock, sign-in
+ * still works). Only the customer; the time is the server's, never input.
+ */
+export const endCustomerAccessSchema = z.object({ userId: objectIdSchema });
+export type EndCustomerAccessInput = z.input<typeof endCustomerAccessSchema>;
+
 /** Block with a reason (admin-only, never shown to the customer). */
 export const banCustomerSchema = z.object({
   userId: objectIdSchema,

@@ -26,7 +26,7 @@ const sessionFor = (fields: Record<string, unknown>) =>
   getSession.mockResolvedValue({
     session: { id: "s1" },
     user: {
-      id: "u1",
+      id: "64b000000000000000000001",
       role: "admin",
       banned: false,
       banExpires: null,
@@ -73,6 +73,28 @@ describe("GET /api/admin/import/template access", () => {
   it("answers 403 for an admin still on a temporary password", async () => {
     sessionFor({ mustChangePassword: true });
     expect((await GET()).status).toBe(403);
+  });
+
+  it("answers 403 when the services then refuse the actor (ADR 0073)", async () => {
+    // The route's own check sees an admin; the services' re-check from the
+    // database sees a customer (e.g. demoted in between).
+    sessionFor({ role: "customer" });
+    getSession.mockResolvedValueOnce({
+      session: { id: "s1" },
+      user: {
+        id: "64b000000000000000000001",
+        role: "admin",
+        banned: false,
+        banExpires: null,
+        mustChangePassword: false,
+        accessExpiresAt: null,
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = await GET();
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(warn).not.toHaveBeenCalled(); // reads throw; nothing is logged
   });
 });
 

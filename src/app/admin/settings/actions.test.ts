@@ -17,6 +17,9 @@ import {
   saveWhatsappNumberAction,
 } from "./actions";
 
+/* The actor every service gets: the session's id and the request headers. */
+const AS_ADMIN = { id: ADMIN_USER_ID, headers: expect.any(Headers) };
+
 const getSession = vi.hoisted(() => vi.fn());
 const nextCache = vi.hoisted(() => ({
   updateTag: vi.fn(),
@@ -89,7 +92,7 @@ describe("as the admin", () => {
     });
     expect(await saveColumnVisibilityAction(COLUMNS)).toEqual({ ok: true });
     expect(services.saveColumnVisibility).toHaveBeenCalledWith(
-      ADMIN_USER_ID,
+      AS_ADMIN,
       COLUMNS,
     );
     expect(nextCache.updateTag).toHaveBeenCalledWith("products");
@@ -136,7 +139,7 @@ describe("as the admin", () => {
     async (_name, action, service, input) => {
       service.mockResolvedValue({ ok: true, data: {}, tags: [] });
       expect(await action(input)).toEqual({ ok: true });
-      expect(service).toHaveBeenCalledWith(ADMIN_USER_ID, input);
+      expect(service).toHaveBeenCalledWith(AS_ADMIN, input);
       expect(nextCache.updateTag).not.toHaveBeenCalled();
       expect(nextCache.refresh).not.toHaveBeenCalled();
     },
@@ -154,5 +157,31 @@ describe("as the admin", () => {
       errors,
       saved: false,
     });
+  });
+});
+
+/* What a service returns when its own actor check refuses (ADR 0073). */
+const DENIED = {
+  ok: false,
+  errors: { formErrors: ["You are not allowed to do this."], fieldErrors: {} },
+  tags: [],
+  denied: "not_admin",
+} as const;
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(() => getSession.mockResolvedValue(sessionFor()));
+
+  it.each([
+    [
+      "column visibility",
+      "saveColumnVisibility",
+      () => saveColumnVisibilityAction({}),
+    ],
+    ["whatsapp", "saveWhatsappNumber", () => saveWhatsappNumberAction("")],
+    ["email", "saveCompanyEmail", () => saveCompanyEmailAction("")],
+  ] as const)("%s", async (_name, service, call) => {
+    services[service].mockResolvedValue(DENIED);
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    expect(services[service]).toHaveBeenCalledTimes(1);
   });
 });

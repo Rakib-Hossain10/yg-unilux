@@ -7,7 +7,7 @@ import "server-only";
 import type { PipelineStage } from "mongoose";
 import { unstable_cache } from "next/cache";
 
-import { getColumnVisibility } from "@/lib/admin/settings";
+import { getColumnVisibility } from "@/lib/column-visibility";
 import { connectDb } from "@/lib/db";
 import { CATALOG_TAGS } from "@/lib/revalidate";
 import { ProductModel } from "@/models";

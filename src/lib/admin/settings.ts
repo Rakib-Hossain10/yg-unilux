@@ -1,18 +1,22 @@
 // Admin services for settings kept in `siteContent` (ADR 0049): which spec
 // columns are restricted, the WhatsApp number and the company email. Each
 // write audits and returns its cache tags. The caller (a Server Action) has
-// already run requireAdmin() and passes the session's user id as `actorId`.
+// already run requireAdmin() and passes `{ id, headers }`; every service
+// re-checks that actor from the database first (ADR 0073). The public
+// column-visibility reader is src/lib/column-visibility.ts.
 
 import "server-only";
 
 import { type AuditInput } from "@/lib/audit";
 import { connectDb } from "@/lib/db";
+import {
+  getColumnVisibility,
+  readColumnVisibilitySetting,
+} from "@/lib/column-visibility";
 import { CATALOG_TAGS, type CatalogTag } from "@/lib/revalidate";
 import {
   columnVisibilitySchema,
   companyEmailSchema,
-  DEFAULT_COLUMN_VISIBILITY,
-  parseStoredColumnVisibility,
   SETTINGS_KEYS,
   storedEmailSchema,
   storedWhatsappSchema,
@@ -26,8 +30,8 @@ import {
   type SpecKey,
 } from "@/models/spec-columns";
 
+import { assertAdminActor, refuseUnlessAdmin, type AdminActor } from "./actor";
 import {
-  assertActorId,
   auditAndFinish,
   invalidInput,
   unchanged,
@@ -79,16 +83,11 @@ export interface AdminSettings {
   companyEmail: string | null;
 }
 
-/** Column visibility as stored; defaults when never saved; fails closed. */
-export async function getColumnVisibility(): Promise<ColumnVisibility> {
-  const stored = await readSetting(SETTINGS_KEYS.columnVisibility);
-  return stored === undefined
-    ? { ...DEFAULT_COLUMN_VISIBILITY }
-    : parseStoredColumnVisibility(stored);
-}
-
 /** Every setting for the admin form. */
-export async function getAdminSettings(): Promise<AdminSettings> {
+export async function getAdminSettings(
+  actor: AdminActor,
+): Promise<AdminSettings> {
+  await assertAdminActor(actor);
   const [columnVisibility, whatsapp, email] = await Promise.all([
     getColumnVisibility(),
     readSetting(SETTINGS_KEYS.whatsappNumber),
@@ -123,19 +122,16 @@ export interface SaveColumnVisibilityResult {
  * then fails; that failure still returns the tags.
  */
 export async function saveColumnVisibility(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<SaveColumnVisibilityResult>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "settings");
+  if (refused) return refused;
   const parsed = columnVisibilitySchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const next: ColumnVisibility = parsed.data;
 
-  const stored = await readSetting(SETTINGS_KEYS.columnVisibility);
-  const before =
-    stored === undefined
-      ? { ...DEFAULT_COLUMN_VISIBILITY }
-      : parseStoredColumnVisibility(stored);
+  const { stored, visibility: before } = await readColumnVisibilitySetting();
   const newlyRestricted = SPEC_KEYS.filter(
     (key) => before[key] === "public" && next[key] === "restricted",
   );
@@ -161,7 +157,7 @@ export async function saveColumnVisibility(
     console.error(`[admin] column filter cleanup failed: ${kind}`);
     if (changed) {
       // The setting change is saved, so it is audited even though the call fails.
-      await auditAndFinish(columnAudit(actorId, data, next, true), data, []);
+      await auditAndFinish(columnAudit(actor.id, data, next, true), data, []);
     }
     return {
       ok: false,
@@ -176,7 +172,7 @@ export async function saveColumnVisibility(
       : unchanged(data);
 
   return auditAndFinish(
-    columnAudit(actorId, data, next, false),
+    columnAudit(actor.id, data, next, false),
     data,
     COLUMN_TAGS,
   );
@@ -228,10 +224,11 @@ async function clearRestrictedFilters(next: ColumnVisibility): Promise<number> {
  * cached catalog data holds it. The audit meta says only whether it is set.
  */
 export async function saveWhatsappNumber(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ whatsappNumber: string | null }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "settings");
+  if (refused) return refused;
   const parsed = whatsappNumberSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const whatsappNumber = parsed.data;
@@ -244,7 +241,7 @@ export async function saveWhatsappNumber(
   await writeSetting(SETTINGS_KEYS.whatsappNumber, whatsappNumber);
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "settings.whatsapp.update",
       target: { type: "settings", id: SETTINGS_KEYS.whatsappNumber },
       meta: { isSet: whatsappNumber !== null },
@@ -256,10 +253,11 @@ export async function saveWhatsappNumber(
 
 /** Saves the company email ("" clears it). Audit meta: only whether it is set. */
 export async function saveCompanyEmail(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ companyEmail: string | null }>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "settings");
+  if (refused) return refused;
   const parsed = companyEmailSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const companyEmail = parsed.data;
@@ -272,7 +270,7 @@ export async function saveCompanyEmail(
   await writeSetting(SETTINGS_KEYS.companyEmail, companyEmail);
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "settings.email.update",
       target: { type: "settings", id: SETTINGS_KEYS.companyEmail },
       meta: { isSet: companyEmail !== null },

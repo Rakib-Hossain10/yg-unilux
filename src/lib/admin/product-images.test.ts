@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mongoose } from "@/lib/db";
 import { CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
+import { testActor } from "../../../test/helpers/admin-actor";
 import { setupMemoryDb } from "../../../test/helpers/memory-db";
 import { testPublicId } from "../../../test/helpers/public-ids";
 
@@ -15,6 +16,12 @@ import { PUBLISHED_NEEDS_IMAGE, saveProductImages } from "./product-images";
 import { getProductForEdit, PRODUCT_CHANGED } from "./products";
 import { IMAGE_REJECTED } from "./uploads";
 import type { ServiceResult } from "./write-result";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("../../../test/helpers/admin-actor"))
+    .fakeSessionFromDb,
+}));
 
 const cloudinaryMock = vi.hoisted(() => ({
   inspectImage: vi.fn(),
@@ -25,7 +32,7 @@ vi.mock("@/lib/cloudinary", () => cloudinaryMock);
 setupMemoryDb("yg_admin_product_images_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
 
 let product: string;
 let category: mongoose.Types.ObjectId;
@@ -90,7 +97,7 @@ async function storedImages() {
 }
 
 function save(images: unknown[], options = {}) {
-  return saveProductImages(ADMIN, { productId: product, images }, options);
+  return saveProductImages(admin, { productId: product, images }, options);
 }
 
 function errorsOf<T>(result: ServiceResult<T>) {
@@ -164,7 +171,7 @@ describe("saveProductImages", () => {
 
     /* The editor's payload, built from what the edit page loads. */
     async function loadedEditorList() {
-      const loaded = await getProductForEdit(product);
+      const loaded = await getProductForEdit(admin, product);
       if (!loaded) throw new Error("fixture missing");
       return {
         version: loaded.updatedAt,
@@ -382,7 +389,7 @@ describe("saveProductImages", () => {
     ],
     ["a non-array", "nope"],
   ])("refuses %s before touching Cloudinary", async (_label, images) => {
-    const result = await saveProductImages(ADMIN, {
+    const result = await saveProductImages(admin, {
       productId: product,
       images,
     });
@@ -391,7 +398,7 @@ describe("saveProductImages", () => {
   });
 
   it("refuses an unknown product", async () => {
-    const result = await saveProductImages(ADMIN, {
+    const result = await saveProductImages(admin, {
       productId: new ObjectId().toHexString(),
       images: [],
     });

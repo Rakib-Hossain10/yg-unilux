@@ -18,6 +18,8 @@ import type { AccessRequestStatus } from "@/models/access-request";
 import type { ProductStatus } from "@/models/product";
 import type { CaseStatus } from "@/models/whistleblower-case";
 
+import { assertAdminActor, type AdminActor } from "./actor";
+
 /** The numbers shown on the admin dashboard. */
 export interface DashboardCounts {
   products: { total: number; published: number; draft: number };
@@ -72,7 +74,8 @@ const CUSTOMER_ROLE = /(?:^|,)\s*customer\s*(?:,|$)/;
  *   `caseNumber`). Cases are rare; the scan stays inside MongoDB and returns
  *   a number only.
  */
-export async function getCounts(): Promise<DashboardCounts> {
+export async function getCounts(actor: AdminActor): Promise<DashboardCounts> {
+  await assertAdminActor(actor);
   await connectDb();
 
   const [

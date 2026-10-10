@@ -51,6 +51,7 @@ import {
   createCustomerSchema,
   customerDetailSchema,
   customerIdSchema,
+  endCustomerAccessSchema,
   CUSTOMERS_PAGE_SIZE,
   EXPIRING_SOON_DAYS,
   listCustomersSchema,
@@ -911,6 +912,57 @@ export async function setCustomerAccess(
       [],
     );
   });
+}
+
+/**
+ * "End access now": sets `accessExpiresAt` to this instant, so downloads
+ * lock at once (the datasheet route answers its expired redirect) while
+ * sign-in keeps working. Not a ban: sessions, invite and password are left
+ * alone, and no email goes out. The reminder mark is cleared in the same
+ * write, so a later "set access" re-arms the 7-day reminder even for an end
+ * date that was already reminded. Access that has already ended is left as
+ * it is (`alreadyEnded: true`, nothing written or audited), so the recorded
+ * end date never moves later.
+ */
+export async function endCustomerAccess(
+  actor: AdminActor,
+  input: unknown,
+  options: { now?: Date } = {},
+): Promise<ServiceResult<{ accessExpiresAt: Date; alreadyEnded: boolean }>> {
+  const refused = await refuseUnlessAdmin(actor, "customers");
+  if (refused) return refused;
+  const parsed = endCustomerAccessSchema.safeParse(input);
+  if (!parsed.success) return invalidInput(parsed.error);
+  const { userId } = parsed.data;
+  const now = options.now ?? new Date();
+
+  return guarded<{ accessExpiresAt: Date; alreadyEnded: boolean }>(
+    "access not ended",
+    async () => {
+      const doc = await findCustomer(userId);
+      if (!doc) return formError(NOT_FOUND);
+      const current = doc.accessExpiresAt ?? null;
+      if (current !== null && current.getTime() <= now.getTime()) {
+        return unchanged({ accessExpiresAt: current, alreadyEnded: true });
+      }
+      const context = await getAuthContext();
+      await updateAccountFields(context, userId, {
+        accessExpiresAt: now,
+        expiryReminderFor: null,
+      });
+      return auditAndFinish(
+        {
+          actorId: actor.id,
+          action: "customer.access.end",
+          target: { type: "customer", id: userId },
+          // Whether it had an end before; never dates or emails.
+          meta: { hadExpiry: current !== null },
+        },
+        { accessExpiresAt: now, alreadyEnded: false },
+        [],
+      );
+    },
+  );
 }
 
 /**

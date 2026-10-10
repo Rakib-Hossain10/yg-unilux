@@ -9,12 +9,15 @@ import { ContactSettingsForm } from "@/components/admin/settings/contact-setting
 import { getAdminSettings } from "@/lib/admin/settings";
 import { requireAdmin } from "@/lib/permissions";
 
+import { pageActor, readAsAdmin } from "../admin-reads";
+
 // Static only (ADR 0036): a title never carries data.
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function AdminSettingsPage() {
-  await requireAdmin();
-  const settings = await getAdminSettings();
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
+  const settings = await readAsAdmin(() => getAdminSettings(actor));
 
   return (
     <div className="flex flex-col gap-8">

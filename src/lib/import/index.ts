@@ -5,9 +5,9 @@
 
 import "server-only";
 
+import { refuseUnlessAdmin, type AdminActor } from "@/lib/admin/actor";
 import { tagsFor } from "@/lib/admin/products";
 import {
-  assertActorId,
   auditAndFinish,
   fieldError,
   formError,
@@ -16,17 +16,21 @@ import {
   type ServiceResult,
 } from "@/lib/admin/write-result";
 import { uniqueTags } from "@/lib/revalidate";
+import { XLSX_MIME_TYPE } from "@/lib/constants";
 import {
   commitImportInputSchema,
   finishImportInputSchema,
+  presignImportInputSchema,
   importFileInputSchema,
   importIdFromKey,
 } from "@/lib/schemas/import";
 import {
   deleteImportUpload,
   getImportBytes,
+  presignImportUpload,
   StorageConditionError,
   type ImportBytes,
+  type ImportUploadTicket,
 } from "@/lib/storage";
 
 import { commitPlanBatch, type CommitBatchResult } from "./commit";
@@ -66,14 +70,38 @@ export const STAGED_FILE_MESSAGES: Record<
 };
 
 /**
+ * Step 1: `{fileName, size, contentType}` → a presigned PUT to a
+ * server-chosen `imports/<uuid>.xlsx`, always signed as the .xlsx type and
+ * the exact size. Nothing is written, so there are no tags.
+ */
+export async function presignImport(
+  actor: AdminActor,
+  input: unknown,
+): Promise<ServiceResult<ImportUploadTicket>> {
+  const refused = await refuseUnlessAdmin(actor, "import");
+  if (refused) return refused;
+  const parsed = presignImportInputSchema.safeParse(input);
+  if (!parsed.success) return invalidInput(parsed.error);
+  return unchanged(
+    await presignImportUpload({
+      contentType: XLSX_MIME_TYPE,
+      contentLength: parsed.data.size,
+    }),
+  );
+}
+
+/**
  * Plans the staged import file `input.key` with `input.defaultCategoryId`
  * as the default main category. The caller (the Server Action) has already
  * run `requireAdmin()`. Returns `unchanged(...)`: no tags, nothing to
  * revalidate, because nothing was written.
  */
 export async function previewImport(
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<ImportPreview>> {
+  const refused = await refuseUnlessAdmin(actor, "import");
+  if (refused) return refused;
   const parsed = importFileInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { key, defaultCategoryId } = parsed.data;
@@ -129,10 +157,11 @@ const NO_SUCH_BATCH = "There is no such batch. Preview the file again.";
  * products plan as unchanged and are skipped.
  */
 export async function commitImportBatch(
-  actorId: string,
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<CommitBatchResult>> {
-  assertActorId(actorId);
+  const refused = await refuseUnlessAdmin(actor, "import");
+  if (refused) return refused;
   const parsed = commitImportInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   const { key, defaultCategoryId, etag, ...commit } = parsed.data;
@@ -182,7 +211,7 @@ export async function commitImportBatch(
   const { summary } = result;
   return auditAndFinish(
     {
-      actorId,
+      actorId: actor.id,
       action: "import.commit",
       // The key passed importKeySchema, so it has an id.
       target: { type: "import", id: importIdFromKey(key) as string },
@@ -210,8 +239,11 @@ export async function commitImportBatch(
  * sweep removes it anyway), so it reports `deleted: false` instead.
  */
 export async function finishImport(
+  actor: AdminActor,
   input: unknown,
 ): Promise<ServiceResult<{ deleted: boolean }>> {
+  const refused = await refuseUnlessAdmin(actor, "import");
+  if (refused) return refused;
   const parsed = finishImportInputSchema.safeParse(input);
   if (!parsed.success) return invalidInput(parsed.error);
   try {

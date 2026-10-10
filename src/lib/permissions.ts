@@ -191,6 +191,14 @@ function jsonError(status: 401 | 403, message: string): Response {
   );
 }
 
+/**
+ * The admin route's 403 (same body as requireAdminForRoute's), for when an
+ * admin service then refuses the actor (AdminActorError, ADR 0073).
+ */
+export function adminRouteForbidden(): Response {
+  return jsonError(403, "Not allowed.");
+}
+
 export type AdminRouteCheck =
   { ok: true; viewer: Viewer } | { ok: false; response: Response };
 

@@ -39,14 +39,20 @@ import {
   type SpecVisibility,
 } from "@/models/spec-columns";
 
+import { testActor } from "./helpers/admin-actor";
 import { setupMemoryDb } from "./helpers/memory-db";
 import { createNextCacheHarness, nextTick } from "./helpers/next-cache-harness";
 import { testPublicId } from "./helpers/public-ids";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("./helpers/admin-actor")).fakeSessionFromDb,
+}));
+
 setupMemoryDb("yg_catalog_gate_a_cache");
 
 const harness = createNextCacheHarness();
-const ACTOR = new Types.ObjectId().toHexString();
+const admin = testActor();
 
 const token = (key: SpecKey) => `QA-${key}-VALUE`;
 const ALL_SPECS: SpecValues = Object.fromEntries(
@@ -321,7 +327,7 @@ describe("visibility changes never serve stale restricted-ness (real cache)", ()
       await setVisibilityRaw(every("public"));
       const before = await getPublicProduct(SLUG);
       expect(leaks(before, key)).toBe(true);
-      const result = await saveColumnVisibility(ACTOR, {
+      const result = await saveColumnVisibility(admin, {
         ...every("public"),
         [key]: "restricted",
       });
@@ -429,7 +435,7 @@ describe("visibility changes never serve stale restricted-ness (real cache)", ()
     const filling = getPublicProduct(SLUG);
     await atQuery;
     // ...the admin restricts Wattage and the action expires the tags...
-    const result = await saveColumnVisibility(ACTOR, {
+    const result = await saveColumnVisibility(admin, {
       ...every("public"),
       wattage: "restricted",
     });
@@ -452,7 +458,7 @@ describe("visibility changes never serve stale restricted-ness (real cache)", ()
 describe("real admin services expire what the catalog readers depend on", () => {
   it("area rename (updateArea) refreshes the product's Applications row", async () => {
     await getPublicProduct(SLUG);
-    const result = await updateArea(ACTOR, ids.area.toHexString(), {
+    const result = await updateArea(admin, ids.area.toHexString(), {
       name: "Workspace",
       slug: "",
       bwImage: "",
@@ -481,7 +487,7 @@ describe("real admin services expire what the catalog readers depend on", () => 
       getBreadcrumb({ mainCategoryId: ids.sub.toHexString() });
     expect((await crumb()).map((c) => c.name)).toEqual(["Main", "Sub"]);
     try {
-      const result = await updateCategory(ACTOR, ids.sub.toHexString(), {
+      const result = await updateCategory(admin, ids.sub.toHexString(), {
         name: "Sub",
         slug: "",
         parent: other.toHexString(),

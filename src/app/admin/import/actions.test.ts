@@ -1,6 +1,6 @@
 // Behavioural tests for the import Server Actions (T9): a visitor, a customer,
 // a banned admin and an admin on a temporary password reach no service and
-// no storage call; the admin's calls pass the session's id and the input on,
+// no storage call; the admin's calls pass the session's actor and the input on,
 // revalidate on both branches, and answer with shaped data only.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -50,8 +50,12 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/cache", () => nextCache);
 vi.mock("@/lib/storage", () => storage);
-vi.mock("@/lib/import", () => ({
+vi.mock("@/lib/import", async (importOriginal) => ({
   ...services,
+  // The real presign service (its Zod check and actor check), over the
+  // mocked storage above.
+  presignImport: (await importOriginal<typeof import("@/lib/import")>())
+    .presignImport,
   PREVIEW_AGAIN: "PREVIEW AGAIN",
   FILE_CHANGED: "FILE CHANGED",
   STAGED_FILE_MESSAGES: { not_found: "STAGED GONE" },
@@ -59,6 +63,9 @@ vi.mock("@/lib/import", () => ({
 
 const { ObjectId } = mongoose.Types;
 const ADMIN_ID = new ObjectId().toHexString();
+
+/* The actor every service gets: the session's id and the request headers. */
+const AS_ADMIN = { id: ADMIN_ID, headers: expect.any(Headers) };
 const CATEGORY_ID = new ObjectId().toHexString();
 const KEY = "imports/0f8fad5b-d9cb-469f-a165-70867728950e.xlsx";
 const HASH = "a".repeat(64);
@@ -235,7 +242,7 @@ describe("as the admin", () => {
       },
     });
     const result = await previewImportAction(PREVIEW);
-    expect(services.previewImport).toHaveBeenCalledWith(PREVIEW);
+    expect(services.previewImport).toHaveBeenCalledWith(AS_ADMIN, PREVIEW);
     expect(result).toMatchObject({
       ok: true,
       data: {
@@ -291,7 +298,7 @@ describe("as the admin", () => {
       tags: ["products", PRODUCT_TAG],
     });
     const result = await commitImportBatchAction(COMMIT);
-    expect(services.commitImportBatch).toHaveBeenCalledWith(ADMIN_ID, COMMIT);
+    expect(services.commitImportBatch).toHaveBeenCalledWith(AS_ADMIN, COMMIT);
     expect(nextCache.updateTag).toHaveBeenCalledWith("products");
     expect(nextCache.updateTag).toHaveBeenCalledWith(PRODUCT_TAG);
     expect(result).toEqual({ ok: true, data });
@@ -354,6 +361,46 @@ describe("as the admin", () => {
       ok: true,
       data: { deleted: true },
     });
-    expect(services.finishImport).toHaveBeenCalledWith({ key: KEY });
+    expect(services.finishImport).toHaveBeenCalledWith(AS_ADMIN, { key: KEY });
+  });
+});
+
+/* What a service returns when its own actor check refuses (ADR 0073). */
+const DENIED = {
+  ok: false,
+  errors: { formErrors: ["You are not allowed to do this."], fieldErrors: {} },
+  tags: [],
+  denied: "not_admin",
+} as const;
+
+describe("a service that refuses the actor answers 403 (ADR 0073)", () => {
+  beforeEach(() => signedInAs({}));
+
+  it.each([
+    ["preview", "previewImport", () => previewImportAction(PREVIEW)],
+    ["commit", "commitImportBatch", () => commitImportBatchAction(COMMIT)],
+    ["finish", "finishImport", () => finishImportAction({ key: KEY })],
+  ] as const)("%s", async (_name, service, call) => {
+    services[service].mockResolvedValue(DENIED);
+    await expect(call()).rejects.toThrow("FORBIDDEN");
+    expect(services[service]).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("presign: the real service refuses the actor → 403 (ADR 0073)", () => {
+  it("answers 403 and signs nothing", async () => {
+    signedInAs({});
+    const admin: unknown = await getSession();
+    // requireAdmin() sees the admin; the service's re-check sees a customer.
+    signedInAs({ role: "customer" });
+    getSession.mockResolvedValueOnce(admin);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(presignImportUploadAction(PRESIGN)).rejects.toThrow(
+      "FORBIDDEN",
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/actor refused: not_admin$/),
+    );
+    expect(storage.presignImportUpload).not.toHaveBeenCalled();
   });
 });

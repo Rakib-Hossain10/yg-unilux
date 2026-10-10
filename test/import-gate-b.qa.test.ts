@@ -34,6 +34,7 @@ import * as storage from "@/lib/storage";
 import { AreaModel, CategoryModel, ProductModel } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { testActor } from "./helpers/admin-actor";
 import { fixturePictures } from "./fixtures/import/build";
 import {
   fillTemplate,
@@ -50,6 +51,11 @@ import {
   previewImport,
   type ImportPreview,
 } from "@/lib/import";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("./helpers/admin-actor")).fakeSessionFromDb,
+}));
 
 vi.mock("@/lib/storage", () => {
   class StorageConditionError extends Error {
@@ -83,7 +89,7 @@ const { ObjectId } = mongoose.Types;
 const IMPORT_ID = "00000000-0000-4000-8000-0000000000b1";
 const KEY = `imports/${IMPORT_ID}.xlsx`;
 const ETAG = '"etag-b"';
-const ACTOR = new ObjectId().toHexString();
+const admin = testActor();
 
 /* Restricted by default (CLAUDE.md): Chip Type and Driver. The golden fill
    uses these values for them. */
@@ -194,7 +200,7 @@ function stageFile(bytes: Uint8Array): void {
 type PlanPreview = Extract<ImportPreview, { kind: "plan" }>;
 
 async function preview(defaultCategoryId = defaultCategory) {
-  const result = await previewImport({ key: KEY, defaultCategoryId });
+  const result = await previewImport(admin, { key: KEY, defaultCategoryId });
   if (!result.ok || result.data.kind !== "plan") {
     throw new Error(JSON.stringify(result));
   }
@@ -218,7 +224,7 @@ function commitInput(
 }
 
 async function commitOk(p: PlanPreview, batch = 0) {
-  const result = await commitImportBatch(ACTOR, commitInput(p, batch));
+  const result = await commitImportBatch(admin, commitInput(p, batch));
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   return result;
 }
@@ -253,7 +259,7 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
     const p = await preview();
     const input = commitInput(p);
     const hashes = [...(input.entryHashes as string[])].reverse();
-    const result = await commitImportBatch(ACTOR, {
+    const result = await commitImportBatch(admin, {
       ...input,
       entryHashes: hashes,
     });
@@ -267,7 +273,7 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
 
   it("refuses the preview's hashes under another default category", async () => {
     const p = await preview();
-    const result = await commitImportBatch(ACTOR, {
+    const result = await commitImportBatch(admin, {
       ...commitInput(p),
       defaultCategoryId: otherCategory,
     });
@@ -283,7 +289,7 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
     const p = await preview();
     const input = commitInput(p);
     const hashes = input.entryHashes as string[];
-    const result = await commitImportBatch(ACTOR, {
+    const result = await commitImportBatch(admin, {
       ...input,
       entryHashes: [...hashes, hashes[0]],
     });
@@ -319,7 +325,7 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
     const before = await snapshot();
     const auditsBefore = await AuditLogModel.countDocuments();
 
-    const result = await commitImportBatch(ACTOR, commitInput(p));
+    const result = await commitImportBatch(admin, commitInput(p));
     expect(result).toMatchObject({
       ok: false,
       errors: { formErrors: [PREVIEW_AGAIN] },
@@ -338,7 +344,7 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
       { productNo: 77 },
       { $set: { family: "Beam (admin)" } },
     );
-    const result = await commitImportBatch(ACTOR, commitInput(p));
+    const result = await commitImportBatch(admin, commitInput(p));
     expect(result).toMatchObject({
       ok: false,
       errors: { formErrors: [PREVIEW_AGAIN] },
@@ -368,7 +374,7 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
       "blocked",
     );
     await ProductModel.deleteOne({ _id: b!._id });
-    const result = await commitImportBatch(ACTOR, commitInput(p));
+    const result = await commitImportBatch(admin, commitInput(p));
     expect(result).toMatchObject({
       ok: false,
       errors: { formErrors: [PREVIEW_AGAIN] },
@@ -391,15 +397,15 @@ describe("gate B: hash protocol (forged, replayed, stale)", () => {
   it("documents: etag null skips the If-Match pin (the sheet hash still binds the content)", async () => {
     const p = await preview();
     vi.mocked(storage.getImportBytes).mockClear();
-    await commitImportBatch(ACTOR, { ...commitInput(p), etag: null });
+    await commitImportBatch(admin, { ...commitInput(p), etag: null });
     expect(storage.getImportBytes).toHaveBeenCalledWith(KEY, {});
   });
 
   it("two concurrent commits of one batch create each product once", async () => {
     const p = await preview();
     const [first, second] = await Promise.all([
-      commitImportBatch(ACTOR, commitInput(p)),
-      commitImportBatch(ACTOR, commitInput(p)),
+      commitImportBatch(admin, commitInput(p)),
+      commitImportBatch(admin, commitInput(p)),
     ]);
     // The loser may be refused ("preview again"): the hash check is racy by design.
     expect(first.ok || second.ok).toBe(true);
@@ -838,7 +844,7 @@ describe("gate B: plan size caps (DoS)", () => {
   it("M-1: the preview refuses a file with more products than a commit accepts", async () => {
     stageFile(big);
     const started = Date.now();
-    const result = await previewImport({
+    const result = await previewImport(admin, {
       key: KEY,
       defaultCategoryId: defaultCategory,
     });

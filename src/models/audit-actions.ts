@@ -42,6 +42,8 @@ export const ADMIN_AUDIT_ACTIONS = [
   "customer.create",
   "customer.update",
   "customer.access.set",
+  // "End access now" (access ends at once; not a ban).
+  "customer.access.end",
   "customer.ban",
   "customer.unban",
   "customer.password.link",

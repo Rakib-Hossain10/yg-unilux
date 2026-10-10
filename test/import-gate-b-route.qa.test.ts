@@ -21,7 +21,7 @@ vi.mock("next/server", () => ({ connection: async () => undefined }));
 setupMemoryDb("yg_import_gate_b_route_qa");
 
 const admin = {
-  id: "u1",
+  id: "64b000000000000000000001",
   role: "admin",
   banned: false,
   banExpires: null,

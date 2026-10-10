@@ -56,6 +56,7 @@ import {
   type SpecVisibility,
 } from "@/models/spec-columns";
 
+import { testActor } from "./helpers/admin-actor";
 import { setupMemoryDb } from "./helpers/memory-db";
 import {
   type ImportEdge,
@@ -68,10 +69,15 @@ import {
 import { createNextCacheHarness, nextTick } from "./helpers/next-cache-harness";
 import { testPublicId } from "./helpers/public-ids";
 
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("./helpers/admin-actor")).fakeSessionFromDb,
+}));
+
 setupMemoryDb("yg_listing_gate_b_qa");
 
 const harness = createNextCacheHarness();
-const ACTOR = new Types.ObjectId().toHexString();
+const admin = testActor();
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -338,7 +344,7 @@ describe("cache expiry after admin writes (real services + revalidation helper)"
         .find((c) => c.id === ids.main.toHexString())
         ?.children.map((c) => c.href),
     ).toEqual(["/products/gbmain/gbsub"]);
-    const result = await updateCategory(ACTOR, ids.sub.toHexString(), {
+    const result = await updateCategory(admin, ids.sub.toHexString(), {
       name: "Gbsub renamed",
       slug: "gbsub-renamed",
       parent: ids.main.toHexString(),
@@ -361,7 +367,7 @@ describe("cache expiry after admin writes (real services + revalidation helper)"
       expect(paths).toContain("/products/gbmain/gbsub-renamed");
       expect(paths).not.toContain("/products/gbmain/gbsub");
     } finally {
-      const back = await updateCategory(ACTOR, ids.sub.toHexString(), {
+      const back = await updateCategory(admin, ids.sub.toHexString(), {
         name: "Gbsub",
         slug: "gbsub",
         parent: ids.main.toHexString(),
@@ -374,7 +380,7 @@ describe("cache expiry after admin writes (real services + revalidation helper)"
   it("area update: menu areas and sitemap follow", async () => {
     await loadSiteMenu();
     await sitemapPaths();
-    const result = await updateArea(ACTOR, ids.area.toHexString(), {
+    const result = await updateArea(admin, ids.area.toHexString(), {
       name: "Gbatrium",
       slug: "gbatrium",
     });
@@ -388,7 +394,7 @@ describe("cache expiry after admin writes (real services + revalidation helper)"
     } finally {
       expect(
         (
-          await updateArea(ACTOR, ids.area.toHexString(), {
+          await updateArea(admin, ids.area.toHexString(), {
             name: "Gbhall",
             slug: "gbhall",
           })
@@ -401,7 +407,7 @@ describe("cache expiry after admin writes (real services + revalidation helper)"
     const before = await read(ALL_SCOPE);
     expect(before.result.total).toBe(3);
     expect(JSON.stringify(await loadSiteMenu())).toContain("Gbsolo");
-    const down = await unpublishProduct(ACTOR, ids.solo.toHexString());
+    const down = await unpublishProduct(admin, ids.solo.toHexString());
     expect(down.ok, JSON.stringify(down)).toBe(true);
     try {
       await expire(down.tags);
@@ -415,7 +421,7 @@ describe("cache expiry after admin writes (real services + revalidation helper)"
       expect(JSON.stringify(await loadSiteMenu())).not.toContain("Gbsolo");
       expect(await sitemapPaths()).not.toContain("/products/gbsolo");
     } finally {
-      const up = await publishProduct(ACTOR, ids.solo.toHexString());
+      const up = await publishProduct(admin, ids.solo.toHexString());
       expect(up.ok, JSON.stringify(up)).toBe(true);
       await expire(up.tags);
     }
@@ -504,7 +510,7 @@ describe("facets follow restricted <-> public through saveColumnVisibility", () 
           ?.options.map((o) => o.value) ?? [];
       expect(await offered(), key).toContain(value);
 
-      const down = await saveColumnVisibility(ACTOR, {
+      const down = await saveColumnVisibility(admin, {
         ...DEFAULTS,
         [key]: "restricted",
       });
@@ -522,7 +528,7 @@ describe("facets follow restricted <-> public through saveColumnVisibility", () 
           { $set: { filters: doc.filters } },
         );
       }
-      const up = await saveColumnVisibility(ACTOR, DEFAULTS);
+      const up = await saveColumnVisibility(admin, DEFAULTS);
       expect(up.ok, key).toBe(true);
       await expire(up.tags);
       expect(await offered(), key).toContain(value);

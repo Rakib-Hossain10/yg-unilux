@@ -2,15 +2,17 @@
 // generated per download from the live category tree and areas so the
 // dropdowns always match the admin's data. Admin only; never cached.
 
+import { headers } from "next/headers";
 import { connection } from "next/server";
 
+import { AdminActorError, type AdminActor } from "@/lib/admin/actor";
 import { listAreas } from "@/lib/admin/areas";
 import {
   listCategoryTree,
   type CategoryTreeNode,
 } from "@/lib/admin/categories";
 import { buildImportTemplate } from "@/lib/import/template";
-import { requireAdminForRoute } from "@/lib/permissions";
+import { adminRouteForbidden, requireAdminForRoute } from "@/lib/permissions";
 
 // exceljs and the MongoDB driver need Node APIs.
 export const runtime = "nodejs";
@@ -34,7 +36,22 @@ export async function GET(): Promise<Response> {
   const check = await requireAdminForRoute();
   if (!check.ok) return check.response;
 
-  const [tree, areas] = await Promise.all([listCategoryTree(), listAreas()]);
+  // The services re-check this actor from the database (ADR 0073).
+  const actor: AdminActor = {
+    id: check.viewer.user.id,
+    headers: await headers(),
+  };
+  let tree: CategoryTreeNode[];
+  let areas: Awaited<ReturnType<typeof listAreas>>;
+  try {
+    [tree, areas] = await Promise.all([
+      listCategoryTree(actor),
+      listAreas(actor),
+    ]);
+  } catch (error) {
+    if (error instanceof AdminActorError) return adminRouteForbidden();
+    throw error;
+  }
   const bytes = await buildImportTemplate({
     categories: flatten(tree),
     areas,

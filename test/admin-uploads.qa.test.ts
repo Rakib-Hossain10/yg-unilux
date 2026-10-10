@@ -53,8 +53,14 @@ import {
 } from "@/models";
 import { AuditLogModel } from "@/models/audit-log";
 
+import { testActor } from "./helpers/admin-actor";
 import { setupMemoryDb } from "./helpers/memory-db";
 import { testPublicId, testUuid } from "./helpers/public-ids";
+
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  getSessionFromDb: (await import("./helpers/admin-actor")).fakeSessionFromDb,
+}));
 
 /* A Map-backed bucket; `onDelete` lets a test run a rival call mid-delete. */
 const bucket = vi.hoisted(() => ({
@@ -107,7 +113,8 @@ vi.mock("@/lib/storage", () => ({
 setupMemoryDb("yg_admin_uploads_qa_test");
 
 const { ObjectId } = mongoose.Types;
-const ADMIN = new ObjectId().toHexString();
+const admin = testActor();
+const ADMIN = admin.id;
 const SECRET = "Qa_Gate_C_secret-9876";
 const API_KEY = "123456789012345";
 
@@ -258,7 +265,7 @@ describe("signCloudinaryUpload", () => {
   it("signs a fresh id in the owner's folder with an independently computed SHA-1", async () => {
     const product = await makeProduct("Signed");
     const id = product._id.toHexString();
-    const result = await signCloudinaryUpload(ADMIN, { target: "product", id });
+    const result = await signCloudinaryUpload(admin, { target: "product", id });
     if (!result.ok) throw new Error("expected ok");
     const { fields, publicId, uploadUrl } = result.data;
 
@@ -302,8 +309,8 @@ describe("signCloudinaryUpload", () => {
   it("never reuses an id, and writes nothing", async () => {
     const product = await makeProduct("Twice");
     const id = product._id.toHexString();
-    const a = await signCloudinaryUpload(ADMIN, { target: "product", id });
-    const b = await signCloudinaryUpload(ADMIN, { target: "product", id });
+    const a = await signCloudinaryUpload(admin, { target: "product", id });
+    const b = await signCloudinaryUpload(admin, { target: "product", id });
     if (!a.ok || !b.ok) throw new Error("expected ok");
     expect(a.data.publicId).not.toBe(b.data.publicId);
     expect(await AuditLogModel.countDocuments()).toBe(0);
@@ -325,7 +332,7 @@ describe("signCloudinaryUpload", () => {
       "product",
     ];
     for (const input of cases) {
-      const result = await signCloudinaryUpload(ADMIN, input);
+      const result = await signCloudinaryUpload(admin, input);
       expect(result.ok).toBe(false);
       expect(result.tags).toEqual([]);
     }
@@ -334,7 +341,10 @@ describe("signCloudinaryUpload", () => {
 
   it("refuses an empty actor id (no unauthenticated service call)", async () => {
     await expect(
-      signCloudinaryUpload("", { target: "product", id: "a".repeat(24) }),
+      signCloudinaryUpload(
+        { id: "", headers: new Headers() },
+        { target: "product", id: "a".repeat(24) },
+      ),
     ).rejects.toThrow();
   });
 });
@@ -519,7 +529,7 @@ describe("saveProductImages", () => {
       testPublicId(2, mineId, "area"),
       testPublicId(3, new ObjectId().toHexString()),
     ]) {
-      const result = await saveProductImages(ADMIN, {
+      const result = await saveProductImages(admin, {
         productId: mineId,
         images: [{ publicId, alt: "x", kind: "gallery" }],
       });
@@ -547,7 +557,7 @@ describe("saveProductImages", () => {
       .spyOn(cloudinary.uploader, "destroy")
       .mockResolvedValue({ result: "ok" } as never);
 
-    const result = await saveProductImages(ADMIN, {
+    const result = await saveProductImages(admin, {
       productId: id,
       images: [
         { publicId: good, alt: "ok", kind: "gallery" },
@@ -567,7 +577,7 @@ describe("saveProductImages", () => {
     const id = product._id.toHexString();
     const added = testPublicId(1, id);
     vi.spyOn(cloudinary.api, "resource").mockResolvedValue(okImage as never);
-    const result = await saveProductImages(ADMIN, {
+    const result = await saveProductImages(admin, {
       productId: id,
       images: [{ publicId: added, alt: "SECRET-ALT-TEXT", kind: "gallery" }],
     });
@@ -589,7 +599,7 @@ describe("saveProductImages", () => {
     );
     vi.spyOn(console, "error").mockImplementation(() => {});
     const destroy = vi.spyOn(cloudinary.uploader, "destroy");
-    const result = await saveProductImages(ADMIN, {
+    const result = await saveProductImages(admin, {
       productId: id,
       images: [{ publicId: testPublicId(1, id), alt: "x", kind: "gallery" }],
     });
@@ -616,11 +626,11 @@ describe("saveProductImages", () => {
       [{ ...one, publicId: { $ne: null } }],
       [{ ...one, extra: true }],
     ]) {
-      const result = await saveProductImages(ADMIN, { productId: id, images });
+      const result = await saveProductImages(admin, { productId: id, images });
       expect(result.ok).toBe(false);
     }
     expect(
-      (await saveProductImages(ADMIN, { productId: { $ne: null }, images: [] }))
+      (await saveProductImages(admin, { productId: { $ne: null }, images: [] }))
         .ok,
     ).toBe(false);
     expect(lookup).not.toHaveBeenCalled();
@@ -632,11 +642,11 @@ describe("mass assignment through the product form", () => {
     const stored = testPublicId(0, new ObjectId().toHexString());
     const product = await makeProduct("Mass", [stored]);
     const id = product._id.toHexString();
-    const loaded = await getProductForEdit(id);
+    const loaded = await getProductForEdit(admin, id);
     if (!loaded) throw new Error("fixture");
     const base = loaded.values as Record<string, unknown>;
 
-    const forged = await updateProduct(ADMIN, id, {
+    const forged = await updateProduct(admin, id, {
       ...base,
       images: [
         { publicId: testPublicId(5), alt: "x", order: 0, kind: "gallery" },
@@ -644,14 +654,14 @@ describe("mass assignment through the product form", () => {
     });
     expect(forged.ok).toBe(false);
 
-    const ghost = await updateProduct(ADMIN, id, {
+    const ghost = await updateProduct(admin, id, {
       ...base,
       datasheetId: new ObjectId().toHexString(),
     });
     expect(ghost).toMatchObject({ ok: false });
     expect(JSON.stringify(ghost)).toContain("datasheetId");
 
-    const operator = await updateProduct(ADMIN, id, {
+    const operator = await updateProduct(admin, id, {
       ...base,
       datasheetId: { $ne: null },
     });
@@ -685,7 +695,7 @@ describe("area image", () => {
     });
     const areaId = area._id.toHexString();
 
-    const created = await createArea(ADMIN, {
+    const created = await createArea(admin, {
       name: "Sneaky",
       slug: "",
       bwImage: testPublicId(1, areaId, "area"),
@@ -693,7 +703,7 @@ describe("area image", () => {
     expect(created.ok).toBe(false);
     expect(await AreaModel.countDocuments()).toBe(2);
 
-    const viaUpdate = await updateArea(ADMIN, areaId, {
+    const viaUpdate = await updateArea(admin, areaId, {
       name: "Mine",
       slug: "mine",
       bwImage: testPublicId(2, areaId, "area"),
@@ -704,7 +714,7 @@ describe("area image", () => {
       testPublicId(3, other._id.toHexString(), "area"),
       testPublicId(4, areaId, "product"),
     ]) {
-      const result = await setAreaImage(ADMIN, { areaId, publicId });
+      const result = await setAreaImage(admin, { areaId, publicId });
       expect(result).toMatchObject({ ok: false, tags: [] });
     }
     expect(lookup).not.toHaveBeenCalled();
@@ -726,14 +736,14 @@ describe("area image", () => {
     const first = testPublicId(1, areaId, "area");
     const second = testPublicId(2, areaId, "area");
 
-    expect((await setAreaImage(ADMIN, { areaId, publicId: first })).ok).toBe(
+    expect((await setAreaImage(admin, { areaId, publicId: first })).ok).toBe(
       true,
     );
-    expect((await setAreaImage(ADMIN, { areaId, publicId: second })).ok).toBe(
+    expect((await setAreaImage(admin, { areaId, publicId: second })).ok).toBe(
       true,
     );
     expect((await AreaModel.findById(areaId).lean())?.bwImage).toBe(second);
-    expect((await setAreaImage(ADMIN, { areaId, publicId: null })).ok).toBe(
+    expect((await setAreaImage(admin, { areaId, publicId: null })).ok).toBe(
       true,
     );
     expect((await AreaModel.findById(areaId).lean())?.bwImage).toBeUndefined();
@@ -761,7 +771,7 @@ describe("presign", () => {
   it("only ever signs an incoming/ key, a fresh one per call, and refuses bad input without touching R2", async () => {
     const keys = new Set<string>();
     for (let n = 0; n < 5; n++) {
-      const result = await presignDatasheetUpload(ADMIN, {
+      const result = await presignDatasheetUpload(admin, {
         fileName: "a.xlsx",
         size: 10,
       });
@@ -791,7 +801,7 @@ describe("presign", () => {
       null,
     ];
     for (const input of bad) {
-      expect((await presignDatasheetUpload(ADMIN, input)).ok).toBe(false);
+      expect((await presignDatasheetUpload(admin, input)).ok).toBe(false);
     }
     expect(bucket.calls).toEqual([]);
   });
@@ -808,7 +818,7 @@ describe("finalize: forged keys and size lies", () => {
       `${INCOMING_A}\n`,
     ];
     for (const incomingKey of forged) {
-      const result = await finalizeDatasheet(ADMIN, {
+      const result = await finalizeDatasheet(admin, {
         mode: "new",
         incomingKey,
         fileName: "a.xlsx",
@@ -822,7 +832,7 @@ describe("finalize: forged keys and size lies", () => {
 
   it("a replace aimed at a missing or malformed datasheet id deletes the upload and writes nothing", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
-    const ghost = await finalizeDatasheet(ADMIN, {
+    const ghost = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: new ObjectId().toHexString(),
       incomingKey: INCOMING_A,
@@ -833,7 +843,7 @@ describe("finalize: forged keys and size lies", () => {
     expect(bucket.calls.some((c) => c.startsWith("copy:"))).toBe(false);
 
     bucket.objects.set(INCOMING_B, await workbook());
-    const operator = await finalizeDatasheet(ADMIN, {
+    const operator = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: { $ne: null },
       incomingKey: INCOMING_B,
@@ -846,7 +856,7 @@ describe("finalize: forged keys and size lies", () => {
 
   it("does not read the body when HEAD already shows more than 10 MB, and cleans up", async () => {
     bucket.objects.set(INCOMING_A, new Uint8Array(MAX_DATASHEET_BYTES + 1));
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "big.xlsx",
@@ -864,7 +874,7 @@ describe("finalize: forged keys and size lies", () => {
     vi.mocked(storage.getObjectBytes).mockResolvedValueOnce(
       new Uint8Array(MAX_DATASHEET_BYTES + 1).fill(0x50),
     );
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "grew.xlsx",
@@ -884,7 +894,7 @@ describe("finalize: forged keys and size lies", () => {
     "%s is refused: nothing copied, nothing stored, upload removed",
     async (_n, bytes) => {
       bucket.objects.set(INCOMING_A, bytes);
-      const result = await finalizeDatasheet(ADMIN, {
+      const result = await finalizeDatasheet(admin, {
         mode: "new",
         incomingKey: INCOMING_A,
         fileName: "fake.xlsx",
@@ -913,7 +923,7 @@ describe("finalize: forged keys and size lies", () => {
       uploadedBy: new ObjectId(),
     });
     bucket.objects.set(INCOMING_A, HTML_BYTES);
-    const result = await finalizeDatasheet(ADMIN, {
+    const result = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: row._id.toHexString(),
       incomingKey: INCOMING_A,
@@ -933,7 +943,7 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
 
   it("every write audits once, returns only the datasheets tag, and keeps names and keys out of the audit entry", async () => {
     bucket.objects.set(INCOMING_A, await workbook());
-    const created = await finalizeDatasheet(ADMIN, {
+    const created = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: NAME,
@@ -943,7 +953,7 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
     expect(created.tags).toEqual(["datasheets"]);
 
     bucket.objects.set(INCOMING_B, await workbook());
-    const replaced = await finalizeDatasheet(ADMIN, {
+    const replaced = await finalizeDatasheet(admin, {
       mode: "replace",
       datasheetId: id,
       incomingKey: INCOMING_B,
@@ -952,14 +962,14 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
     expect(replaced.ok).toBe(true);
     expect(replaced.tags).toEqual(["datasheets"]);
 
-    const renamed = await renameDatasheet(ADMIN, {
+    const renamed = await renameDatasheet(admin, {
       id,
       fileName: "Renamed-Name.xlsx",
     });
     expect(renamed.ok).toBe(true);
     expect(renamed.tags).toEqual(["datasheets"]);
 
-    const removed = await deleteDatasheet(ADMIN, id);
+    const removed = await deleteDatasheet(admin, id);
     expect(removed.ok).toBe(true);
     expect(removed.tags).toEqual(["datasheets"]);
 
@@ -996,7 +1006,7 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
 
     bucket.objects.set(INCOMING_A, await workbook());
     vi.mocked(storage.copyObject).mockRejectedValueOnce(secretError);
-    const finalized = await finalizeDatasheet(ADMIN, {
+    const finalized = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_A,
       fileName: "a.xlsx",
@@ -1005,7 +1015,7 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
 
     vi.mocked(storage.headObject).mockRejectedValueOnce(secretError);
     bucket.objects.set(INCOMING_B, await workbook());
-    const headFail = await finalizeDatasheet(ADMIN, {
+    const headFail = await finalizeDatasheet(admin, {
       mode: "new",
       incomingKey: INCOMING_B,
       fileName: "b.xlsx",
@@ -1021,7 +1031,7 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
       uploadedBy: new ObjectId(),
     });
     vi.mocked(storage.deleteObject).mockRejectedValueOnce(secretError);
-    const delFail = await deleteDatasheet(ADMIN, row._id.toHexString());
+    const delFail = await deleteDatasheet(admin, row._id.toHexString());
     expect(delFail.ok).toBe(false);
     // R2 failed, so the row must still exist to retry.
     expect(await DatasheetModel.countDocuments({ _id: row._id })).toBe(1);
@@ -1060,9 +1070,9 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
       "",
       "*",
     ]) {
-      expect((await deleteDatasheet(ADMIN, id)).ok).toBe(false);
+      expect((await deleteDatasheet(admin, id)).ok).toBe(false);
       expect(
-        (await renameDatasheet(ADMIN, { id, fileName: "x.xlsx" })).ok,
+        (await renameDatasheet(admin, { id, fileName: "x.xlsx" })).ok,
       ).toBe(false);
     }
     expect(await DatasheetModel.countDocuments()).toBe(1);
@@ -1087,7 +1097,7 @@ describe("datasheet writes: audit, tags, no names, no leaks", () => {
         { $set: { datasheetId: row._id } },
       );
     }
-    const result = await deleteDatasheet(ADMIN, row._id.toHexString());
+    const result = await deleteDatasheet(admin, row._id.toHexString());
     expect(result).toMatchObject({ ok: false, tags: [] });
     expect(JSON.stringify(result)).toContain("2 products");
     expect(bucket.objects.has(key)).toBe(true);
@@ -1124,14 +1134,14 @@ describe("datasheet races (gate C)", () => {
         if (deletedKey !== key) return;
         bucket.onDelete = undefined;
         bucket.objects.set(INCOMING_A, await workbook());
-        await finalizeDatasheet(ADMIN, {
+        await finalizeDatasheet(admin, {
           mode: "replace",
           datasheetId: id,
           incomingKey: INCOMING_A,
           fileName: "race2.xlsx",
         });
       };
-      await deleteDatasheet(ADMIN, id);
+      await deleteDatasheet(admin, id);
       const rowGone = (await DatasheetModel.countDocuments({ _id: id })) === 0;
       const objectLeft = bucket.objects.has(key);
       expect(rowGone && objectLeft).toBe(false);
@@ -1154,12 +1164,12 @@ describe("datasheet races (gate C)", () => {
         { $set: { datasheetId: new ObjectId(id) } },
       );
     };
-    expect((await deleteDatasheet(ADMIN, id)).ok).toBe(true);
+    expect((await deleteDatasheet(admin, id)).ok).toBe(true);
     const dangling = await ProductModel.findById(product._id).lean();
     expect(dangling?.datasheetId?.toHexString()).toBe(id);
     expect(await DatasheetModel.countDocuments()).toBe(0);
 
-    const publish = await publishProduct(ADMIN, product._id.toHexString());
+    const publish = await publishProduct(admin, product._id.toHexString());
     expect(publish.ok).toBe(false);
     expect(JSON.stringify(publish)).toContain("datasheetId");
     expect((await ProductModel.findById(product._id))?.status).toBe("draft");

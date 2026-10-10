@@ -8,7 +8,9 @@
 import { Collection } from "mongodb";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getSessionFromDb } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { checkDatasheetAccess } from "@/lib/permissions";
 import {
   acquireLock,
   buildKey,
@@ -31,6 +33,7 @@ import {
 import {
   banCustomer,
   createCustomer,
+  endCustomerAccess,
   escapeRegex,
   getCustomer,
   getCustomerCounts,
@@ -765,6 +768,147 @@ describe("getCustomer", () => {
   });
 });
 
+describe("endCustomerAccess (end access now)", () => {
+  async function activeCustomer(password: string) {
+    const created = await newCustomer();
+    await acceptInvite(mail.invites.at(-1)?.url ?? "", password);
+    return created;
+  }
+
+  it("ends access at this instant: downloads lock, sign-in and sessions stay", async () => {
+    const created = await activeCustomer("end-access-password-1");
+    const cookie = await signIn(created.email, "end-access-password-1");
+    const before = await rawUser(created.userId);
+    // Reminded already for the old end date.
+    await seedUserFields(created.userId, {
+      expiryReminderFor: before?.accessExpiresAt,
+    });
+    await AuditLogModel.deleteMany({});
+    const now = new Date();
+
+    const data = expectOk(
+      await endCustomerAccess(admin, { userId: created.userId }, { now }),
+    );
+    expect(data).toEqual({ accessExpiresAt: now, alreadyEnded: false });
+
+    const after = await rawUser(created.userId);
+    expect(after?.accessExpiresAt).toEqual(now);
+    // Cleared, so a later "set access" re-arms the 7-day reminder.
+    expect(after?.expiryReminderFor ?? null).toBeNull();
+    // Not a ban, and nothing else about the account changed.
+    expect(after?.banned ?? false).toBe(false);
+    expect(after?.mustChangePassword).toBe(false);
+    expect(after?.deviceEpoch).toEqual(before?.deviceEpoch);
+    expect(await sessionCount(created.userId)).toBe(1);
+    expect(mail.extended).toEqual([]);
+
+    // The old session still works, the datasheet rule now says expired.
+    const session = await getSessionFromDb(new Headers({ cookie }));
+    expect(session?.user.id).toBe(created.userId);
+    expect(checkDatasheetAccess(session?.user, new Date())).toEqual({
+      ok: false,
+      reason: "expired",
+    });
+    // A fresh sign-in still works.
+    expect(await signIn(created.email, "end-access-password-1")).not.toBe("");
+
+    const audit = await AuditLogModel.find({}).lean();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      action: "customer.access.end",
+      target: { type: "customer", id: created.userId },
+      meta: { hadExpiry: true },
+    });
+    expect(String(audit[0]?.actor)).toBe(admin.id);
+  });
+
+  it("ends a no-expiry customer too", async () => {
+    const created = await newCustomer({ access: { kind: "none" } });
+    await AuditLogModel.deleteMany({});
+    const now = new Date();
+    expectOk(
+      await endCustomerAccess(admin, { userId: created.userId }, { now }),
+    );
+    expect((await rawUser(created.userId))?.accessExpiresAt).toEqual(now);
+    const audit = await AuditLogModel.findOne({
+      action: "customer.access.end",
+    }).lean();
+    expect(audit?.meta).toEqual({ hadExpiry: false });
+  });
+
+  it("leaves access that has already ended alone (nothing written or audited)", async () => {
+    const created = await newCustomer();
+    const ended = new Date(Date.now() - 60_000);
+    await seedUserFields(created.userId, {
+      accessExpiresAt: ended,
+      expiryReminderFor: ended,
+    });
+    await AuditLogModel.deleteMany({});
+    const result = await endCustomerAccess(admin, { userId: created.userId });
+    expect(result).toEqual({
+      ok: true,
+      data: { accessExpiresAt: ended, alreadyEnded: true },
+      tags: [],
+    });
+    const after = await rawUser(created.userId);
+    expect(after?.accessExpiresAt).toEqual(ended);
+    expect(after?.expiryReminderFor).toEqual(ended);
+    expect(await AuditLogModel.countDocuments()).toBe(0);
+  });
+
+  it("a later 'set access' re-arms the reminder for an end date already reminded", async () => {
+    const created = await newCustomer({
+      access: { kind: "date", date: "2099-06-30" },
+    });
+    const planned = (await rawUser(created.userId))?.accessExpiresAt;
+    await seedUserFields(created.userId, { expiryReminderFor: planned });
+    expectOk(await endCustomerAccess(admin, { userId: created.userId }));
+    expectOk(
+      await setCustomerAccess(admin, {
+        userId: created.userId,
+        access: { kind: "date", date: "2099-06-30" },
+        notify: false,
+      }),
+    );
+    const after = await rawUser(created.userId);
+    expect(after?.accessExpiresAt).toEqual(planned);
+    // Differs from the end date again, so the cron reminds once more.
+    expect(after?.expiryReminderFor ?? null).toBeNull();
+  });
+
+  it("refuses bad input, an unknown id and the admin account", async () => {
+    expect((await endCustomerAccess(admin, {})).ok).toBe(false);
+    expect((await endCustomerAccess(admin, { userId: { $ne: null } })).ok).toBe(
+      false,
+    );
+    expect(
+      formErrors(
+        await endCustomerAccess(admin, { userId: "64b0000000000000000000ff" }),
+      ),
+    ).toEqual(["This customer no longer exists."]);
+    expect(
+      formErrors(await endCustomerAccess(admin, { userId: admin.id })),
+    ).toEqual(["This customer no longer exists."]);
+    expect((await rawUser(admin.id))?.accessExpiresAt ?? null).toBeNull();
+  });
+
+  it("a customer's own session can't end anyone's access", async () => {
+    const victim = await newCustomer();
+    const attacker = await activeCustomer("attacker-end-password-1");
+    const cookie = await signIn(attacker.email, "attacker-end-password-1");
+    const before = await rawUser(victim.userId);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await endCustomerAccess(
+      { id: attacker.userId, headers: new Headers({ cookie }) },
+      { userId: victim.userId },
+    );
+    expect(!result.ok && result.denied).toBe("not_admin");
+    expect((await rawUser(victim.userId))?.accessExpiresAt).toEqual(
+      before?.accessExpiresAt,
+    );
+  });
+});
+
 describe("the actor must be a real signed-in admin (second line behind requireAdmin)", () => {
   it("a forged actor (admin id, no session) changes nothing through Better Auth", async () => {
     const victim = await newCustomer();
@@ -858,6 +1002,7 @@ describe("the actor must be a real signed-in admin (second line behind requireAd
           delivery: "copy",
         }),
         await sendCustomerResetLink(actor, { userId: victim.userId }),
+        await endCustomerAccess(actor, { userId: victim.userId }),
       ];
       for (const result of results) {
         expect(result.ok, reason).toBe(false);

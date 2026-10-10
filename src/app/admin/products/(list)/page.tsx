@@ -38,6 +38,8 @@ import { listProducts, MAX_PRODUCT_SEARCH_LENGTH } from "@/lib/admin/products";
 import { requireAdmin } from "@/lib/permissions";
 import { PRODUCT_STATUSES } from "@/models/product-constants";
 
+import { pageActor, readAsAdmin } from "../../admin-reads";
+
 // Static only (ADR 0036): a title never carries data.
 export const metadata: Metadata = { title: "Products" };
 
@@ -56,8 +58,12 @@ function single(value: string | string[] | undefined): string {
 export default async function AdminProductsPage({
   searchParams,
 }: PageProps<"/admin/products">) {
-  await requireAdmin();
-  const [tree, query] = await Promise.all([listCategoryTree(), searchParams]);
+  const viewer = await requireAdmin();
+  const actor = await pageActor(viewer);
+  const [tree, query] = await Promise.all([
+    readAsAdmin(() => listCategoryTree(actor)),
+    searchParams,
+  ]);
 
   const categories = categoryOptions(tree);
 
@@ -76,12 +82,14 @@ export default async function AdminProductsPage({
     ? rawCategory
     : undefined;
 
-  const result = await listProducts({
-    q,
-    status,
-    category,
-    page: query.page,
-  });
+  const result = await readAsAdmin(() =>
+    listProducts(actor, {
+      q,
+      status,
+      category,
+      page: query.page,
+    }),
+  );
   const notice = readNotice(query[NOTICE_PARAM]);
 
   const filters: ProductFilterValues = {
