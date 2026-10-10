@@ -173,7 +173,7 @@ describe("datasheet route: sessions and states that must fail closed", () => {
     [
       "an invite-pending customer (mustChangePassword)",
       "invitepending",
-      loginLocation,
+      `/change-password?next=${encodeURIComponent(`/product/${SLUG}`)}`,
     ],
     [
       "an unreadable accessExpiresAt",

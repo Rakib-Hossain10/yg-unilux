@@ -1,8 +1,9 @@
 // Phase 5 P4: GET /api/datasheet/[productId] end to end (rule 2, ADR 0071).
 // An active customer gets a 303 to a 60 s presigned R2 GET that the R2 fake
 // serves as an .xlsx attachment (bytes and file name intact), and a log row
-// is written; a visitor is sent to /login with next=/product/<slug> and no
-// row is written. Every answer is `private, no-store`. The redirect is
+// is written; a visitor is sent to /login with next=/product/<slug>, a
+// customer on a temporary password to /change-password with the same next,
+// and no row is written for either. Every answer is `private, no-store`. The redirect is
 // followed by hand: page.route() does not see a navigation's redirected
 // request, so a browser would try the real R2 host.
 
@@ -17,6 +18,7 @@ import {
 import { type Db, type MongoClient, ObjectId } from "mongodb";
 
 import { E2E_DOWNLOAD_CUSTOMER } from "./fixtures/accounts";
+import { loadState } from "./fixtures/auth-state";
 import { connectE2eDb } from "./fixtures/database";
 import { putR2Object } from "./fixtures/providers";
 import { E2E_FAKE_PROVIDERS_URL } from "./fixtures/providers-port";
@@ -101,6 +103,27 @@ test("a visitor is sent to sign in and nothing is logged", async ({
     `/login?next=${encodeURIComponent(`/product/${slug}`)}`,
   );
   expect(await logCount()).toBe(before);
+});
+
+test("a customer on a temporary password goes straight to /change-password, nothing logged", async () => {
+  // E2E_CUSTOMER (global setup) is still on its temporary password.
+  const context = await playwrightRequest.newContext({
+    baseURL: BASE_URL,
+    storageState: loadState("customer"),
+  });
+  try {
+    const before = await logCount();
+    const response = await context.get(routePath, { maxRedirects: 0 });
+    expect(response.status()).toBe(303);
+    expect(response.headers()["cache-control"]).toBe("private, no-store");
+    expect(response.headers()["location"]).toBe(
+      `/change-password?next=${encodeURIComponent(`/product/${slug}`)}`,
+    );
+    expect(await response.text()).toBe("");
+    expect(await logCount()).toBe(before);
+  } finally {
+    await context.dispose();
+  }
 });
 
 test("an active customer gets a 60 s presigned GET the bucket serves", async () => {

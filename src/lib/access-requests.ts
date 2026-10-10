@@ -22,6 +22,7 @@ import { getCompanyAlertEmail } from "./contact-settings";
 import { connectDb } from "./db";
 import { EmailSendError, sendAccessRequestAlertEmail } from "./email";
 import { EnvError } from "./env";
+import { readFormStamp } from "./form-stamp";
 import { RateLimitUnavailableError } from "./rate-limit";
 import { consumeAccessRequest } from "./sign-in-limit";
 
@@ -29,7 +30,10 @@ import { consumeAccessRequest } from "./sign-in-limit";
 export const MIN_FILL_MS = 3000;
 /** The hidden field bots fill in; people never see it. */
 export const HONEYPOT_FIELD = "website";
-/** The hidden field holding when the form was rendered (ms since epoch). */
+/**
+ * The hidden field holding the server's signed stamp of when the form was
+ * rendered ("<ms>.<MAC>", src/lib/form-stamp.ts), never a client number.
+ */
 export const STARTED_AT_FIELD = "startedAt";
 
 /** Shown for every accepted, merged, limited or spam submission alike. */
@@ -81,22 +85,32 @@ function readField(source: unknown, key: string): unknown {
     : undefined;
 }
 
-const startedAtSchema = z.coerce.number().int().positive();
+/** Why a post is refused before validation: a bot, or a stale form. */
+type EarlyRefusal = "automated" | "stale";
 
 /*
- * True for a bot: the honeypot has text, or the form came back faster than
- * a person can fill it (or with a missing, malformed or future start time).
- * Checked BEFORE validation, so a bot learns nothing from field errors.
+ * Checked BEFORE validation, so a bot learns nothing from field errors:
+ * - "automated": the honeypot has text, or the form's stamp is missing,
+ *   malformed, forged (bad MAC) or from the future, or came back faster
+ *   than a person can fill the form → the silent `{ ok: true }`;
+ * - "stale": a stamp this server really issued, older than 24 h (a tab
+ *   left open) → "reload the page", so a person is not thanked and
+ *   dropped. Only a genuine stamp gets here, and the answer does not
+ *   depend on the email or any account (no enumeration).
+ * Throws EnvError without AUTH_SECRET (the caller answers `unavailable`).
  */
-function looksAutomated(raw: unknown, now: Date): boolean {
+function refuseEarly(raw: unknown, now: Date): EarlyRefusal | null {
   const honeypot = readField(raw, HONEYPOT_FIELD);
   if (typeof honeypot === "string" ? honeypot.trim() !== "" : honeypot != null)
-    return true;
-  const startedAt = startedAtSchema.safeParse(readField(raw, STARTED_AT_FIELD));
-  if (!startedAt.success) return true;
-  const elapsed = now.getTime() - startedAt.data;
-  return elapsed < MIN_FILL_MS;
+    return "automated";
+  const stamp = readFormStamp(readField(raw, STARTED_AT_FIELD), now);
+  if (!stamp.ok) return stamp.reason === "expired" ? "stale" : "automated";
+  return stamp.ageMs < MIN_FILL_MS ? "automated" : null;
 }
+
+/** The form-level error for a stale form (no field to sit under). */
+export const ACCESS_REQUEST_STALE =
+  "This form has expired. Reload the page and send it again.";
 
 function logProblem(what: string, error: unknown): void {
   const kind =
@@ -142,7 +156,8 @@ function isDuplicateKey(error: unknown): boolean {
 
 /**
  * Handles one public submission. Steps:
- * 1. honeypot / minimum fill time → silent `{ ok: true }`, nothing stored;
+ * 1. honeypot / signed stamp + minimum fill time → silent `{ ok: true }`,
+ *    nothing stored; a genuine stamp over 24 h old → "reload" form error;
  * 2. Zod (rule 8) → field errors;
  * 3. limits per network (HMAC'd) and per email → silent `{ ok: true }`;
  * 4. one pending request per email: a second one MERGES into the first
@@ -157,7 +172,22 @@ export async function submitAccessRequest(
   context: SubmitAccessRequestContext,
 ): Promise<SubmitAccessRequestResult> {
   const now = context.now ?? new Date();
-  if (looksAutomated(input, now)) return received();
+  try {
+    const refusal = refuseEarly(input, now);
+    if (refusal === "automated") return received();
+    if (refusal === "stale") {
+      return {
+        ok: false,
+        errors: { formErrors: [ACCESS_REQUEST_STALE], fieldErrors: {} },
+      };
+    }
+  } catch (error) {
+    if (error instanceof EnvError) {
+      logProblem("form stamp not checked", error);
+      return { ok: false, unavailable: true };
+    }
+    throw error;
+  }
 
   const parsed = publicAccessRequestSchema.safeParse(input);
   if (!parsed.success) {

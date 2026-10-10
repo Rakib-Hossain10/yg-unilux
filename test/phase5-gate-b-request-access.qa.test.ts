@@ -30,6 +30,7 @@ import {
   IDLE_STATE,
 } from "@/components/site/request-access/request-form";
 import { getDb } from "@/lib/db";
+import { issueFormStamp } from "@/lib/form-stamp";
 import { AccessRequestModel, ProductModel } from "@/models";
 import { LoginAttemptModel } from "@/models/login-attempt";
 
@@ -146,7 +147,7 @@ function post(fields: Record<string, string | string[] | Blob> = {}): FormData {
     consent: "on",
     kind: "new",
     website: "",
-    startedAt: String(Date.now() - 60_000),
+    startedAt: issueFormStamp(new Date(Date.now() - 60_000)),
     ...fields,
   };
   for (const [key, value] of Object.entries(all)) {
@@ -176,8 +177,10 @@ describe("identical answers (no account enumeration)", () => {
       await submit(post({ email: ADMIN_EMAIL })),
       await submit(post({ email: duplicateEmail })),
       await submit(post({ website: "https://spam.example" })),
-      await submit(post({ startedAt: String(Date.now()) })),
-      await submit(post({ startedAt: String(Date.now() + 3_600_000) })),
+      await submit(post({ startedAt: issueFormStamp() })),
+      await submit(
+        post({ startedAt: issueFormStamp(new Date(Date.now() + 3_600_000)) }),
+      ),
       await submit(post({ startedAt: "" })),
     ];
     // The network limit (5 / 15 min) from one address: the 6th+ are dropped.
@@ -191,7 +194,7 @@ describe("identical answers (no account enumeration)", () => {
       name: "",
       company: "<b>",
       country: "Atlantis",
-      startedAt: String(Date.now() - 60_000),
+      startedAt: issueFormStamp(new Date(Date.now() - 60_000)),
     };
     const known = await submit(post({ ...bad, email: CUSTOMER_EMAIL }));
     const admin = await submit(post({ ...bad, email: ADMIN_EMAIL }));

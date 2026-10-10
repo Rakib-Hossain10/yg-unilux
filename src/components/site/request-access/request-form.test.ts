@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACCESS_REQUEST_STALE,
   ACCESS_REQUEST_THANKS,
   ACCESS_REQUEST_UNAVAILABLE,
   HONEYPOT_FIELD,
@@ -31,6 +32,8 @@ const MESSAGES = {
   unavailable: ACCESS_REQUEST_UNAVAILABLE,
 };
 const ID = "0123456789abcdef01234567";
+/* A stamp of the right shape (its MAC is checked by the service, not here). */
+const STAMP = `1700000000000.${"A".repeat(43)}`;
 
 function form(entries: Record<string, string | Blob>): FormData {
   const data = new FormData();
@@ -75,7 +78,7 @@ describe("readRequestForm", () => {
           email: "ada@example.com",
           consent: "on",
           [HONEYPOT_NAME]: "",
-          [STARTED_AT_NAME]: "123",
+          [STARTED_AT_NAME]: STAMP,
           $ACTION_ID_abc: "",
           role: "admin",
         }),
@@ -87,8 +90,28 @@ describe("readRequestForm", () => {
       country: "",
       consent: "on",
       website: "",
-      startedAt: "123",
+      startedAt: STAMP,
     });
+  });
+
+  it("drops a stamp of the wrong shape instead of refusing the form", () => {
+    for (const bad of [
+      "123",
+      "1",
+      `${STAMP}x`,
+      `1700000000000.${"+".repeat(43)}`,
+      "9".repeat(20_000),
+    ]) {
+      const posted = readRequestForm(
+        form({ name: "Ada", [STARTED_AT_NAME]: bad }),
+      );
+      expect(posted, bad.slice(0, 20)).not.toBeNull();
+      expect(posted?.startedAt).toBeUndefined();
+    }
+    // Over the raw cap it is refused like every other field.
+    expect(
+      readRequestForm(form({ [STARTED_AT_NAME]: "9".repeat(20_001) })),
+    ).toBeNull();
   });
 
   it("drops a file in a text field but counts one in the honeypot as filled", () => {
@@ -120,7 +143,7 @@ describe("stateForAnswer", () => {
     message: "Hi",
     consent: undefined,
     website: "",
-    startedAt: "1700000000000",
+    startedAt: STAMP,
   };
 
   it("one identical sent state for every accepted answer, with no values", () => {
@@ -160,7 +183,7 @@ describe("stateForAnswer", () => {
         message: "Hi",
         consent: false,
       },
-      startedAt: "1700000000000",
+      startedAt: STAMP,
     });
   });
 
@@ -180,6 +203,24 @@ describe("stateForAnswer", () => {
     });
   });
 
+  it("a stale form (stamp over 24 h) asks to reload and keeps the values", () => {
+    const state = stateForAnswer(
+      {
+        ok: false,
+        errors: { formErrors: [ACCESS_REQUEST_STALE], fieldErrors: {} },
+      },
+      posted,
+      MESSAGES,
+    );
+    expect(state).toMatchObject({
+      status: "invalid",
+      fieldErrors: {},
+      formError: FORM_REFUSED,
+      values: { email: "ada@example.com" },
+    });
+    expect(FORM_REFUSED).toMatch(/Reload the page/);
+  });
+
   it("our outage keeps the values and says so", () => {
     expect(
       stateForAnswer({ ok: false, unavailable: true }, posted, MESSAGES),
@@ -187,7 +228,7 @@ describe("stateForAnswer", () => {
       status: "unavailable",
       message: ACCESS_REQUEST_UNAVAILABLE,
       values: { email: "ada@example.com" },
-      startedAt: "1700000000000",
+      startedAt: STAMP,
     });
   });
 

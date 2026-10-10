@@ -26,6 +26,7 @@ import {
   type PublishedProductLabel,
 } from "@/lib/catalog/product-ref";
 import { getWhatsappNumber, whatsappLink } from "@/lib/contact-settings";
+import { issueFormStamp } from "@/lib/form-stamp";
 import { getViewer, type Viewer } from "@/lib/permissions";
 import { countrySchema } from "@/lib/schemas/access-request";
 import { hasSessionCookie } from "@/lib/session-cookie";
@@ -100,11 +101,6 @@ function withCountryChoice(values: RequestFormValues): {
         extraCountry: parsed.data,
       }
     : { prefill: { ...values, country: undefined }, extraCountry: null };
-}
-
-/* When the form was rendered: the service's minimum fill time counts from it. */
-function renderedAt(): string {
-  return String(Date.now());
 }
 
 const STEPS: Record<"new" | "renew", readonly string[]> = {
@@ -185,7 +181,7 @@ export default async function RequestAccessPage({
             <RequestAccessForm
               renew={renew}
               productId={product?.productId ?? null}
-              startedAt={renderedAt()}
+              startedAt={issueFormStamp()}
               prefill={prefill}
               extraCountry={extraCountry}
               submitLabel={renew ? "Send renewal request" : "Send request"}

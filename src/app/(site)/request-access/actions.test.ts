@@ -32,6 +32,8 @@ const { ACCESS_REQUEST_THANKS, ACCESS_REQUEST_UNAVAILABLE } =
   await import("@/lib/access-requests");
 
 const SECRET_MESSAGE = "my-private-project-details-123";
+/* A signed stamp's shape; the (mocked) service would check its MAC. */
+const STAMP = `1700000000000.${"Q".repeat(43)}`;
 
 function post(extra: Record<string, string> = {}): FormData {
   const data = new FormData();
@@ -44,7 +46,7 @@ function post(extra: Record<string, string> = {}): FormData {
     consent: "on",
     kind: "new",
     website: "",
-    startedAt: "1700000000000",
+    startedAt: STAMP,
     ...extra,
   };
   for (const [key, value] of Object.entries(fields)) data.append(key, value);
@@ -69,7 +71,7 @@ describe("requestAccessAction", () => {
       email: "ada@example.com",
       consent: "on",
       website: "",
-      startedAt: "1700000000000",
+      startedAt: STAMP,
     });
     expect(context.headers).toBe(mocks.headers);
     expect(context.viewer).toBeNull();
@@ -135,7 +137,7 @@ describe("requestAccessAction", () => {
       status: "invalid",
       fieldErrors: { name: "Use letters" },
       values: { name: "<b>", consent: true },
-      startedAt: "1700000000000",
+      startedAt: STAMP,
     });
   });
 

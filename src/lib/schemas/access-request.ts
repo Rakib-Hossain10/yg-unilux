@@ -130,8 +130,9 @@ export const accessRequestKindSchema = z.enum(ACCESS_REQUEST_KINDS);
 
 /**
  * The public request form (plan Q2). The honeypot (`website`) and the form's
- * start time (`startedAt`, ms since epoch, rendered by the server) are read
- * by the service BEFORE this schema, so a bot gets no validation feedback.
+ * signed start stamp (`startedAt`, "<ms>.<MAC>" issued by the server,
+ * `formStampSchema` + src/lib/form-stamp.ts) are read by the service BEFORE
+ * this schema, so a bot gets no validation feedback.
  */
 export const publicAccessRequestSchema = z.object({
   name: personNameSchema,

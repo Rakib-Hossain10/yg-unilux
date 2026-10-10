@@ -194,7 +194,7 @@ async function call(viewer: string | null, productId: string) {
   });
 }
 
-type Expected = "file" | "login" | "renew" | 404;
+type Expected = "file" | "login" | "password" | "renew" | 404;
 
 function expectAnswer(
   response: Response,
@@ -212,6 +212,12 @@ function expectAnswer(
   if (expected === "login") {
     expect(location).toBe(
       `/login?next=${encodeURIComponent(`/product/${SLUGS[product] ?? "?"}`)}`,
+    );
+  } else if (expected === "password") {
+    // Signed in on a temporary password: straight to /change-password,
+    // then back to the product (not via /login, which would only bounce).
+    expect(location).toBe(
+      `/change-password?next=${encodeURIComponent(`/product/${SLUGS[product] ?? "?"}`)}`,
     );
   } else if (expected === "renew") {
     expect(location).toBe(
@@ -231,14 +237,14 @@ const MATRIX: [string | null, string, Expected[]][] = [
   ["noexpiry", "customer, no expiry", ["file", 404, 404, 404, 404, 404]],
   ["expired", "expired customer", ["renew", 404, 404, 404, "renew", 404]],
   ["banned", "banned customer", ["renew", 404, 404, 404, "renew", 404]],
-  ["temp", "temporary password", ["login", 404, 404, 404, "login", 404]],
+  ["temp", "temporary password", ["password", 404, 404, 404, "password", 404]],
   ["banended", "ban expired", ["file", 404, 404, 404, 404, 404]],
   ["staff", "other role", ["login", 404, 404, 404, "login", 404]],
   ["admin", "admin", ["file", 404, 404, 404, 404, 404]],
   [
     "tempAdmin",
     "admin, temporary password",
-    ["login", 404, 404, 404, "login", 404],
+    ["password", 404, 404, 404, "password", 404],
   ],
 ];
 const ORDER: ProductCase[] = [
@@ -287,6 +293,17 @@ const logsOf = (name: string) =>
   });
 
 describe("the download log", () => {
+  it("is not written for a temporary password, and no URL is handed out", async () => {
+    const before = await logsOf("temp");
+    const response = await call("temp", PRODUCTS.published);
+    expect(response.status).toBe(303);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("location")).toMatch(/^\/change-password\?/);
+    expect(response.headers.get("location")).not.toContain("r2.cloudflare");
+    expect(await response.text()).toBe("");
+    expect(await logsOf("temp")).toBe(before);
+  });
+
   it("is written once per successful download, with user, product and file", async () => {
     const before = await logsOf("noexpiry");
     await call("noexpiry", PRODUCTS.published);

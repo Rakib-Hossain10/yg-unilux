@@ -94,14 +94,19 @@ async function fillValid(page: Page, email: string): Promise<void> {
     .check();
 }
 
+/* The issue time of the server's signed stamp "<ms>.<MAC>" in the form. */
+async function stampTime(page: Page): Promise<number> {
+  const stamp = await page.locator('input[name="startedAt"]').inputValue();
+  expect(stamp).toMatch(/^\d{1,15}\.[A-Za-z0-9_-]{43}$/);
+  return Number(stamp.split(".")[0]);
+}
+
 /*
  * Waits out the service's minimum fill time, counted from the start time
  * the server rendered into the form (the clock the service compares with).
  */
 async function waitMinimumFill(page: Page): Promise<void> {
-  const startedAt = Number(
-    await page.locator('input[name="startedAt"]').inputValue(),
-  );
+  const startedAt = await stampTime(page);
   expect(startedAt).toBeGreaterThan(0);
   const left = startedAt + MIN_FILL_MS + 500 - Date.now();
   if (left > 0) await page.waitForTimeout(left);
@@ -161,10 +166,8 @@ test.describe("the page", () => {
       .boundingBox();
     expect(box).not.toBeNull();
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(0);
-    // The start time is rendered by the server.
-    const startedAt = Number(
-      await page.locator('input[name="startedAt"]').inputValue(),
-    );
+    // The start time is a stamp signed by the server.
+    const startedAt = await stampTime(page);
     expect(Math.abs(Date.now() - startedAt)).toBeLessThan(60_000);
   });
 
@@ -259,10 +262,17 @@ test.describe("submitting", () => {
       .getByLabel(/I agree that YG UniLUX keeps these details/)
       .uncheck();
     await waitMinimumFill(page);
+    const firstStamp = await page
+      .locator('input[name="startedAt"]')
+      .inputValue();
     await submit(page);
 
     const name = requestForm(page).getByLabel("Name");
     await expect(name).toHaveAttribute("aria-invalid", "true");
+    // The refill re-sends the first render's signed stamp, not a new one.
+    await expect(page.locator('input[name="startedAt"]')).toHaveValue(
+      firstStamp,
+    );
     await expect(name).toHaveValue("<b>Ada</b>");
     await expect(requestForm(page).getByLabel("Work email")).toHaveValue(email);
     await expect(requestForm(page).getByLabel("Country")).toHaveValue(
@@ -285,10 +295,16 @@ test.describe("submitting", () => {
     await requestForm(page).getByLabel("Work email").fill("not-an-address");
     await requestForm(page).getByLabel("Company").fill("Acme");
     await waitMinimumFill(page);
+    const firstStamp = await page
+      .locator('input[name="startedAt"]')
+      .inputValue();
     await submit(page);
 
     await expect(page.locator("[data-request-message]")).toContainText(
       "Some details need another look",
+    );
+    await expect(page.locator('input[name="startedAt"]')).toHaveValue(
+      firstStamp,
     );
     const emailField = requestForm(page).getByLabel("Work email");
     await expect(emailField).toHaveAttribute("aria-invalid", "true");

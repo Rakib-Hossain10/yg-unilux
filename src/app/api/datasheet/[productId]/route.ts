@@ -9,7 +9,8 @@
 //   2. product published (draft/unknown = 404 for everyone, the admin too)
 //      and a datasheet attached ("coming soon" is public) → 404
 //   3. session from the database + checkDatasheetAccess:
-//      signed out / temporary password / other role      → 303 /login?next=/product/<slug>
+//      signed out / other role                            → 303 /login?next=/product/<slug>
+//      temporary password (mustChangePassword)           → 303 /change-password?next=/product/<slug>
 //      expired / banned                                  → 303 /request-access?renew=1&product=<id>
 //   4. datasheet record exists                            → 404
 //   5. per-user limit, 60/hour, admin exempt              → 429 (limiter down → 503)
@@ -24,6 +25,11 @@
 // body. HEAD is 405 (Allow: GET), so it never runs the GET pipeline.
 
 import { connection } from "next/server";
+
+import {
+  accountNextPath,
+  changePasswordPathFor,
+} from "@/lib/account-destination";
 
 import {
   consumeDownload,
@@ -163,8 +169,13 @@ export async function GET(
       case "expired":
       case "banned":
         return seeOther(renewalPath(product.id));
-      case "signed-out":
       case "must-change-password":
+        // Already signed in: /login would only bounce them on, so go
+        // straight to the password page, then back to the product.
+        return seeOther(
+          changePasswordPathFor(accountNextPath(`/product/${product.slug}`)),
+        );
+      case "signed-out":
       case "not-allowed":
         return seeOther(loginPathFor(`/product/${product.slug}`));
     }

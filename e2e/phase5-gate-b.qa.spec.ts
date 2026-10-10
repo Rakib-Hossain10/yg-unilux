@@ -332,7 +332,7 @@ test("datasheet and restricted-data routes for a temporary password, expired, bl
   await expectRefused(
     customer,
     "temporary password",
-    /^\/login\?next=%2Fproduct%2F/,
+    /^\/change-password\?next=%2Fproduct%2F/,
   );
 
   await setUser(customerA.id, {
@@ -533,7 +533,9 @@ test("/request-access: a draft product is never named; known and unknown emails 
     await form.getByLabel("Country").selectOption("United Kingdom");
     await form.getByLabel(/I agree that YG UniLUX keeps these details/).check();
     const startedAt = Number(
-      await page.locator('input[name="startedAt"]').inputValue(),
+      (await page.locator('input[name="startedAt"]').inputValue()).split(
+        ".",
+      )[0],
     );
     const left = startedAt + 3500 - Date.now();
     if (left > 0) await page.waitForTimeout(left);

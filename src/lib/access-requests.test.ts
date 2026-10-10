@@ -11,10 +11,12 @@ import { LoginAttemptModel } from "@/models/login-attempt";
 import { setupMemoryDb } from "../../test/helpers/memory-db";
 
 import {
+  ACCESS_REQUEST_STALE,
   MIN_FILL_MS,
   submitAccessRequest,
   type SubmitAccessRequestContext,
 } from "./access-requests";
+import { FORM_STAMP_MAX_AGE_MS, issueFormStamp } from "./form-stamp";
 
 const alerts = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("./email", async (importOriginal) => ({
@@ -73,13 +75,16 @@ function form(fields: Record<string, unknown> = {}) {
     company: "Acme Lighting",
     country: "Hong Kong",
     consent: "on",
-    startedAt: String(NOW.getTime() - 10_000),
+    startedAt: stampAgo(10_000),
     website: "",
     ...fields,
   };
 }
 
 const settle = () => Promise.all(background);
+
+/* A stamp this server issued `ms` before NOW (negative: after NOW). */
+const stampAgo = (ms: number) => issueFormStamp(new Date(NOW.getTime() - ms));
 
 describe("identical answers", () => {
   it("new, duplicate, existing customer, limited, honeypot and too fast all answer { ok: true }", async () => {
@@ -95,12 +100,12 @@ describe("identical answers", () => {
       ),
       await submitAccessRequest(form({ website: "spam.example" }), context()),
       await submitAccessRequest(
-        form({ startedAt: String(NOW.getTime() - MIN_FILL_MS + 1) }),
+        form({ startedAt: stampAgo(MIN_FILL_MS - 1) }),
         context(),
       ),
       await submitAccessRequest(form({ startedAt: undefined }), context()),
       await submitAccessRequest(
-        form({ startedAt: String(NOW.getTime() + 60_000) }),
+        form({ startedAt: stampAgo(-60_000) }),
         context(),
       ),
     ];
@@ -111,15 +116,102 @@ describe("identical answers", () => {
 
   it("honeypot and too-fast submissions store nothing and count nothing", async () => {
     await submitAccessRequest(form({ website: "x" }), context());
-    await submitAccessRequest(
-      form({ startedAt: String(NOW.getTime() - 100) }),
-      context(),
-    );
+    await submitAccessRequest(form({ startedAt: stampAgo(100) }), context());
     await submitAccessRequest(form({ website: ["x"] }), context());
     expect(await AccessRequestModel.countDocuments()).toBe(0);
     expect(await LoginAttemptModel.countDocuments()).toBe(0);
     await settle();
     expect(alerts).toHaveLength(0);
+  });
+});
+
+describe("signed start stamp (QA gate B L-1)", () => {
+  /* Swap the first MAC character for another valid one. */
+  const tamper = (stamp: string) => {
+    const dot = stamp.indexOf(".");
+    const first = stamp[dot + 1] === "A" ? "B" : "A";
+    return `${stamp.slice(0, dot + 1)}${first}${stamp.slice(dot + 2)}`;
+  };
+
+  it.each([
+    ["a forged plain number (the old startedAt=1)", () => "1"],
+    ["a plain number from long ago", () => String(NOW.getTime() - 60_000)],
+    ["a tampered MAC", () => tamper(stampAgo(60_000))],
+    [
+      "a MAC moved onto an earlier time",
+      () => `${NOW.getTime() - 60_000}.${stampAgo(10).split(".")[1]}`,
+    ],
+    [
+      "a forged stamp from long ago",
+      () =>
+        `${NOW.getTime() - FORM_STAMP_MAX_AGE_MS - 1}.${stampAgo(10).split(".")[1]}`,
+    ],
+    ["a stamp from the future", () => stampAgo(-1)],
+    ["a too-fast stamp", () => stampAgo(MIN_FILL_MS - 1)],
+    ["an empty stamp", () => ""],
+  ])(
+    "%s is thanked and dropped: no row, no limiter slot, no alert",
+    async (_label, stamp) => {
+      const answer = await submitAccessRequest(
+        form({ startedAt: stamp() }),
+        context(),
+      );
+      expect(answer).toStrictEqual({ ok: true });
+      expect(await AccessRequestModel.countDocuments()).toBe(0);
+      expect(await LoginAttemptModel.countDocuments()).toBe(0);
+      await settle();
+      expect(alerts).toHaveLength(0);
+    },
+  );
+
+  it("a genuine stamp over 24 h old asks to reload: no row, no limiter slot", async () => {
+    const answer = await submitAccessRequest(
+      form({ startedAt: stampAgo(FORM_STAMP_MAX_AGE_MS + 1) }),
+      context(),
+    );
+    expect(answer).toStrictEqual({
+      ok: false,
+      errors: { formErrors: [ACCESS_REQUEST_STALE], fieldErrors: {} },
+    });
+    expect(await AccessRequestModel.countDocuments()).toBe(0);
+    expect(await LoginAttemptModel.countDocuments()).toBe(0);
+  });
+
+  it("the stale answer is the same for a customer's email and a new one", async () => {
+    const stale = stampAgo(FORM_STAMP_MAX_AGE_MS + 60_000);
+    const email = nextEmail();
+    const known = await submitAccessRequest(
+      form({ email, startedAt: stale }),
+      context({ viewer: { userId: "a".repeat(24), email, role: "customer" } }),
+    );
+    const unknown = await submitAccessRequest(
+      form({ startedAt: stale }),
+      context(),
+    );
+    expect(known).toStrictEqual(unknown);
+  });
+
+  it("a valid stamp at the minimum fill time and one just under 24 h are stored", async () => {
+    await submitAccessRequest(
+      form({ startedAt: stampAgo(MIN_FILL_MS) }),
+      context(),
+    );
+    await submitAccessRequest(
+      form({ startedAt: stampAgo(FORM_STAMP_MAX_AGE_MS) }),
+      context(),
+    );
+    expect(await AccessRequestModel.countDocuments()).toBe(2);
+  });
+
+  it("a missing AUTH_SECRET is our outage, not a silent drop", async () => {
+    const valid = form();
+    vi.stubEnv("AUTH_SECRET", "");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const answer = await submitAccessRequest(valid, context());
+    expect(answer).toStrictEqual({ ok: false, unavailable: true });
+    expect(JSON.stringify(errors.mock.calls)).toContain("EnvError");
+    errors.mockRestore();
+    expect(await AccessRequestModel.countDocuments()).toBe(0);
   });
 });
 

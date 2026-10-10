@@ -7,6 +7,7 @@
 import { z } from "zod";
 
 import { objectIdSchema } from "@/lib/schemas/common";
+import { formStampSchema } from "@/lib/schemas/form-stamp";
 
 /** The visible text fields, in form order. */
 export const REQUEST_TEXT_FIELDS = [
@@ -42,7 +43,10 @@ export type RequestFormState =
       fieldErrors: Partial<Record<RequestErrorField, string>>;
       formError: string | null;
       values: RequestFormValues;
-      /** The first render's start time, kept so a fix is not "too fast". */
+      /**
+       * The first render's signed stamp, re-sent unchanged so a fix is not
+       * "too fast" (never a new one: the fill time counts from first render).
+       */
       startedAt: string | null;
     }
   | {
@@ -68,6 +72,17 @@ export const FORM_REFUSED =
  */
 const MAX_RAW_LENGTH = 20_000;
 const rawText = z.string().max(MAX_RAW_LENGTH).optional();
+/*
+ * The signed stamp: over the raw cap it is refused like any field; under it,
+ * anything not shaped like a stamp (bounded length, digits "." base64url) is
+ * dropped, not refused, so the service treats it as missing and gives the
+ * same answer as every other automated post (no enumeration).
+ */
+const stampText = rawText.transform((value) =>
+  value !== undefined && formStampSchema.safeParse(value).success
+    ? value
+    : undefined,
+);
 const postedShape = z.object({
   name: rawText,
   email: rawText,
@@ -79,7 +94,7 @@ const postedShape = z.object({
   kind: rawText,
   consent: rawText,
   [HONEYPOT_NAME]: rawText,
-  [STARTED_AT_NAME]: rawText,
+  [STARTED_AT_NAME]: stampText,
 });
 export type PostedRequest = z.infer<typeof postedShape>;
 
