@@ -169,6 +169,13 @@ describe("bad formats", () => {
     ["SITE_URL", "ftp://example.com", () => env.siteUrl()],
     ["COMPANY_EMAIL", "not-an-email", () => env.companyEmail()],
     ["CRON_SECRET", "short", () => env.cronSecret()],
+    [
+      "CRON_SECRET",
+      `${"c".repeat(20)} ${"c".repeat(20)}`,
+      () => env.cronSecret(),
+    ],
+    ["CRON_SECRET", `${"c".repeat(32)}é`, () => env.cronSecret()],
+    ["CRON_SECRET", "c".repeat(506), () => env.cronSecret()],
     ["IP_HASH_SECRET", "x".repeat(31), () => env.ipHashSecret()],
     ["WHISTLEBLOWER_ENC_KEY", "not base64 !!", () => env.whistleblowerKey()],
     [
