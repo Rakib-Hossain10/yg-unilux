@@ -53,6 +53,8 @@ import {
   MAX_DATASHEET_FILE_NAME_LENGTH,
 } from "@/lib/schemas/datasheet";
 
+import { formatDate } from "@/lib/time-zone";
+
 import { allMessages, callAction } from "./action-result";
 import { ReplaceFileButton, UploadMessages } from "./datasheet-uploader";
 import { formatBytes } from "./image-upload";
@@ -67,14 +69,6 @@ export interface DatasheetRowData {
   updatedAt: string;
   inUse: number;
 }
-
-/* "6 Oct 2026" in UTC: the same text on the server and in any browser. */
-const DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
 
 const renameFormSchema = z.object({ fileName: datasheetFileNameSchema });
 type RenameValues = z.input<typeof renameFormSchema>;
@@ -256,9 +250,7 @@ function DatasheetRow({ row }: { row: DatasheetRowData }) {
           </span>
         </TableCell>
         <TableCell className="text-muted-foreground">
-          <time dateTime={row.updatedAt}>
-            {DATE_FORMAT.format(new Date(row.updatedAt))}
-          </time>
+          <time dateTime={row.updatedAt}>{formatDate(row.updatedAt)}</time>
         </TableCell>
         <TableCell>
           {row.inUse === 0 ? (

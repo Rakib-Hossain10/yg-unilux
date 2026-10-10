@@ -81,7 +81,7 @@ export const accountFieldsSchema = z
       .max(200)
       .regex(/^[^\r\n\t\x00-\x1f\x7f]*$/),
     mustChangePassword: z.boolean(),
-    /** End of datasheet access (end of a UTC day, plan Q5); null = no expiry. */
+    /** End of datasheet access (end of an app-zone day, src/lib/time-zone.ts); null = no expiry. */
     accessExpiresAt: validDate.nullable(),
     company: profileText(200),
     country: profileText(100),

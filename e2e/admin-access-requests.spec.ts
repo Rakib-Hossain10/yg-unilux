@@ -192,7 +192,7 @@ test("approve by email creates the customer and emails the invite", async ({
   await dialog.getByLabel("Name").fill("Chan Tai-man");
   await dialog.getByRole("radio", { name: "6 months" }).check();
   await expect(
-    dialog.getByText(/Access until .* \(end of day, UTC\)\./),
+    dialog.getByText(/Access until the end of .* \(China time\)\./),
   ).toBeVisible();
   await dialog
     .getByRole("button", { name: "Approve and create account" })

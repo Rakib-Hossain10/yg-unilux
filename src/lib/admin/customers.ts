@@ -60,6 +60,7 @@ import {
   type CustomerSort,
   type CustomerStatusFilter,
 } from "@/lib/schemas/customer";
+import { endOfZonedDayAfter } from "@/lib/time-zone";
 import { AccessRequestModel, AuditLogModel, UserModel } from "@/models";
 import type {
   AccessRequestKind,
@@ -112,7 +113,6 @@ function charRange(from: string, to: string): string[] {
   );
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 /* Sorts "no expiry" after every real date. */
 const NO_EXPIRY_SORT = new Date("9999-12-31T23:59:59.999Z");
 
@@ -189,11 +189,21 @@ function isBlocked(doc: CustomerDoc, now: Date): boolean {
   return !doc.banExpires || doc.banExpires.getTime() > now.getTime();
 }
 
+/*
+ * "Expiring" = access ends no later than the end of the app-zone day
+ * EXPIRING_SOON_DAYS after today's zone day (src/lib/time-zone.ts).
+ */
+function expiringWindowEnd(now: Date): Date {
+  return endOfZonedDayAfter(now, EXPIRING_SOON_DAYS);
+}
+
 function accessState(expiresAt: Date | null, now: Date): AccessState {
   if (expiresAt === null) return "no_expiry";
-  const left = expiresAt.getTime() - now.getTime();
-  if (left <= 0) return "expired";
-  return left <= EXPIRING_SOON_DAYS * MS_PER_DAY ? "expiring" : "active";
+  if (expiresAt.getTime() <= now.getTime()) return "expired";
+  // Same window as customerStatusFilter("expiring"): app-zone days.
+  return expiresAt.getTime() <= expiringWindowEnd(now).getTime()
+    ? "expiring"
+    : "active";
 }
 
 function toSummary(doc: CustomerDoc, now: Date): CustomerSummary {
@@ -520,7 +530,8 @@ export const INVITE_SETTLED = {
  * dashboard counts so both always agree.
  * - blocked: banned with no end, or an end still ahead;
  * - active / expiring / expired: NOT blocked, by accessExpiresAt
- *   (active = no expiry or ends after now; expiring = ends within 30 days;
+ *   (active = no expiry or ends after now; expiring = ends after now and by
+ *   the end of the app-zone day 30 days from today's zone day;
  *   expired = ended);
  * - invite_pending / invite_expired: invited, password not chosen since the
  *   invite ($expr comparing passwordSetAt and invitedAt), link still valid
@@ -558,7 +569,7 @@ export function customerStatusFilter(
           {
             accessExpiresAt: {
               $gt: now,
-              $lte: new Date(now.getTime() + EXPIRING_SOON_DAYS * MS_PER_DAY),
+              $lte: expiringWindowEnd(now),
             },
           },
         ],

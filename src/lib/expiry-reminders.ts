@@ -22,6 +22,7 @@ import {
   type ExpiryDigestEntry,
 } from "@/lib/email";
 import { acquireLock, buildKey, releaseLock } from "@/lib/rate-limit";
+import { endOfZonedDayAfter, zonedDayKey } from "@/lib/time-zone";
 import { AuditLogModel, UserModel } from "@/models";
 import type { User } from "@/models/user";
 
@@ -41,9 +42,11 @@ import type { User } from "@/models/user";
  *   email, a name or a provider message.
  */
 
-/** Reminders go out when access ends within this many days. */
+/**
+ * Reminders go out when access ends within this many calendar days, counted
+ * in the app's zone (src/lib/time-zone.ts): today's day plus 7.
+ */
 export const REMINDER_WINDOW_DAYS = 7;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Customers read per query. */
 export const REMINDER_BATCH_SIZE = 50;
@@ -140,8 +143,10 @@ const optionsSchema = z
  * The customers due a reminder at `now`:
  * - customers only (never the admin, also when it holds both roles);
  * - not blocked (no ban, or a timed ban that has ended, as isBanned());
- * - access ends after now and within 7 days (null expiry and already
- *   expired are out);
+ * - access ends after now (instant) and no later than the end of the
+ *   app-zone day 7 days from today's zone day (null expiry and already
+ *   expired are out). Expiries are the end of a zone day, so "ends on
+ *   17 Oct" is due from 10 Oct (China time) whatever hour the cron runs;
  * - not yet reminded about THIS expiry date;
  * - not waiting on an invite: never invited, or a password chosen at or
  *   after the latest invite (ADR 0072 amendment). A customer who never
@@ -157,7 +162,7 @@ export function dueFilter(now: Date): Record<string, unknown> {
       {
         accessExpiresAt: {
           $gt: now,
-          $lte: new Date(now.getTime() + REMINDER_WINDOW_DAYS * MS_PER_DAY),
+          $lte: endOfZonedDayAfter(now, REMINDER_WINDOW_DAYS),
         },
       },
       { $expr: { $ne: ["$expiryReminderFor", "$accessExpiresAt"] } },
@@ -213,14 +218,14 @@ function reminderKey(user: DueUser): string {
   return `expiry-reminder/${user._id.toHexString()}/${user.accessExpiresAt.getTime()}`;
 }
 
-/* One digest per distinct set of reminded customers per UTC day. */
+/* One digest per distinct set of reminded customers per app-zone day. */
 function digestKey(now: Date, reminded: readonly DueUser[]): string {
   const ids = reminded
     .map((user) => user._id.toHexString())
     .sort()
     .join(",");
   const hash = createHash("sha256").update(ids).digest("hex").slice(0, 32);
-  return `expiry-digest/${now.toISOString().slice(0, 10)}/${hash}`;
+  return `expiry-digest/${zonedDayKey(now)}/${hash}`;
 }
 
 async function sendDigest(

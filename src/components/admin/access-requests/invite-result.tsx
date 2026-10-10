@@ -7,20 +7,22 @@
 // a URL, logged or stored, and it is gone once the dialog closes.
 
 import { Check, CircleAlert, Copy, Mail, TriangleAlert } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition, type ReactNode } from "react";
 
 import { newInviteLinkAction } from "@/app/admin/access-requests/actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { formatDateTime } from "@/lib/time-zone";
 
-import { allMessages, callAction } from "../action-result";
-import { formatDayTime, formatWait } from "./format";
+import { allMessages, callAction, type ActionData } from "../action-result";
+import { formatWait } from "./format";
 import {
   inviteNeedsRetry,
   type InviteDeliveryChoice,
   type InviteView,
+  type NewInviteOutcome,
 } from "./types";
 
 /**
@@ -39,6 +41,25 @@ export function UnverifiedContactWarning() {
         Copy it only to someone you know is the owner of this email address, for
         example a contact you already talk to on WhatsApp. Otherwise choose
         &quot;Email it&quot;.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/**
+ * The same check on the customers module, where the email's origin is not
+ * known: copying hands a password-setting link to whoever receives it.
+ */
+export function CopyLinkWarning() {
+  return (
+    <Alert role="note">
+      <TriangleAlert aria-hidden="true" />
+      <AlertTitle>Check who you send this link to</AlertTitle>
+      <AlertDescription>
+        Whoever holds the link can set the password for this account. Copy it
+        only to someone you know is the owner of this email address, for example
+        a contact you already talk to on WhatsApp. Otherwise choose &quot;Email
+        it&quot;.
       </AlertDescription>
     </Alert>
   );
@@ -68,7 +89,7 @@ function CopyOnceLink({ url, expiresAt }: { url: string; expiresAt: string }) {
         <AlertDescription>
           The link is not stored anywhere readable and can&apos;t be shown
           again. If you lose it, make a new one. It works until{" "}
-          {formatDayTime(expiresAt)}.
+          {formatDateTime(expiresAt)}.
         </AlertDescription>
       </Alert>
       <Field>
@@ -118,7 +139,7 @@ export function InviteOutcomeView({ invite }: { invite: InviteView }) {
           <AlertTitle>Invite emailed</AlertTitle>
           <AlertDescription>
             The customer sets a password from the link in the email. It works
-            until {formatDayTime(invite.expiresAt)}.
+            until {formatDateTime(invite.expiresAt)}.
           </AlertDescription>
         </Alert>
       );
@@ -160,17 +181,32 @@ export function InviteOutcomeView({ invite }: { invite: InviteView }) {
   }
 }
 
+/** A Server Action that makes a new invite link for `{ userId, delivery }`. */
+export type NewInviteAction = (input: {
+  userId: string;
+  delivery: InviteDeliveryChoice;
+}) => Promise<ActionData<NewInviteOutcome>>;
+
 /**
  * "New invite link": emailed, or shown once to copy. Shown after an invite
- * that did not go out; the full invite card is on the customer page.
+ * that did not go out, and on the customer page's invite card (which passes
+ * its own action and is told when a link was made).
  */
 export function NewInviteLink({
   userId,
   unverified,
+  action = newInviteLinkAction,
+  onMade,
+  warning = <UnverifiedContactWarning />,
 }: {
   userId: string;
-  /** The request came from the public form (gate A L-3 warning). */
+  /** Ask before "Show once to copy" (gate A L-3 warning). */
   unverified: boolean;
+  /** The warning shown before copying; the request wording by default. */
+  warning?: ReactNode;
+  action?: NewInviteAction;
+  /** Told once a link was made (emailed or shown), e.g. to refresh. */
+  onMade?: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<string[]>([]);
@@ -187,9 +223,7 @@ export function NewInviteLink({
     setAuditMessage(null);
     startTransition(async () => {
       try {
-        const result = await callAction(() =>
-          newInviteLinkAction({ userId, delivery }),
-        );
+        const result = await callAction(() => action({ userId, delivery }));
         if (!result) return;
         if (!result.ok) {
           setErrors(allMessages(result.errors));
@@ -198,6 +232,8 @@ export function NewInviteLink({
         setConfirmCopy(false);
         setOutcome(result.data.invite);
         setAuditMessage(result.data.auditMessage);
+        // A link exists now (earlier ones are dead), even if its email failed.
+        if ("expiresAt" in result.data.invite) onMade?.();
       } finally {
         inFlight.current = false;
       }
@@ -233,7 +269,7 @@ export function NewInviteLink({
           <AlertDescription>{errors.join(" ")}</AlertDescription>
         </Alert>
       ) : null}
-      {confirmCopy && unverified ? <UnverifiedContactWarning /> : null}
+      {confirmCopy && unverified ? warning : null}
       <div className="flex flex-wrap gap-2">
         <Button type="button" disabled={pending} onClick={() => make("email")}>
           <Mail data-icon="inline-start" aria-hidden="true" />

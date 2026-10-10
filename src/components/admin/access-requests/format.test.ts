@@ -1,37 +1,21 @@
-// The queue's date and label text (plan Q5: UTC, "UTC" written out).
+// The queue's date and label text. Dates are shown in China time with the
+// zone written out (src/lib/time-zone.ts); access ends at the end of the
+// chosen day there.
 
 import { describe, expect, it } from "vitest";
 
-import {
-  formatAccessEnd,
-  formatDay,
-  formatDayTime,
-  formatWait,
-  labelOf,
-  SOURCE_LABELS,
-} from "./format";
+import { formatAccessEnd, formatWait, labelOf, SOURCE_LABELS } from "./format";
 
 describe("access-request format helpers", () => {
-  it("prints an access end as the UTC day", () => {
-    expect(formatAccessEnd(new Date("2027-03-31T23:59:59.999Z"))).toBe(
-      "until 31 Mar 2027 (end of day, UTC)",
+  it("prints an access end as the China-time day it ends on", () => {
+    // 15:59:59.999 UTC = 23:59:59.999 in China (UTC+8).
+    expect(formatAccessEnd(new Date("2027-03-31T15:59:59.999Z"))).toBe(
+      "until the end of 31 Mar 2027 (China time)",
     );
-    expect(formatAccessEnd("2027-03-31T23:59:59.999Z")).toBe(
-      "until 31 Mar 2027 (end of day, UTC)",
+    expect(formatAccessEnd("2027-03-31T15:59:59.999Z")).toBe(
+      "until the end of 31 Mar 2027 (China time)",
     );
     expect(formatAccessEnd(null)).toBe("no expiry");
-  });
-
-  it("prints a time in UTC with the zone written out", () => {
-    expect(formatDayTime("2026-10-13T09:05:00.000Z")).toBe(
-      "13 Oct 2026, 09:05 UTC",
-    );
-    expect(formatDay("2026-10-13T23:30:00.000Z")).toBe("13 Oct 2026");
-  });
-
-  it("never crashes on an unreadable date", () => {
-    expect(formatDay("garbage")).toBe("—");
-    expect(formatDayTime("garbage")).toBe("—");
   });
 
   it("labels known values and passes others through, prototype keys included", () => {

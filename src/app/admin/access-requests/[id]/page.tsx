@@ -4,12 +4,13 @@
 // (rule 3); no loading.tsx here, so not-found answers before streaming.
 
 import type { Metadata } from "next";
+import { UserRound } from "lucide-react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import {
   formatAccessEnd,
-  formatDayTime,
   KIND_LABELS,
   labelOf,
   SOURCE_LABELS,
@@ -18,9 +19,11 @@ import { accessRequestsListPath } from "@/components/admin/access-requests/paths
 import { RequestActions } from "@/components/admin/access-requests/request-actions";
 import { StatusBadge } from "@/components/admin/access-requests/requests-table";
 import { BackLink } from "@/components/admin/back-link";
+import { customerPath } from "@/components/admin/customers/paths";
 import { NOTICE_PARAM, readNotice } from "@/components/admin/save-notice";
 import { SaveNoticeAlert } from "@/components/admin/save-notice-alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -31,6 +34,7 @@ import {
 import { getAccessRequest } from "@/lib/admin/access-requests";
 import type { InviteStatus } from "@/lib/invite";
 import { requireAdmin } from "@/lib/permissions";
+import { formatDateTime } from "@/lib/time-zone";
 
 import { pageActor, readAsAdmin } from "../../admin-reads";
 
@@ -52,7 +56,7 @@ const INVITE_LABELS = {
 function inviteText(invite: InviteStatus): string {
   switch (invite.state) {
     case "pending":
-      return `Invite link valid until ${formatDayTime(invite.until)}`;
+      return `Invite link valid until ${formatDateTime(invite.until)}`;
     case "expired":
       return "Invite link expired, password never set";
     default:
@@ -78,6 +82,9 @@ export default async function AccessRequestPage({
 
   const account = request.existingAccount;
   const handled = request.status !== "pending";
+  // The customer this request made or extended, else one with its email.
+  const customerId =
+    request.userId ?? (account?.isCustomer ? account.userId : null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -99,7 +106,7 @@ export default async function AccessRequestPage({
           {labelOf(KIND_LABELS, request.kind)} ·{" "}
           {labelOf(SOURCE_LABELS, request.source)} · received{" "}
           <time dateTime={request.createdAt.toISOString()}>
-            {formatDayTime(request.createdAt)}
+            {formatDateTime(request.createdAt)}
           </time>
         </p>
       </div>
@@ -108,6 +115,15 @@ export default async function AccessRequestPage({
         notice={readNotice(query[NOTICE_PARAM])}
         messages={NOTICES}
       />
+
+      {customerId ? (
+        <Button asChild variant="outline" className="w-fit">
+          <Link href={customerPath(customerId)}>
+            <UserRound data-icon="inline-start" aria-hidden="true" />
+            Open customer
+          </Link>
+        </Button>
+      ) : null}
 
       <RequestActions
         status={request.status}
@@ -182,7 +198,7 @@ export default async function AccessRequestPage({
               </Row>
               {request.consentAt ? (
                 <Row label="Privacy consent">
-                  {formatDayTime(request.consentAt)}
+                  {formatDateTime(request.consentAt)}
                 </Row>
               ) : null}
               {request.handledAt ? (
@@ -191,7 +207,7 @@ export default async function AccessRequestPage({
                     request.status === "rejected" ? "Rejected" : "Approved"
                   }
                 >
-                  {formatDayTime(request.handledAt)}
+                  {formatDateTime(request.handledAt)}
                 </Row>
               ) : null}
               {request.rejectReason ? (

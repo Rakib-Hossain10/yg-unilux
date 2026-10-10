@@ -105,7 +105,8 @@ describe("e2e fake-provider preload stays out of the app", () => {
     };
     walk(server);
     expect(hits).toEqual([]);
-  });
+    // Walks the whole build output: well over 5 s under full-suite load.
+  }, 60_000);
 
   /*
    * Loads the real preload in a fresh Node process whose http/https request

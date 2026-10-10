@@ -259,7 +259,8 @@ describe("as the signed-in admin", () => {
       notifyExtension: true,
     });
     if (!result.ok) throw new Error(JSON.stringify(result.errors));
-    expect(result.data.accessExpiresAt).toBe("2027-01-31T23:59:59.999Z");
+    // The end of 31 Jan 2027 in China time.
+    expect(result.data.accessExpiresAt).toBe("2027-01-31T15:59:59.999Z");
     expect(result.data.invite?.state).toBe("sent");
   });
 });

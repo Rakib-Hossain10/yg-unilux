@@ -16,14 +16,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatDate } from "@/lib/time-zone";
 
-import {
-  formatDay,
-  KIND_LABELS,
-  labelOf,
-  SOURCE_LABELS,
-  STATUS_LABELS,
-} from "./format";
+import { KIND_LABELS, labelOf, SOURCE_LABELS, STATUS_LABELS } from "./format";
 import {
   accessRequestPath,
   accessRequestsListPath,
@@ -121,7 +116,7 @@ export function RequestsTable({
                   {labelOf(SOURCE_LABELS, row.source)}
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
-                  <time dateTime={date}>{formatDay(date)}</time>
+                  <time dateTime={date}>{formatDate(date)}</time>
                 </TableCell>
                 <TableCell className="pr-4">
                   <div className="flex flex-wrap gap-1">

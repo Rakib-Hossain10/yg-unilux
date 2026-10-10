@@ -58,3 +58,6 @@ Plan Q4/Q11 and P5: a customer whose datasheet access ends soon gets one reminde
 - `dueFilter` adds `INVITE_SETTLED` (exported from `customers.ts`): `{ $or: [{ invitedAt: null }, { $expr: { $gte: ["$passwordSetAt", "$invitedAt"] } }] }`.
 - Once the customer sets a password through the invite, they are due on the next run. If that is still before the expiry, they get their one reminder for that date.
 - The digest and the audit counts are unchanged; `due` already excludes these customers, so there is no "skipped" count.
+
+## Amendment (2026-10-10, ADR 0076)
+The window is now `now < expiry <= end of the China-time day 7 days after today`, and the digest key uses the China-time day. The schedule stays 08:00 UTC (user decision: customers are mostly in the UAE and Europe).

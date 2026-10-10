@@ -9,3 +9,6 @@ test/admin-uploads.qa.test.ts:generic-api-key:100
 src/app/api/cron/access-expiry/route.test.ts:generic-api-key:41
 # False positive: fixed fake CRON_SECRET used by the Phase 5 gate A QA route tests.
 test/phase5-gate-a-routes.qa.test.ts:generic-api-key:238
+# False positive: fixed fake temporary password in the P8 customers action test.
+src/app/admin/customers/actions.test.ts:generic-api-key:291
+src/app/admin/customers/actions.test.ts:generic-api-key:297

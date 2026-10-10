@@ -1,45 +1,17 @@
-// Labels and date text for the access-request queue. Dates are shown in UTC
-// with "UTC" written next to them (plan Q5): the server and every browser
-// then print the same text, and access always ends at 23:59 UTC.
+// Labels and date text for the access-request queue and the customers
+// module. Dates are formatted only by src/lib/time-zone.ts (shown in China
+// time with the zone written out; stored in UTC).
 
-const DAY = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
+import { formatDate } from "@/lib/time-zone";
 
-const DAY_TIME = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
-
-function asDate(value: Date | string): Date {
-  return typeof value === "string" ? new Date(value) : value;
-}
-
-/** "6 Oct 2026" ("—" for an unreadable date, never a render crash). */
-export function formatDay(value: Date | string): string {
-  const date = asDate(value);
-  return Number.isNaN(date.getTime()) ? "—" : DAY.format(date);
-}
-
-/** "6 Oct 2026, 14:05 UTC". */
-export function formatDayTime(value: Date | string): string {
-  const date = asDate(value);
-  return Number.isNaN(date.getTime()) ? "—" : `${DAY_TIME.format(date)} UTC`;
-}
-
-/** An access end date: "until 31 Mar 2027 (end of day, UTC)" or "no expiry". */
+/**
+ * An access end: "until the end of 31 Mar 2027 (China time)", or "no expiry".
+ * Access ends at the last moment of the chosen day in the app's zone.
+ */
 export function formatAccessEnd(value: Date | string | null): string {
   return value === null
     ? "no expiry"
-    : `until ${formatDay(value)} (end of day, UTC)`;
+    : `until the end of ${formatDate(value, { label: true })}`;
 }
 
 export const SOURCE_LABELS: Record<string, string> = {

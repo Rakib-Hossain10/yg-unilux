@@ -1,13 +1,14 @@
 // Tests for the /my-downloads access line: admin, active until a date, no
 // expiry, expired (also at the exact instant), temporary password, paused by
-// a ban, no role; and the UTC date formats.
+// a ban, no role; and the China-time date formats.
 
 import { describe, expect, it } from "vitest";
 
 import { accessStatus, formatDay, formatMoment } from "./access-status";
 
 const now = new Date("2026-10-09T12:00:00.000Z");
-const endOfDay = new Date("2027-03-31T23:59:59.999Z");
+// The end of 31 Mar 2027 in China time.
+const endOfDay = new Date("2027-03-31T15:59:59.999Z");
 const customer = {
   id: "u1",
   role: "customer",
@@ -56,10 +57,12 @@ describe("accessStatus", () => {
 });
 
 describe("date formats", () => {
-  it("are UTC", () => {
-    expect(formatDay(endOfDay)).toBe("31 March 2027");
+  it("are China time, like the admin screens and emails", () => {
+    expect(formatDay(endOfDay)).toBe("31 Mar 2027");
+    // One ms later is already 1 Apr in China.
+    expect(formatDay(new Date(endOfDay.getTime() + 1))).toBe("1 Apr 2027");
     expect(formatMoment(new Date("2026-10-09T23:30:00.000Z"))).toBe(
-      "9 Oct 2026, 23:30 UTC",
+      "10 Oct 2026, 07:30 (China time)",
     );
   });
 });

@@ -313,7 +313,7 @@ test.describe("/my-downloads", () => {
   }) => {
     await signIn(page, E2E_READY_CUSTOMER);
     await expect(page).toHaveURL(at("/my-downloads"));
-    await expect(page.getByText("Active until 31 March 2099")).toBeVisible();
+    await expect(page.getByText("Active until 31 Mar 2099")).toBeVisible();
 
     const rows = page
       .getByRole("list")
@@ -355,7 +355,7 @@ test.describe("/my-downloads", () => {
   test("expired access: renewal link, empty history", async ({ page }) => {
     await signIn(page, E2E_EXPIRED_CUSTOMER);
     await expect(page).toHaveURL(at("/my-downloads"));
-    await expect(page.getByText("Ended on 31 January 2026")).toBeVisible();
+    await expect(page.getByText("Ended on 31 Jan 2026")).toBeVisible();
     await expect(
       page.getByRole("link", { name: "Renew access" }),
     ).toHaveAttribute("href", "/request-access?renew=1");

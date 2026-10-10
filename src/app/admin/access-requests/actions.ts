@@ -14,11 +14,10 @@
 
 import { headers } from "next/headers";
 import { refresh } from "next/cache";
-import { forbidden, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 
 import type {
   ActionData,
-  ActionFailure,
   ActionResult,
 } from "@/components/admin/action-result";
 import {
@@ -27,7 +26,6 @@ import {
 } from "@/components/admin/access-requests/paths";
 import type {
   ApproveOutcome,
-  InviteView,
   NewInviteOutcome,
 } from "@/components/admin/access-requests/types";
 import {
@@ -36,13 +34,11 @@ import {
   deleteAccessRequest,
   rejectAccessRequest,
 } from "@/lib/admin/access-requests";
-import { regenerateInvite, type InviteOutcome } from "@/lib/admin/customers";
-import {
-  AUDIT_FAILED_MESSAGE,
-  type ServiceResult,
-} from "@/lib/admin/write-result";
+import { regenerateInvite } from "@/lib/admin/customers";
 import { requireAdmin } from "@/lib/permissions";
 import { revalidateCatalogInAction } from "@/lib/revalidate";
+
+import { auditMessage, failure, inviteView } from "../action-helpers";
 
 /*
  * Every argument is `unknown`: an action is a public POST endpoint, so the
@@ -52,48 +48,6 @@ import { revalidateCatalogInAction } from "@/lib/revalidate";
  * No try/catch: requireAdmin() works by throwing, and catching it would let
  * a non-admin call through (ADR 0024).
  */
-
-/*
- * The client's view of a failed call. These services change no catalog
- * tags, so "saved" is read from the one failure that comes after a write:
- * the audit entry (ADR 0035 point 5).
- */
-function failure(
-  result: ServiceResult<unknown> & { ok: false },
-): ActionFailure {
-  // A refused actor is a 403, never a form message (ADR 0073).
-  if (result.denied) forbidden();
-  return {
-    ok: false,
-    errors: result.errors,
-    saved:
-      result.tags.length > 0 ||
-      result.errors.formErrors.includes(AUDIT_FAILED_MESSAGE),
-  };
-}
-
-/* Dates become ISO strings; the link is kept only for the "copy" state. */
-function inviteView(invite: InviteOutcome): InviteView {
-  switch (invite.state) {
-    case "sent":
-    case "send_failed":
-      return { state: invite.state, expiresAt: invite.expiresAt.toISOString() };
-    case "copy":
-      return {
-        state: "copy",
-        url: invite.url,
-        expiresAt: invite.expiresAt.toISOString(),
-      };
-    case "limited":
-      return {
-        state: "limited",
-        retryAfterSeconds: invite.retryAfterSeconds,
-      };
-    case "busy":
-    case "failed":
-      return { state: invite.state };
-  }
-}
 
 /**
  * Approves a pending request: `{ requestId, name, company, country, access,
@@ -122,7 +76,7 @@ export async function approveAccessRequestAction(
       notified: data.notified,
       blocked: data.blocked,
       inviteWithheld: data.inviteWithheld,
-      auditMessage: data.auditFailed ? AUDIT_FAILED_MESSAGE : null,
+      auditMessage: auditMessage(data.auditFailed),
     },
   };
 }
@@ -209,7 +163,7 @@ export async function newInviteLinkAction(
     ok: true,
     data: {
       invite: inviteView(result.data.invite),
-      auditMessage: result.data.auditFailed ? AUDIT_FAILED_MESSAGE : null,
+      auditMessage: auditMessage(result.data.auditFailed),
     },
   };
 }

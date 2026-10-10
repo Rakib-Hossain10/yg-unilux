@@ -48,10 +48,11 @@ import {
   MAX_COUNTRY_LENGTH,
   MAX_NAME_LENGTH,
 } from "@/lib/schemas/access-request";
+import { formatDateTime } from "@/lib/time-zone";
 
 import { callAction, type ServiceErrors } from "../action-result";
 import { ExpiryPicker } from "./expiry-picker";
-import { formatAccessEnd, formatDayTime } from "./format";
+import { formatAccessEnd } from "./format";
 import {
   AuditFailedAlert,
   InviteOutcomeView,
@@ -298,7 +299,7 @@ export function ApproveDialog({
                   {existing.invite.state === "pending" ? (
                     <p>
                       Their invite link is still valid until{" "}
-                      {formatDayTime(existing.invite.until)}; no new one is
+                      {formatDateTime(existing.invite.until)}; no new one is
                       sent.
                     </p>
                   ) : null}

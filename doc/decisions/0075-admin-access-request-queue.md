@@ -1,5 +1,5 @@
-# 0075 — Admin access-request queue: raw form values, copy-once link in dialog state, UTC dates
-- Status: Accepted (item 6 waits for the user to confirm)
+# 0075 — Admin access-request queue: raw form values, copy-once link in dialog state, UTC dates (§6 superseded by 0076)
+- Status: Accepted (item 6 superseded by ADR 0076)
 - Date: 2026-10-10
 - Builds on: 0069, 0070, 0073 (Phase 5 P7)
 
@@ -16,7 +16,7 @@ P7 puts the admin UI on the P3 access-request service: `/admin/access-requests` 
    - `[id]` has `not-found.tsx` and no `loading.tsx`, so an unknown or malformed id gets a real 404.
    - "Open customer" is left out until P8 adds `/admin/customers/[id]`.
    - "New invite link" (shown after `send_failed`, `limited`, `busy` or `failed`) calls `regenerateInvite` through the access-requests actions.
-6. **Dates are shown in UTC with "UTC" written out.** This is a deviation from Q5, which asked for the admin's local time with "UTC" noted. Expiry is stored as 23:59:59.999 UTC on the chosen day. In local time east of UTC (the client is in Asia), that shows as the next morning, which reads like the wrong day. **The user should confirm this or ask for local time.**
+6. **Superseded by ADR 0076 (China time).** ~~Dates are shown in UTC with "UTC" written out.~~ This is a deviation from Q5, which asked for the admin's local time with "UTC" noted. Expiry is stored as 23:59:59.999 UTC on the chosen day. In local time east of UTC (the client is in Asia), that shows as the next morning, which reads like the wrong day. **The user should confirm this or ask for local time.**
 7. **New Server Action file.** `src/app/admin/access-requests/actions.ts` is added to the known-files list in `test/admin-write-path.qa.test.ts` (QA-owned). The main session made that one-line change, and gate B should confirm it.
 8. **shadcn supply-chain trap.** `npx shadcn add radio-group` wrote `import { cn } from "cn"` and installed the unrelated npm package `cn@0.4.0`. The package was removed, `package.json` and the lockfile were restored, and the import now uses `@/lib/utils`. After any `shadcn add`, check the imports and `package.json` diff.
 

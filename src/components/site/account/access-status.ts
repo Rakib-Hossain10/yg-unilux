@@ -1,10 +1,11 @@
 // The access line on /my-downloads (plan Q8), from the same rule the download
 // route uses (permissions.checkDatasheetAccess), plus the date formats of the
-// account pages. Pure; dates are shown in UTC because expiry is stored as the
-// end of a UTC day (plan Q5), and the page renders on the server. Server-side
-// only (permissions.ts is server-only).
+// account pages. Pure. Dates come from src/lib/time-zone.ts (China time), the
+// single display-zone module shared with the emails and the admin screens,
+// so the customer sees the day the admin picked. Server-side only (permissions.ts is server-only).
 
 import { type AccessUser, checkDatasheetAccess } from "@/lib/permissions";
+import { formatDate, formatDateTime } from "@/lib/time-zone";
 
 export type AccessStatus =
   | { kind: "admin" }
@@ -42,29 +43,12 @@ export function accessStatus(user: AccessUser, now: Date): AccessStatus {
   }
 }
 
-const dayFormat = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
-const momentFormat = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
-
-/** "31 March 2027" (UTC). */
+/** "31 Mar 2027": the app-zone calendar day (access ends at its end). */
 export function formatDay(date: Date): string {
-  return dayFormat.format(date);
+  return formatDate(date);
 }
 
-/** "9 Oct 2026, 14:05 UTC". */
+/** "9 Oct 2026, 14:05 (China time)". */
 export function formatMoment(date: Date): string {
-  return `${momentFormat.format(date)} UTC`;
+  return formatDateTime(date);
 }

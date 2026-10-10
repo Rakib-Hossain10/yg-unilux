@@ -8,10 +8,10 @@ import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { endOfUtcDay } from "@/lib/access-expiry";
 import { getDb } from "@/lib/db";
 import { acquireLock, buildKey, releaseLock } from "@/lib/rate-limit";
 import { SETTINGS_KEYS } from "@/lib/schemas/settings";
+import { endOfZonedDayAfter } from "@/lib/time-zone";
 import { AuditLogModel, SiteContentModel, UserModel } from "@/models";
 import { LoginAttemptModel } from "@/models/login-attempt";
 import {
@@ -79,7 +79,7 @@ beforeEach(async () => {
   });
   await seedUserFields(user.id, {
     company: "Due Company",
-    accessExpiresAt: endOfUtcDay(new Date(Date.now() + 3 * 86_400_000)),
+    accessExpiresAt: endOfZonedDayAfter(new Date(), 3),
   });
 });
 

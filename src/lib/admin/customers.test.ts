@@ -157,7 +157,7 @@ describe("createCustomer", () => {
       ),
     );
     expect(data.accessExpiresAt?.toISOString()).toBe(
-      "2027-01-09T23:59:59.999Z",
+      "2027-01-09T15:59:59.999Z",
     );
     expect(data.invite.state).toBe("sent");
     const doc = await rawUser(data.userId);
@@ -168,7 +168,7 @@ describe("createCustomer", () => {
       mustChangePassword: true,
       company: "Acme Lighting",
       country: "Hong Kong",
-      accessExpiresAt: new Date("2027-01-09T23:59:59.999Z"),
+      accessExpiresAt: new Date("2027-01-09T15:59:59.999Z"),
     });
     expect(doc?.invitedAt).toBeInstanceOf(Date);
     expect(mail.invites).toEqual([{ to: email, url: expect.any(String) }]);
@@ -400,7 +400,7 @@ describe("ban / unban / sessions", () => {
 });
 
 describe("setCustomerAccess (plan Q5)", () => {
-  it("extends from the later of today and the current end, end of day UTC", async () => {
+  it("extends from the later of today and the current end, end of the China-time day", async () => {
     const now = new Date("2026-10-09T12:00:00.000Z");
     const created = await newCustomer({
       access: { kind: "date", date: "2026-12-31" },
@@ -413,7 +413,7 @@ describe("setCustomerAccess (plan Q5)", () => {
       ),
     );
     expect(data.accessExpiresAt?.toISOString()).toBe(
-      "2027-03-31T23:59:59.999Z",
+      "2027-03-31T15:59:59.999Z",
     );
     expect(data.notified).toBe(true);
     expect(mail.extended).toEqual([
@@ -442,7 +442,7 @@ describe("setCustomerAccess (plan Q5)", () => {
       ),
     );
     expect(data.accessExpiresAt?.toISOString()).toBe(
-      "2027-10-09T23:59:59.999Z",
+      "2027-10-09T15:59:59.999Z",
     );
     expect(mail.extended).toHaveLength(0);
   });
@@ -457,7 +457,7 @@ describe("setCustomerAccess (plan Q5)", () => {
     );
     expect(data.notified).toBe(false);
     expect((await rawUser(created.userId))?.accessExpiresAt).toEqual(
-      new Date("2020-01-01T23:59:59.999Z"),
+      new Date("2020-01-01T15:59:59.999Z"),
     );
   });
 
@@ -585,8 +585,13 @@ describe("listCustomers (plan Q10)", () => {
     const at = (ms: number) => new Date(now.getTime() + ms);
     await make("noexpiry", { accessExpiresAt: null });
     await make("active", { accessExpiresAt: at(60 * DAY) });
-    await make("expiring30", { accessExpiresAt: at(30 * DAY) });
-    await make("expiring31", { accessExpiresAt: at(30 * DAY + 1) });
+    // now = 20:00 on 9 Oct in China; the window ends with 8 Nov China time.
+    await make("expiring30", {
+      accessExpiresAt: new Date("2026-11-08T15:59:59.999Z"),
+    });
+    await make("expiring31", {
+      accessExpiresAt: new Date("2026-11-08T16:00:00.000Z"),
+    });
     await make("expiredNow", { accessExpiresAt: at(0) });
     await make("blocked", {
       accessExpiresAt: at(60 * DAY),
@@ -648,7 +653,7 @@ describe("listCustomers (plan Q10)", () => {
     expect(await listIds({ status: "blocked" })).toEqual(pick("blocked"));
   });
 
-  it("expiring: ends within 30 days (30 d exactly in, 30 d + 1 ms out)", async () => {
+  it("expiring: ends by the end of the China day 30 days on (last ms in, next ms out)", async () => {
     expect(await listIds({ status: "expiring" })).toEqual(pick("expiring30"));
   });
 

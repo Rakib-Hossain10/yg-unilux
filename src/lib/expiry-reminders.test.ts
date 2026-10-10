@@ -9,7 +9,8 @@ import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { endOfUtcDay } from "@/lib/access-expiry";
+import { computeAccessExpiry } from "@/lib/access-expiry";
+import { endOfZonedDay, zonedDayKey } from "@/lib/time-zone";
 import { getDb } from "@/lib/db";
 import { createInviteLink } from "@/lib/invite";
 import { acquireLock, buildKey, releaseLock } from "@/lib/rate-limit";
@@ -96,9 +97,12 @@ const harness = setupAuthHarness("yg_expiry_reminders_test");
 
 const NOW = new Date("2026-10-10T08:00:00.000Z");
 const DAY = 86_400_000;
-/** Access that ends at the end of the UTC day `days` from NOW. */
-const endsIn = (days: number) =>
-  endOfUtcDay(new Date(NOW.getTime() + days * DAY));
+/** Access that ends at the end of the China-time day `days` from NOW's. */
+const endsIn = (days: number): Date => {
+  const end = endOfZonedDay(zonedDayKey(NOW.getTime() + days * DAY));
+  if (end === null) throw new Error("bad test day");
+  return end;
+};
 
 const SETTINGS_EMAIL = "sales@yg.example";
 const ENV_EMAIL = "office@yg.example";
@@ -179,11 +183,14 @@ describe("who is due", () => {
     });
   });
 
-  it("the window is now < expiry <= now + 7 days (boundaries)", async () => {
+  it("the window is now < expiry <= end of the China day 7 days on (boundaries)", async () => {
+    // NOW = 08:00Z = 16:00 on 10 Oct in China; the window ends with 17 Oct
+    // China time = 2026-10-17T15:59:59.999Z (later than NOW + 7 x 24 h).
     const atLimit = await makeUser({
-      accessExpiresAt: new Date(NOW.getTime() + 7 * DAY),
+      accessExpiresAt: new Date("2026-10-17T15:59:59.999Z"),
     });
-    await makeUser({ accessExpiresAt: new Date(NOW.getTime() + 7 * DAY + 1) });
+    expect(endsIn(7)).toEqual(new Date("2026-10-17T15:59:59.999Z"));
+    await makeUser({ accessExpiresAt: new Date("2026-10-17T16:00:00.000Z") });
     await makeUser({ accessExpiresAt: NOW }); // ends exactly now = expired
     const justAfter = await makeUser({
       accessExpiresAt: new Date(NOW.getTime() + 1),
@@ -338,13 +345,46 @@ describe("idempotency", () => {
     expect((await rawUser(user.id))?.expiryReminderFor).toEqual(extended);
   });
 
+  it("counts days in China time, not UTC", async () => {
+    // 17:00Z on 10 Oct is already 11 Oct in China, so access ending with
+    // 18 Oct (China) is due; ending with 19 Oct is not.
+    const due = await makeUser({ accessExpiresAt: endsIn(8) });
+    await makeUser({ accessExpiresAt: endsIn(9) });
+    await run({ now: new Date("2026-10-10T17:00:00.000Z") });
+    expect(remindedEmails()).toEqual([due.email]);
+  });
+
+  it("an admin-picked day is reminded on the 08:00Z run exactly 7 China days before", async () => {
+    // The admin picks 31 Dec (custom date) and "3 months" on 30 Sep; both
+    // are stored by the same end-of-China-day rule the window uses.
+    const picked = computeAccessExpiry(
+      { kind: "date", date: "2026-12-31" },
+      { now: NOW },
+    );
+    const preset = computeAccessExpiry(
+      { kind: "months", months: 3 },
+      { now: new Date("2026-09-30T08:00:00.000Z") },
+    );
+    expect(picked).toEqual(new Date("2026-12-31T15:59:59.999Z"));
+    expect(preset).toEqual(new Date("2026-12-30T15:59:59.999Z"));
+    const dec31 = await makeUser({ accessExpiresAt: picked });
+    const dec30 = await makeUser({ accessExpiresAt: preset });
+    const cron = (day: string) =>
+      run({ now: new Date(`2026-12-${day}T08:00:00.000Z`) });
+
+    await cron("22"); // 8 days before 30 Dec, 9 before 31 Dec
+    expect(remindedEmails()).toEqual([]);
+    await cron("23"); // 7 days before 30 Dec
+    expect(remindedEmails()).toEqual([dec30.email]);
+    await cron("24"); // 7 days before 31 Dec; 30 Dec already marked
+    expect(remindedEmails()).toEqual([dec30.email, dec31.email].sort());
+  });
+
   it("a missed day is caught up later in the window", async () => {
     // 7 days out at NOW, but no run happened that day (nor the next four).
     // Five days later, 2 days before the end, the reminder still goes out:
     // the window is "ends within 7 days", not a one-day slice.
-    const user = await makeUser({
-      accessExpiresAt: new Date(NOW.getTime() + 7 * DAY),
-    });
+    const user = await makeUser({ accessExpiresAt: endsIn(7) });
     const summary = await run({ now: new Date(NOW.getTime() + 5 * DAY) });
     expect(summary.sent).toBe(1);
     expect(remindedEmails()).toEqual([user.email]);
@@ -444,7 +484,7 @@ describe("admin digest", () => {
     ]);
   });
 
-  it("carries an idempotency key per UTC day and set of customers", async () => {
+  it("carries an idempotency key per China day and set of customers", async () => {
     const a = await makeUser({ accessExpiresAt: endsIn(2) });
     await run();
     const first = mail.digests[0]?.idempotencyKey;
@@ -467,6 +507,13 @@ describe("admin digest", () => {
     await seedUserFields(a.id, { expiryReminderFor: null });
     await run({ now: new Date(NOW.getTime() + DAY) });
     expect(mail.digests[3]?.idempotencyKey).toMatch(
+      /^expiry-digest\/2026-10-11\//,
+    );
+
+    // The day is the China-time day: 16:30Z on 10 Oct is 11 Oct there.
+    await seedUserFields(a.id, { expiryReminderFor: null });
+    await run({ now: new Date("2026-10-10T16:30:00.000Z") });
+    expect(mail.digests[4]?.idempotencyKey).toMatch(
       /^expiry-digest\/2026-10-11\//,
     );
   });

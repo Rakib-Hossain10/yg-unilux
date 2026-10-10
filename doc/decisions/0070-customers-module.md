@@ -38,3 +38,6 @@ The admin creates customers, sets and extends their access, blocks them, resets 
 - Service API for P8 (`@/lib/admin/customers`): `listCustomers`, `getCustomer`, `getCustomerCounts`, `createCustomer`, `updateCustomerProfile`, `setCustomerAccess`, `banCustomer`, `unbanCustomer`, `revokeCustomerSessions`, `sendCustomerResetLink`, `setTemporaryPassword` and `regenerateInvite`.
 - The UI must show `invite.url` and `password` once, and never put them in a URL or a log.
 - `test/helpers/auth-harness.ts` runs real Better Auth on the memory database for later tests.
+
+## Amendment (2026-10-10, ADR 0076)
+Expiry days and month presets now end at the end of the **China-time** day (`src/lib/time-zone.ts`), not the UTC day.

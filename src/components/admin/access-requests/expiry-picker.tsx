@@ -1,9 +1,10 @@
 "use client";
 
 // The access expiry picker (plan Q5): 3 / 6 / 12 months, a custom day or no
-// expiry, with a preview of the end date the server will store (end of the
-// UTC day). Months count from the later of today and the current end, so an
-// extension never shortens access. Shared with the customer page (P8).
+// expiry, with a preview of the end date the server will store. Access ends
+// at the end of the chosen day in China time (src/lib/time-zone.ts). Months
+// count from the later of today and the current end, so an extension never
+// shortens access. Shared with the customer pages (P8).
 
 import { useId, useState } from "react";
 
@@ -21,10 +22,10 @@ import {
   ACCESS_MONTH_CHOICES,
   computeAccessExpiry,
   MAX_ACCESS_DATE,
-  MIN_ACCESS_DATE,
   parseAccessDay,
   type AccessChoice,
 } from "@/lib/access-expiry";
+import { APP_TIME_ZONE_LABEL, zonedDayKey } from "@/lib/time-zone";
 
 import { formatAccessEnd } from "./format";
 
@@ -66,11 +67,27 @@ export function ExpiryPicker({
   legend?: string;
 }) {
   const id = useId();
-  // Kept while another option is picked, so switching back restores it.
-  const [day, setDay] = useState(value.kind === "date" ? value.date : "");
-  // Read once per render; the preview is a guide, the server decides.
+  // Read once; the preview is a guide, the server decides.
   const [now] = useState(() => new Date());
+  // Kept while another option is picked, so switching back restores it.
+  // Starts on the current last day while that is still ahead (saving it
+  // unchanged then changes nothing); otherwise EMPTY, so no day is chosen
+  // by accident (a prefilled "today" would end access tonight).
+  const [day, setDay] = useState(() =>
+    value.kind === "date"
+      ? value.date
+      : current !== null && new Date(current).getTime() > now.getTime()
+        ? zonedDayKey(current)
+        : "",
+  );
+  // The earliest day the date input offers: today in China time.
+  const today = zonedDayKey(now);
   const currentEnd = current === null ? null : new Date(current);
+  // An empty day gets a plain message instead of the schema's range text.
+  const dayError =
+    error !== undefined && value.kind === "date" && value.date.trim() === ""
+      ? "Pick the last day of access."
+      : error;
   const preview = previewAccessEnd(value, now, currentEnd);
 
   const pick = (option: string) => {
@@ -119,7 +136,7 @@ export function ExpiryPicker({
           <Input
             id={dayId}
             type="date"
-            min={MIN_ACCESS_DATE}
+            min={today}
             max={MAX_ACCESS_DATE}
             value={day}
             onChange={(event) => {
@@ -127,14 +144,15 @@ export function ExpiryPicker({
               onChange({ kind: "date", date: event.target.value });
             }}
             aria-invalid={error !== undefined}
-            aria-describedby={
-              error !== undefined ? `${dayId}-error` : undefined
-            }
+            aria-describedby={`${dayId}-help${error !== undefined ? ` ${dayId}-error` : ""}`}
             className="w-fit"
           />
+          <FieldDescription id={`${dayId}-help`}>
+            Access ends at the end of this day, {APP_TIME_ZONE_LABEL}.
+          </FieldDescription>
           <FieldError
             id={`${dayId}-error`}
-            errors={error !== undefined ? [{ message: error }] : []}
+            errors={dayError !== undefined ? [{ message: dayError }] : []}
           />
         </Field>
       ) : null}

@@ -122,13 +122,13 @@ describe("approveAccessRequest: new email", () => {
       invite: { state: "sent" },
     });
     expect(data.accessExpiresAt?.toISOString()).toBe(
-      "2027-04-09T23:59:59.999Z",
+      "2027-04-09T15:59:59.999Z",
     );
     expect(await rawUser(data.userId)).toMatchObject({
       email: request.email,
       role: "customer",
       mustChangePassword: true,
-      accessExpiresAt: new Date("2027-04-09T23:59:59.999Z"),
+      accessExpiresAt: new Date("2027-04-09T15:59:59.999Z"),
       company: "Acme Lighting",
     });
     expect(mail.invites.map((m) => m.to)).toEqual([request.email]);
@@ -196,9 +196,9 @@ describe("approveAccessRequest: existing email", () => {
       invite: null,
       notified: true,
     });
-    // 2027-04-09 + 3 months, end of day UTC.
+    // 2027-04-09 + 3 months, end of the China-time day.
     expect(data.accessExpiresAt?.toISOString()).toBe(
-      "2027-07-09T23:59:59.999Z",
+      "2027-07-09T15:59:59.999Z",
     );
     expect(await usersWith(first.email)).toBe(1);
     expect(mail.invites).toHaveLength(0);
@@ -356,7 +356,7 @@ describe("approveAccessRequest: partial failures and retries", () => {
     expect(second.created).toBe(false);
     expect(second.invite?.state).toBe("sent");
     expect(second.accessExpiresAt?.toISOString()).toBe(
-      "2027-07-09T23:59:59.999Z",
+      "2027-07-09T15:59:59.999Z",
     );
     expect(await usersWith(request.email)).toBe(1);
   });

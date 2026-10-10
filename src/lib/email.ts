@@ -9,6 +9,7 @@ import { Resend } from "resend";
 import { z } from "zod";
 
 import { env } from "./env";
+import { APP_TIME_ZONE_LABEL, formatDate, formatDateTime } from "./time-zone";
 
 /*
  * No verified sending domain yet (user decision, Phase 1). EMAIL_FROM is then
@@ -328,37 +329,15 @@ export async function sendPasswordResetEmail(input: {
  */
 export const INVITE_TOKEN_TTL_SECONDS = 72 * 60 * 60;
 
-/* Dates in emails are always UTC and spelled out ("12 October 2026"), so a
- * reader in any country reads the same day (plan Q5). */
-const UTC_DATE = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "UTC",
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-});
-const UTC_TIME = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "UTC",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-
-/** "12 October 2026" (the UTC calendar day). */
-export function formatUtcDate(date: Date): string {
-  return UTC_DATE.format(date);
-}
-
-/** "12 October 2026, 14:05 UTC". */
-export function formatUtcDateTime(date: Date): string {
-  return `${UTC_DATE.format(date)}, ${UTC_TIME.format(date)} UTC`;
-}
-
 /*
- * Access ends at the END of a UTC day (23:59:59.999, plan Q5), so the
- * sentence names that day: "until the end of 12 October 2026 (UTC)".
+ * Dates in emails come from src/lib/time-zone.ts, the same module the admin
+ * screens and account pages use, so the customer reads exactly the day the
+ * admin picked. Access ends at the END of a day in the app's zone, so the
+ * sentence names that day with the zone: "until the end of 16 Oct 2026
+ * (China time)".
  */
 function accessUntilText(date: Date): string {
-  return `until the end of ${formatUtcDate(date)} (UTC)`;
+  return `until the end of ${formatDate(date, { label: true })}`;
 }
 
 /*
@@ -503,7 +482,7 @@ export async function sendInviteEmail(input: {
     { kind: "button", label: "Set your password", href: link },
     {
       kind: "p",
-      text: `The link works once and expires in ${INVITE_LIFETIME_TEXT} (${formatUtcDateTime(data.expiresAt)}). If it has expired, ask us for a new one.`,
+      text: `The link works once and expires in ${INVITE_LIFETIME_TEXT}, at ${formatDateTime(data.expiresAt)}. If it has expired, ask us for a new one.`,
     },
     {
       kind: "p",
@@ -717,13 +696,13 @@ export async function sendExpiryDigestEmail(input: {
   const blocks: Block[] = [
     {
       kind: "p",
-      text: "Datasheet access for these customers ends within the next 7 days (dates in UTC):",
+      text: `Datasheet access for these customers ends within the next 7 days (dates in ${APP_TIME_ZONE_LABEL}):`,
     },
     {
       kind: "list",
       items: shown.map((entry) => {
         const company = defang(oneLine(entry.company));
-        return `${defang(oneLine(entry.name)) || "-"}${company ? ` (${company})` : ""}: ${formatUtcDate(entry.accessExpiresAt)}`;
+        return `${defang(oneLine(entry.name)) || "-"}${company ? ` (${company})` : ""}: ${formatDate(entry.accessExpiresAt)}`;
       }),
     },
   ];
