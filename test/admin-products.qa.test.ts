@@ -130,6 +130,8 @@ describe("race between the read and the write (ADR 0043)", () => {
       expectedUpdatedAt: version,
     });
     expect(result.ok).toBe(false);
+    // Refused for the race, not for some other publish rule.
+    expect(JSON.stringify(result)).toContain(PRODUCT_CHANGED);
     expect((await ProductModel.findById(productId))?.status).toBe("draft");
     expect(await AuditLogModel.countDocuments()).toBe(0);
   });
@@ -147,6 +149,7 @@ describe("race between the read and the write (ADR 0043)", () => {
       expectedUpdatedAt: version,
     });
     expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).toContain(PRODUCT_CHANGED);
     expect((await ProductModel.findById(productId))?.status).toBe("published");
   });
 

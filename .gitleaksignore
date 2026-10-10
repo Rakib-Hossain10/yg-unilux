@@ -12,3 +12,9 @@ test/phase5-gate-a-routes.qa.test.ts:generic-api-key:238
 # False positive: fixed fake temporary password in the P8 customers action test.
 src/app/admin/customers/actions.test.ts:generic-api-key:291
 src/app/admin/customers/actions.test.ts:generic-api-key:297
+# Current line numbers (fixtures moved; the older entries above still cover history).
+src/lib/cloudinary.test.ts:generic-api-key:20
+src/lib/admin/uploads.test.ts:generic-api-key:42
+test/admin-uploads.qa.test.ts:generic-api-key:118
+src/app/admin/customers/actions.test.ts:generic-api-key:295
+src/app/admin/customers/actions.test.ts:generic-api-key:301
