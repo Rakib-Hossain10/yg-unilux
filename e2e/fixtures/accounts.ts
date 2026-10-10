@@ -56,6 +56,17 @@ export const E2E_EXPIRED_CUSTOMER = {
 
 export const E2E_EXPIRED_ACCESS_ENDED = new Date("2026-01-31T23:59:59.999Z");
 
+/**
+ * Phase 5 P4 datasheet download (e2e/datasheet-download.spec.ts): password
+ * already chosen, access until E2E_READY_ACCESS_UNTIL. Its own account, so
+ * its downloads and per-user limit never touch another spec's history.
+ */
+export const E2E_DOWNLOAD_CUSTOMER = {
+  email: "e2e-download-customer@example.com",
+  name: "E2E Download Customer",
+  password: "e2e-download-customer-password-1",
+} as const;
+
 /** Every customer e2e/test-server.ts seeds (the admin dashboard count). */
 export const E2E_SEEDED_CUSTOMERS = [
   E2E_CUSTOMER,
@@ -63,4 +74,5 @@ export const E2E_SEEDED_CUSTOMERS = [
   E2E_TEMP_CUSTOMER,
   E2E_READY_CUSTOMER,
   E2E_EXPIRED_CUSTOMER,
+  E2E_DOWNLOAD_CUSTOMER,
 ] as const;

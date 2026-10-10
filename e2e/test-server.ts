@@ -21,6 +21,7 @@ import { MongoMemoryReplSet } from "mongodb-memory-server";
 import {
   E2E_ADMIN,
   E2E_CUSTOMER,
+  E2E_DOWNLOAD_CUSTOMER,
   E2E_EXPIRED_ACCESS_ENDED,
   E2E_EXPIRED_CUSTOMER,
   E2E_MAIL_CUSTOMER,
@@ -102,6 +103,7 @@ async function seed(uri: string): Promise<void> {
     for (const [account, accessExpiresAt] of [
       [E2E_READY_CUSTOMER, E2E_READY_ACCESS_UNTIL],
       [E2E_EXPIRED_CUSTOMER, E2E_EXPIRED_ACCESS_ENDED],
+      [E2E_DOWNLOAD_CUSTOMER, E2E_READY_ACCESS_UNTIL],
     ] as const) {
       const { user } = await auth.api.createUser({ body: { ...account } });
       // As if the customer had already chosen their own password, through

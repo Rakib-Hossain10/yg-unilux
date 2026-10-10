@@ -1355,11 +1355,18 @@ const notTest = (file: string) => !/\.test\.tsx?$/.test(file);
 
 describe("static rules", () => {
   it("no page, action or component reads or names a storage key", () => {
+    // The one exception: the download route hands the key to presignGet
+    // after the access check (rule 2, ADR 0071).
+    const downloadRoute = path.join(
+      root,
+      "src/app/api/datasheet/[productId]/route.ts",
+    );
     const offenders = [
       ...sourceFiles("src/app", /\.tsx?$/),
       ...sourceFiles("src/components", /\.tsx?$/),
     ]
       .filter(notTest)
+      .filter((file) => path.resolve(file) !== downloadRoute)
       .filter((file) =>
         /storageKey|STORAGE_KEY/.test(readFileSync(file, "utf8")),
       )
@@ -1372,6 +1379,10 @@ describe("static rules", () => {
       "src/lib/admin/datasheets.ts",
       "src/models/datasheet.ts",
       "src/models/whistleblower-case.ts",
+      // The datasheet download (rule 2, ADR 0071): its data step reads the
+      // key, and only the route passes it to presignGet.
+      "src/lib/datasheet-download.ts",
+      "src/app/api/datasheet/[productId]/route.ts",
     ]);
     const offenders = sourceFiles("src", /\.tsx?$/)
       .filter(notTest)

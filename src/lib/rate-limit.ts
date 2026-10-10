@@ -44,7 +44,8 @@ export interface SlowdownRule {
  * - "access-request-net":   public access-request form, per network (ADR 0069);
  * - "access-request-email": public access-request form, per email (ADR 0069);
  * - "invite-user":     admin invite (re)generation, per customer (ADR 0070);
- * - "invite-lock":     the in-flight lock of one customer's invite (ADR 0070).
+ * - "invite-lock":     the in-flight lock of one customer's invite (ADR 0070);
+ * - "download-user":   datasheet downloads per user, 60 per hour (ADR 0071).
  * Phase 8 adds "wb-case" (keyed by case number, never by IP).
  */
 export type KeyNamespace =
@@ -58,7 +59,8 @@ export type KeyNamespace =
   | "access-request-net"
   | "access-request-email"
   | "invite-user"
-  | "invite-lock";
+  | "invite-lock"
+  | "download-user";
 
 /** Namespaces keyed by the email alone, which emailKey() builds. */
 export type EmailNamespace = "email-reset" | "email-login";

@@ -102,6 +102,42 @@ function detectFormat(bytes: Buffer): string {
 
 /* ---- S3 (R2): path-style /<bucket>/<key> ---- */
 
+/* "20261010T093000Z" (X-Amz-Date) as epoch ms; NaN when malformed. */
+function amzDate(value: string): number {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value);
+  if (!m) return Number.NaN;
+  const [, y, mo, d, h, mi, se] = m.map(Number) as number[];
+  return Date.UTC(y!, mo! - 1, d!, h!, mi!, se!);
+}
+
+/*
+ * A presigned GET (the datasheet download, ADR 0071), like R2 answers it:
+ * refused once X-Amz-Date + X-Amz-Expires has passed, and the signed
+ * response-content-type / response-content-disposition overrides become the
+ * response headers. The signature itself is not checked (fake credentials).
+ * A plain SDK GET (no X-Amz-Expires) gets no extra headers.
+ */
+function presignedGetHeaders(url: URL): Record<string, string> | "expired" {
+  const expires = url.searchParams.get("X-Amz-Expires");
+  if (expires === null) return {};
+  const signedAt = amzDate(url.searchParams.get("X-Amz-Date") ?? "");
+  const seconds = Number(expires);
+  if (
+    !Number.isFinite(signedAt) ||
+    !Number.isInteger(seconds) ||
+    Date.now() > signedAt + seconds * 1000 ||
+    !url.searchParams.get("X-Amz-Signature")
+  ) {
+    return "expired";
+  }
+  const headers: Record<string, string> = {};
+  const type = url.searchParams.get("response-content-type");
+  const disposition = url.searchParams.get("response-content-disposition");
+  if (type) headers["content-type"] = type;
+  if (disposition) headers["content-disposition"] = disposition;
+  return headers;
+}
+
 async function handleS3(
   request: IncomingMessage,
   response: ServerResponse,
@@ -167,6 +203,9 @@ async function handleS3(
     });
   }
   if (method === "GET") {
+    // Like R2: an expired presigned link is refused before anything else.
+    const presigned = presignedGetHeaders(url);
+    if (presigned === "expired") return s3Error(response, 403, "AccessDenied");
     if (!found) return s3Error(response, 404, "NoSuchKey");
     if (failsMatch(request.headers["if-match"], found)) {
       return s3Error(response, 412, "PreconditionFailed");
@@ -183,12 +222,14 @@ async function handleS3(
         "content-length": part.length,
         "content-range": `bytes ${start}-${end}/${found.bytes.length}`,
         etag: etagOf(found.bytes),
+        ...presigned,
       });
     }
     return send(response, 200, found.bytes, {
       "content-type": found.contentType,
       "content-length": found.bytes.length,
       etag: etagOf(found.bytes),
+      ...presigned,
     });
   }
   if (method === "DELETE") {

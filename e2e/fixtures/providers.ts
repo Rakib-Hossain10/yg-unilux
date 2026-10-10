@@ -63,6 +63,13 @@ async function forward(route: Route, host: string): Promise<void> {
     headers: {
       ...corsHeaders(route),
       "content-type": reply.headers.get("content-type") ?? "text/plain",
+      // A presigned datasheet GET answers as an attachment (ADR 0071).
+      ...(reply.headers.get("content-disposition")
+        ? {
+            "content-disposition":
+              reply.headers.get("content-disposition") ?? "",
+          }
+        : {}),
     },
     body: Buffer.from(await reply.arrayBuffer()),
   });

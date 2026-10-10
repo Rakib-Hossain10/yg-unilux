@@ -18,14 +18,15 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
     - Results: full unit 4297 passed (1 expected-fail, 3 skipped), lint/typecheck OK, `e2e/email-sink.spec.ts` 2/2. Code review: all PASS/WARN; the High (undeclared fields silently dropped) was fixed and is tested by a raw-document read-back.
   - **P2 done** (2026-10-09, `site-frontend`/Opus, ADR 0068 P2 addendum): `/login` destinations + signed-in users sent on + `?reset=1` notice, `/change-password`, `/forgot-password`, `/reset-password` (invite wording, neutral expired view, no-referrer), `/my-downloads` (access line, history 20/page, "Download again"), sign out; `src/lib/{account-destination,download-history,contact-settings}.ts`, `src/components/site/account/*`, `e2e/account-pages.spec.ts`. 4337 unit (1 expected-fail, 3 skipped), full e2e 305, lint/typecheck OK, all code reviews PASS.
   - **P3 done** (2026-10-09, `backend-architect`/Opus, **ADR 0069 + 0070**): `src/lib/{access-requests,access-expiry}.ts`, `src/lib/admin/{access-requests,customers}.ts`, `src/lib/schemas/{access-request,customer}.ts`, model/audit vocabulary changes, `acquireLock`/`releaseLock` (owner token) in `rate-limit.ts`, `test/helpers/auth-harness.ts` (real Better Auth on memory DB). 4479 unit (1 expected-fail, 3 skipped), lint/typecheck OK. Code-review High (approve retry double-extended / skipped invite) fixed + tested; the remaining WARNs were "no tests" written before the tests landed. Service API for P6/P7/P8 is listed in ADR 0069/0070 Consequences.
-  - **▶ NEXT: P4 datasheet download** (`backend-architect`/Opus): `presignGet()` in `storage.ts` (60 s, RFC 5987 disposition, xlsx type), `GET /api/datasheet/[productId]` (Q9 answers, 303s, `private, no-store`), per-user 60/h limit (add the `download-user` namespace to `KeyNamespace`; admin exempt), log written before the redirect and fail closed, static guard (only this route imports `presignGet`), R2 fake answers presigned GETs; **ADR 0071**. Then P5 cron (use `getCompanyAlertEmail()` for the digest; audit `cron.expiry_reminders` with no actor is already allowed), **QA gate A after P5**.
+  - **P4 done** (2026-10-10, `backend-architect`/Opus, **ADR 0071**): `presignGet()` (60 s, RFC 5987, signs only `datasheets/<uuid>.xlsx`), `GET /api/datasheet/[productId]`, `src/lib/datasheet-download.ts`, `download-user` limit 60/h (admin exempt), log before redirect (503 fail closed), static guard `test/datasheet-download-guards.test.ts`, R2 fake answers presigned GETs, `E2E_DOWNLOAD_CUSTOMER`, `e2e/datasheet-download.spec.ts` (2). 4581 unit (1 expected-fail, 3 skipped), lint/typecheck OK, no review High. "Download again" now reaches the route.
+  - **▶ NEXT: P5 expiry cron** (`backend-architect`/Opus): `GET /api/cron/access-expiry` (timing-safe `Bearer ${CRON_SECRET}`, 401 otherwise), customers expiring in 7 days get one reminder (idempotent via `expiryReminderFor`, catches a missed day), admin digest to `getCompanyAlertEmail()` only when ≥1, one audit `cron.expiry_reminders` with counts and no actor (already allowed), `vercel.json` cron; **ADR 0072**. Then **QA gate A** (`qa-security-reviewer`/Opus) on P1–P5.
+  - **Open from P4 (for gate A):** confirm the allowlist change in QA-owned `test/admin-uploads.qa.test.ts`; check real R2 honours `response-content-disposition` with `filename*` once credentials exist; optional: refuse `Sec-Purpose: prefetch`. P6: `/request-access?renew=1&product=<id>` is the route's renew target. P9: a real browser download test needs a context-level route or an R2-host proxy (`page.route` can't see the redirect). Launch list: Firewall rate limit on `/api/datasheet/*`.
   - **Open from P3:**
     - P6: render hidden `website` + server `startedAt`; pass `viewer` from the DB session; map `errors.fieldErrors`; country values must fit the plain charset.
     - P7/P8: `requireAdmin()` then `{id: viewer.user.id, headers: await headers()}`; show `invite.url`/`password` once, never in URL/logs; show `AUDIT_FAILED_MESSAGE` when `auditFailed`; offer "New invite link" when the invite state isn't sent/copy.
     - Gate A: review the accepted latest-wins overwrite of unlinked form rows; per-network window is 5/15 min (not 5/h, ADR 0022).
   - **User must (new):** run `npm run db:indexes` on the dev DB (new `accessRequests` indexes; fails if two pending requests share an email — clean those up first).
   - **Open from P2:**
-    - P4: "Download again" → `/api/datasheet/<productId>` 404s until P4.
     - P6: `/request-access` (+ `?renew=1`) 404s until P6; product "Sign in to download" must pass `next=/product/<slug>` (`datasheet-button.tsx`); "Access expired" still points at `/contact`; reuse `getWhatsappNumber()`.
     - Gate A: trace the "[WebServer] destination stream closed early" log during admin sign-in/out e2e; optional `Referrer-Policy: no-referrer` header for `/reset-password`.
     - Gate C (ui-reviewer): gap between "Keep me signed in" and the button on `/login`.
@@ -491,9 +492,9 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [x] Plan drafted, `/find-skills` run (2026-10-09)
 - [x] P0: plan approved (defaults + invite-regenerate addition), branch `phase-5`, Better Auth skills installed (ADR 0013 note)
 - [x] P1 account backend (ADR 0068)
-- [ ] P2 account pages
-- [ ] P3 services: access requests + customers (ADR 0069, 0070)
-- [ ] P4 `/api/datasheet/[productId]` (ADR 0071)
+- [x] P2 account pages
+- [x] P3 services: access requests + customers (ADR 0069, 0070)
+- [x] P4 `/api/datasheet/[productId]` (ADR 0071)
 - [ ] P5 expiry cron (ADR 0072) → QA gate A
 - [ ] P6 request-access UI, P7 admin queue, P8 admin customers → QA gate B
 - [ ] P9 exit e2e → gate C
@@ -501,7 +502,7 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - [ ] Admin queue: approve with expiry / reject; Resend emails
 - [ ] Customers module (create, extend, reset, disable, history, filters)
 - [ ] Customer login, forced password change, email reset (admin too), `/my-downloads`
-- [ ] `/api/datasheet/[productId]` → R2 presigned 60 s + downloadLogs, `private, no-store`
+- [x] `/api/datasheet/[productId]` → R2 presigned 60 s + downloadLogs, `private, no-store`
 - [ ] Cron expiry reminders (`CRON_SECRET`, `vercel.json`)
 - [ ] Tests: access matrix + Playwright gated download
 
@@ -628,4 +629,5 @@ Decisions live in [decisions/](decisions/README.md). A task that settles a desig
 - 2026-10-09: P1 account backend done (ADR 0068): 72 h invite = Better Auth reset token (spike passed, one live link per user), one user-field writer, `mustChangePassword` finally cleared by change/reset, ADR 0032 gap closed, `safeNextPath`, six email templates, e2e Resend sink. Auto-review caught undeclared user fields being silently dropped by the adapter; fixed and tested. 4297 unit green. Next: P2 account pages.
 - 2026-10-09: P2 account pages done (`site-frontend`/Opus; ADR 0068 P2 addendum): login destinations, change/forgot/reset password, my-downloads, sign out. Found a P1 regression in `admin-shell.spec.ts` (customer count) and fixed it via `E2E_SEEDED_CUSTOMERS`. 4337 unit + 305 e2e green, all reviews PASS. Next: P3 services.
 - 2026-10-09: P3 services done (`backend-architect`/Opus; ADR 0069 access requests, ADR 0070 customers). Review High on approve retries (double extension, skipped invite) fixed: claim kept once the account is written. 4479 unit green. Next: P4 datasheet download route.
+- 2026-10-10: P4 datasheet download done (`backend-architect`/Opus; ADR 0071): route with the Q9 answers, 60 s presign of datasheet keys only, 60/h per-user limit, log before redirect (fail closed). 4581 unit + 2 e2e green, no review High. Next: P5 expiry cron, then QA gate A.
 - 2026-10-09: QA gate B on L4–L6 failed on 3 findings (L-1 comment, M-1 draft category link, L-2 menu close), all fixed; gate B tests added. 4119 unit + 254 e2e green. Next: L7.

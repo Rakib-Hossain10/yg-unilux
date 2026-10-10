@@ -18,7 +18,13 @@ import {
   presignDatasheetInputSchema,
   renameDatasheetInputSchema,
 } from "@/lib/schemas/datasheet";
-import * as storage from "@/lib/storage";
+import {
+  copyObject,
+  deleteObject,
+  getObjectBytes,
+  headObject,
+  presignPut,
+} from "@/lib/storage";
 import { checkXlsx, XLSX_REJECTED } from "@/lib/xlsx-signature";
 import { DatasheetModel, ProductModel } from "@/models";
 import type { Datasheet } from "@/models/datasheet";
@@ -135,7 +141,7 @@ export async function presignDatasheetUpload(
   if (!parsed.success) return invalidInput(parsed.error);
 
   const incomingKey = `incoming/${randomUUID()}.xlsx`;
-  const put = await storage.presignPut({
+  const put = await presignPut({
     key: incomingKey,
     contentType: XLSX_MIME_TYPE,
     contentLength: parsed.data.size,
@@ -159,7 +165,7 @@ export async function presignDatasheetUpload(
 /* Best-effort cleanup: never throws, logs only the error's class name. */
 async function deleteQuietly(key: string, what: string): Promise<void> {
   try {
-    await storage.deleteObject(key);
+    await deleteObject(key);
   } catch (error) {
     const kind = error instanceof Error ? error.name : typeof error;
     console.error(`[datasheets] could not delete ${what}: ${kind}`);
@@ -216,7 +222,7 @@ export async function finalizeDatasheet(
       if (!existing) return formError(DATASHEET_NOT_FOUND);
     }
 
-    const head = await storage.headObject(incomingKey);
+    const head = await headObject(incomingKey);
     if (head === null) return formError(UPLOAD_NOT_FOUND);
     if (head.size > MAX_DATASHEET_BYTES) return formError(SIZE_MISMATCH);
     // The presigned PUT stays usable for 5 minutes, so the incoming object
@@ -228,11 +234,9 @@ export async function finalizeDatasheet(
     const etag = head.etag;
     if (!etag) return formError(UPLOAD_FAILED);
 
-    const bytes = await storage.getObjectBytes(
-      incomingKey,
-      MAX_DATASHEET_BYTES,
-      { ifMatch: etag },
-    );
+    const bytes = await getObjectBytes(incomingKey, MAX_DATASHEET_BYTES, {
+      ifMatch: etag,
+    });
     if (bytes === null) return formError(UPLOAD_NOT_FOUND);
     const check = await checkXlsx(bytes);
     if (!check.ok) return formError(XLSX_REJECTED[check.reason]);
@@ -240,7 +244,7 @@ export async function finalizeDatasheet(
     const size = bytes.length;
     const storageKey =
       existing?.storageKey ?? `datasheets/${randomUUID()}.xlsx`;
-    await storage.copyObject(incomingKey, storageKey, { ifMatch: etag });
+    await copyObject(incomingKey, storageKey, { ifMatch: etag });
 
     if (existing) {
       const result = await DatasheetModel.updateOne(
@@ -366,7 +370,7 @@ export async function deleteDatasheet(
   if (inUse > 0) return formError(inUseMessage(inUse));
 
   try {
-    await storage.deleteObject(doc.storageKey);
+    await deleteObject(doc.storageKey);
   } catch (error) {
     const kind = error instanceof Error ? error.name : typeof error;
     console.error(`[datasheets] could not delete the stored file: ${kind}`);
