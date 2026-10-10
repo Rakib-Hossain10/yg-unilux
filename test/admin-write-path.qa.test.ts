@@ -79,6 +79,7 @@ describe("Server Actions exist only in admin actions.ts files", () => {
 
   it("still sees the known actions files", () => {
     expect(files.filter((file) => ACTIONS_FILE.test(file))).toEqual([
+      "src/app/admin/access-requests/actions.ts",
       "src/app/admin/areas/actions.ts",
       "src/app/admin/categories/actions.ts",
       "src/app/admin/datasheets/actions.ts",
