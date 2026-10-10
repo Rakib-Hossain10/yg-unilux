@@ -21,3 +21,11 @@ export const E2E_PROVIDER_ENV = {
   RESEND_API_KEY: "e2e-not-a-secret",
   EMAIL_FROM: "YG UniLUX <no-reply@e2e.invalid>",
 } as const;
+
+/*
+ * The e2e `CRON_SECRET` (e2e/test-server.ts sets it for `next start` only),
+ * so the Phase 5 exit spec can call GET /api/cron/access-expiry like Vercel
+ * Cron does. Worthless outside the throwaway test server; 40 printable ASCII
+ * characters, no spaces (the env.ts rule).
+ */
+export const E2E_CRON_SECRET = "e2e-cron-secret-not-real-0123456789abcdef";

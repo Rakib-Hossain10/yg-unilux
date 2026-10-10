@@ -36,6 +36,7 @@ import { seedListingMotion } from "./fixtures/listing-motion";
 import { seedListingPages } from "./fixtures/listing-pages";
 import { seedProductPages } from "./fixtures/product-pages";
 import {
+  E2E_CRON_SECRET,
   E2E_FAKE_PROVIDERS_PORT,
   E2E_PROVIDER_ENV,
 } from "./fixtures/providers-port";
@@ -73,6 +74,8 @@ const testEnv = {
   GEO_BLOCK_ENABLED: "true",
   // Fake provider credentials (also used for the build, see providers-port.ts).
   ...E2E_PROVIDER_ENV,
+  // The Phase 5 exit spec runs the expiry cron over HTTP (restricted-access).
+  CRON_SECRET: E2E_CRON_SECRET,
 };
 
 async function seed(uri: string): Promise<void> {
